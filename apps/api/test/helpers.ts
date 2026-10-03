@@ -56,6 +56,7 @@ export const ids = {
   novaPerkTickets: "75ce90f1-b040-59ba-b134-e2c350d59a68",
   solPerkGA: "3835231c-7f19-5da7-88f7-02e8a3f255b6",
   novaArtist: "c36385da-a6c6-532b-a362-360bfbe4b9f7",
+  sol: "f147ba23-d0a1-562d-9140-267bc300c8c2",
 };
 
 // ── M1 test kit ─────────────────────────────────────────────────────────

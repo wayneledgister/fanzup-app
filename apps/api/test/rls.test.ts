@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { asService, asUser, type Sql } from "../src/db";
+import { runWithCtx } from "../src/context";
 import { freshDb, ids } from "./helpers";
 
 let db: Awaited<ReturnType<typeof freshDb>>;
@@ -48,6 +49,25 @@ describe("row level security", () => {
     const [d] = await asUser(sql, nova, (tx) => tx<{ id: string }[]>`
       insert into public.campaigns (artist_id, slug, title, type, goal_minor) values (${ids.novaArtist}, 'nova-too-big', 'Too big', 'Album', 20000000) returning id`);
     await asUser(sql, nova, (tx) => tx`insert into public.perks (campaign_id, title, kind, price_minor, fulfill_by) values (${d.id}, 'Thanks', 'digital', 500, '2027-06-01')`);
-    await expect(asUser(sql, nova, (tx) => tx`select public.submit_campaign(${d.id})`)).rejects.toThrow(/Rising campaigns can raise up to 10000000/);
+    // NFR-SEC-02 (M1): clients can't call workflow functions directly; the API calls them as the verified actor.
+    await expect(asUser(sql, nova, (tx) => tx`select public.submit_campaign(${d.id})`)).rejects.toThrow(/permission denied/);
+    await expect(runWithCtx({ actorId: ids.nova, actorKind: "user" }, () => asService(sql, (tx) => tx`select public.submit_campaign(${d.id})`))).rejects.toThrow(/Rising campaigns can raise up to 10000000/);
+  });
+  it("column allowlists: payout and identity references are never readable by clients (NFR-SEC-01 slice)", async () => {
+    const allowed = async (role: string, table: string) =>
+      (await sql<{ column_name: string }[]>`
+        select column_name from information_schema.columns c
+         where table_schema = 'public' and table_name = ${table}
+           and has_column_privilege(${role}::text, format('public.%I', ${table}::text), c.column_name::text, 'select')
+         order by column_name`).map((r) => r.column_name);
+    for (const role of ["anon", "authenticated"]) {
+      expect(await allowed(role, "artists")).toEqual(["bio", "city", "created_at", "genre", "id", "identity_status", "name", "owner_id", "slug", "tier"]);
+      expect(await allowed(role, "profiles")).toEqual(["bio", "created_at", "display_name", "handle", "id"]);
+      for (const t of ["provider_events", "outbound_ops", "recon_runs", "recon_breaks", "privileged_actions", "consents", "notifications", "funnel_events", "tranche_evidence", "platform_settings", "worker_heartbeats", "review_signoffs"]) {
+        expect(await allowed(role, t), `${role} on ${t}`).toEqual([]);
+      }
+    }
+    await expect(asUser(sql, fan, (tx) => tx`select payout_account_ref from public.artists`)).rejects.toThrow(/permission denied/);
+    expect((await asUser(sql, null, (tx) => tx`select id, name from public.artists`)).length).toBeGreaterThan(0);
   });
 });
