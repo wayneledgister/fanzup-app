@@ -228,6 +228,14 @@ When a partner is chosen, I add one file, `apps/api/src/escrow/<partner>.ts`, im
 
 ---
 
+## Part H: Supabase MCP (lets Claude read your database directly)
+- **In Claude (this app):** Settings → Connectors → **Supabase** → Connect, then sign in to Supabase and choose your org. Enable it in the chat where you want Claude to use it.
+- **In Claude Code on your Mac:** the repo's `.mcp.json` registers the hosted Supabase MCP server in **read-only** mode. Open the repo in Claude Code, approve the `supabase` server when asked, and sign in through the browser.
+- **Scope it to staging:** to limit Claude to one project, append `&project_ref=<staging-ref>` to the URL in `.mcp.json`.
+- **Keep it read-only.** Schema changes go through `supabase/migrations` and CI, never through ad-hoc MCP writes, so the database never drifts from the code. Never point the MCP at production with write access.
+
+---
+
 ## Decision I made that you should confirm
 **Processing fees on refunds.** When a campaign fails, every backer gets the **full** amount back, which is the escrow promise in Brand §7.3. Card processors don't return their fee on refunds, so **FanZuP absorbs it**. In the ledger, that cost lands in `platform_absorbed_fees`.
 
