@@ -1,7 +1,7 @@
 # FanZuP v2 — Brief: enterprise-grade Fund My Show
 **Tier:** Enterprise — money custody, consumer protection, tax and sanctions obligations, partner due diligence, and staff operations. (Requested by Wayne; confirmed by council E1.)
 **Version:** v2 (the v1 prototype is the 93-route mock app + money core at commit `a165610`)
-**Date:** 2026-10-03 · **Owner:** Wayne · **Status:** Draft for gate G1 (revised after pass 1)
+**Date:** 2026-10-03 · **Owner:** Wayne · **Status:** G1 approved for M1 only (Wayne, 2026-10-03)
 **One-liner:** Independent artists raise money for shows, tours and records from their own fans; every dollar waits with a third-party custodian and is refunded in full if the goal isn't met, and the platform is built to the standard a custodian, an auditor and a card network would expect.
 
 ## How this brief was made
@@ -47,7 +47,7 @@ Added at G1 pass 1. Priorities in `01-requirements.md` map to these.
 
 | Milestone | What's true at the end | Requirements |
 |---|---|---|
-| **M1 · Walking skeleton** (≈ 6–8 weeks of evenings) | On Stripe **test mode**: one campaign goes draft → review → live → funded → both tranches released; another goes live → failed → everyone refunded. Ledger ↔ processor diff is zero. Every step is audited and traceable with one correlation id. Production stack exists with PITR, alerts and no seeded staff. Funnel and referral-source events are logged from day one. | The P0a core (see the walking-skeleton list in `gates/.G1-pragmatist.md`) |
+| **M1 · Walking skeleton** (≈ 6–8 weeks of evenings) | On Stripe **test mode**: one campaign goes draft → review → live → funded → both tranches released; another goes live → failed → everyone refunded. Ledger ↔ processor diff is zero. Every step is audited and traceable with one correlation id. Production stack exists with PITR, alerts and no seeded staff. Funnel and referral-source events are logged from day one. | `01-requirements.md` §Milestone M1 scope (binding; approved at G1, card G1-C) |
 | **M2 · Closed beta, test money** | All P0a requirements: 3–5 hand-picked artists and real fans on test cards; single-operator mode on. | All **P0a** |
 | **M3 · Live money** | Custodian (or counsel-approved interim posture) live; a second person holds second-approver and backup on-call; tax, sanctions, disputes, legal documents, recon against the custodian. | All **P0b** |
 | **M4 · GA** | Growth and community features; full staff console; status page history; pen test passed. | All **P1** |
@@ -71,7 +71,7 @@ Calendar-bound work starts now and runs alongside M1–M2: custodian questions (
 ## Open questions
 | # | Question | Blocks | Who |
 |---|---|---|---|
-| Q1 | Trace every requirement against PRDs 01–03 and Mechanisms 03–07 (attach the doc folder or add it to the repo) | G1 sign-off | Wayne |
+| Q1 | Trace every requirement against PRDs 01–03 and Mechanisms 03–07 (attach the doc folder or add it to the repo) | **M2** (waived for M1, card G1-C) | Wayne |
 | Q2 | E1 cards A (scope), B (custody posture), C (dispute/refund-fee allocation) | P0 priorities, FR-PAY-008, FR-DSP-* | Wayne; counsel for B and C |
 | Q3 | Confirm the proposed success-metric targets | G1 | Wayne |
 | Q4 | Confirm volume assumptions (drives capacity plan in 02-design) | G2 | Wayne |
@@ -79,5 +79,5 @@ Calendar-bound work starts now and runs alongside M1–M2: custodian questions (
 | Q6 | Does 16 CFR 435 (mail-order rule) reach physical reward perks? | FR-FUL-003 | Counsel |
 | Q7 | Who is the payment settlement entity for 1099-K: processor, custodian or FanZuP? | FR-TAX-002 | Counsel + custodian |
 | Q8 | Is FanZuP a marketplace facilitator for sales tax on physical perks and tickets? | FR-TAX-005 | Counsel |
-| Q9 | G1 cards: G1-A single-operator rule; G1-B how much account a fan needs before paying | FR-ID-007, FR-BCK-002 | Wayne |
-| Q10 | Accept the policy defaults in requirements Appendix A as a set | Many P0 criteria | Wayne |
+| Q9 | ~~G1 cards~~ **Decided 2026-10-03:** G1-A option 1 (single-operator mode until live money); G1-B option 3 (full account first) | — | — |
+| Q10 | ~~Policy defaults~~ **Accepted as a set, 2026-10-03** | — | — |

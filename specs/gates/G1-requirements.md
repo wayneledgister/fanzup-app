@@ -73,7 +73,23 @@ Cards E1-A, E1-B, E1-C (in `E1-enterprise-readiness.md`) remain open. G1 adds:
 - **Who decides:** you.
 
 ## User decision
-_Pending — Wayne._
+**APPROVED FOR M1 ONLY, WITH DIRECTION** — Wayne, 2026-10-03 (relayed to the implementing agent; recorded here by Claude).
+- **Card G1-C → option 1 (default).** Approve the M1 walking skeleton only. The PRD trace (blocker 7, brief Q1) is **waived for M1** and **gates M2** (real users). G2 design starts for M1 only. The M1 scope now lives in `01-requirements.md` §"Milestone M1 scope" (moved out of `.G1-pragmatist.md`).
+- **Card G1-A → option 1 (default).** Single-operator mode until live money (FR-ID-007): typed reason + second-factor session on every privileged action, a delay on money actions above policy, daily limits, a weekly review with recorded sign-off; a second person must hold the second-approver and backup on-call role before P0b.
+- **Card G1-B → option 3 (overrules the council default of option 1).** **Full account first.** A fan creates an account and verifies their email before checkout. FR-BCK-002 is rewritten: a signed-out fan who picks a perk signs up or signs in, verifies email, and lands back on checkout with the same campaign and perk. The pass-2 funnel contradiction (N2) is resolved in favour of FR-ID-001 (verified email before the first backing). The council's dissent stays on record: Critic and Skeptic expected this option to cost the most conversion; the ≥ 45% target is still judged at M3 (N10).
+- **Appendix A policy defaults: accepted as a set.** Each key goes into `packages/shared/src/policy.ts` before the feature that uses it is built.
+- **Still binding:** council D1 decisions and CR-001 (holder votes spec-first, behind `postBeta`, out of M1).
+- **Still open:** E1 cards A, B, C. Until card B is decided the default holds: **no live money; Stripe test mode only.** E1-C (who bears refund processing fees) keeps the current behaviour (FanZuP absorbs the fee on refunds) as the M1 default.
+
+### Pass-2 edits applied with this decision (M1-relevant only)
+| Finding | Edit |
+|---|---|
+| N2 funnel contradiction | FR-ID-001 and FR-BCK-002 now agree: verified email before the first backing (card G1-B option 3). |
+| N8 charge timing | FR-BCK-001: P0a builds **charge at backing** (captured immediately, refunded in full if the campaign fails); switching to charge-at-success is a change request once the custodian answers (FR-PAY-010). |
+| N9 test-money promise | New **FR-PLT-006** (P0a): persistent test-mode notice on every money surface, no perk obligation for test-money backings, no custodian named and no "escrow" claim while none exists. |
+| N6 binding scope in a working note | M1 scope moved into `01-requirements.md`; `.G1-pragmatist.md` stays as history only. |
+
+Carried to G2 as conditions (not M1 blockers): N1, N3, N4, N5, N7, N10, N14, N11–N17; pass-1 conditions 1, 2, 4, 6, 10, 12.
 
 ---
 
@@ -123,3 +139,4 @@ The split relabelled the work rather than shrinking it: the first beta still car
 ## Changelog
 - 2026-10-03: pass 1 recorded; summary sent. Founder away; revised blockers 1–6 and conditions in place (blocker 7 needs the doc set).
 - 2026-10-03: pass 2 recorded (REVISE, narrow). Stopped here for Wayne: remaining work needs his decisions (G1-A/B/C, E1-A/B/C, policy defaults) and the doc set.
+- 2026-10-03: Wayne's decisions recorded (G1-C opt 1, G1-A opt 1, G1-B opt 3, Appendix A accepted). Gate closes **APPROVED for M1 only**; PRD trace gates M2. Pass-2 edits N2, N8, N9 and the M1 scope move (N6) applied to `01-requirements.md`.

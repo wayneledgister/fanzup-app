@@ -1,5 +1,5 @@
 # FanZuP v2 — Requirements
-**Tier:** Enterprise · **Status:** Draft for gate G1 · **Date:** 2026-10-03
+**Tier:** Enterprise · **Status:** G1 approved **for M1 only** (Wayne, 2026-10-03; PRD trace gates M2) · **Date:** 2026-10-03
 **Inputs:** `00-brief.md`; council E1 (`gates/E1-enterprise-readiness.md` + seat notes); README money rules; council D1; CR-001.
 **Priorities** (revised at G1 pass 1):
 - **P0a** — required before real people use the product with **test-mode money** (the closed beta and the walking-skeleton milestone, `00-brief.md` §Milestones)
@@ -14,6 +14,70 @@ A P0a requirement never depends on a P0b, P1 or P2 one. Numbers called "policy" 
 **Source tags:** `E1 B<n>` = E1 blocker, `E1 C<n>` = E1 condition, `<Seat> <id>` = a seat finding (e.g. `Sec S4`, `Comp F5`, `Critic 8`). Requirements derived from repo docs cite them. Every requirement still needs a PRD trace (brief Q1).
 
 **ID scheme:** `FR-<AREA>-NNN`. Areas: PAY (money path), BCK (backing & checkout), CMP (campaigns), FUL (fulfillment), DSP (disputes & refunds), ID (identity & access), TAX (tax & sanctions), ADM (staff console), NTF (notifications), COM (community), GRO (growth), ANL (analytics), PRV (privacy & legal), PLT (platform). NFR IDs: SEC, COMP, OPS, PERF, A11Y, QA, I18N.
+
+---
+
+## Milestone M1 scope — walking skeleton (binding)
+Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the council note `gates/.G1-pragmatist.md` so it binds (G1 pass-2 N6). M1 is a **subset of P0a**: where an M1 line trims a requirement, only the trimmed part is due at M1 and the rest stays due at M2. Nothing here relaxes a P0a requirement for M2.
+
+**Goal:** on Stripe **test mode** only (E1 card B default; FR-PAY-008), one Fund My Show campaign goes from draft to both tranches released and another from live to every backer refunded, driven from the browser where a fan touches it, with every step audited and traceable by one correlation id.
+
+**Exit test (all must pass, automated in CI unless marked):**
+1. A campaign funds and releases **both** tranches (tranche 1 on funding, tranche 2 after verified milestone evidence).
+2. A campaign fails and **every** backer is refunded in full.
+3. Reconciliation of ledger ↔ processor (Stripe test balance transactions; the sandbox provider in CI) **diffs to zero**, per campaign and in total.
+4. Every step of (1) and (2) is traceable by one correlation id: checkout → capture for a backing; settlement → every refund or release it caused.
+5. Real Supabase Auth sign-up and sign-in, **full account first**: a signed-out fan who picks a perk signs up, verifies email, and lands back on checkout with the same campaign and perk (FR-BCK-002).
+6. The web app's campaign list, campaign page, back (checkout) flow and My backings read and write through the API; no mock data on those paths.
+7. A Playwright test of the golden journey runs in CI (fan sign-up → verify → back → confirmation → My backings; then settle → release and settle → refund visible to the fan).
+8. *(Manual, Wayne)* The same journey once against Stripe test mode with real test keys; the reconciliation report for that run shows zero difference.
+
+**Requirements in M1** (ID → what M1 delivers; "full" = every acceptance criterion):
+| ID | M1 delivers |
+|---|---|
+| FR-PAY-001 | Full: checkout hold with expiry (`checkout.holdMinutes`), stock held at checkout start, last-unit race, expiry cancels the payment attempt, deadline releases holds |
+| FR-PAY-002 | Full: provider events stored (unique) before processing; duplicates processed once; wrong signature / live mode / account rejected; failed events visible and replayable by staff (API) |
+| FR-PAY-003 | Full for late captures and amount mismatch; unmatched captures listed in the staff unmatched-money view (API). The fan email for the auto-refund reason is the "refund started" template |
+| FR-PAY-004 | Full: initiated record before the provider call, provider lookup before any retry, exact-amount check, dead-letter after `outbound.maxAttempts` (paging = alert log line + staff queue in M1) |
+| FR-PAY-005 | Evidence as text and links (file uploads wait for FR-PLT-005 at M2); verification under FR-ID-007 single-operator rules; automatic in-order release |
+| FR-PAY-006 | Full, with the parallel-request test in CI |
+| FR-PAY-007 | Against the processor only: daily run + on-demand run, per-campaign and total diff, breaks with amount and age, payouts pause on an aged or material break (refunds continue), staff override with reason |
+| FR-PAY-008 | Bullets 1–2 (sandbox/dev adapters refuse to start when deployed as production; live keys refused); bullet 3 via FR-PLT-006 |
+| FR-PAY-009 | Fan view only (money state per backing derived from the ledger) |
+| FR-BCK-001 | Card checkout (Stripe Payment Element; a labelled sandbox card form in CI); charge at backing; failure categories; confirmation |
+| FR-BCK-002 | Full (card G1-B option 3) |
+| FR-BCK-004 | Full |
+| FR-BCK-005 | Without PDF receipts (P1); perk status "Not yet shipped" until FR-FUL-002 |
+| FR-CMP-001/002 | Through the API (draft CRUD with perks and tranches, submit, review, publish). Wiring the 26-route web wizard to the API is **M2** |
+| FR-CMP-003 | Campaign page renders only the artist's own fields; empty sections hidden; milestone progress with dates |
+| FR-CMP-008 | List of live campaigns, default order ending soonest then newest; filters by type; never ordered by money |
+| FR-TAX-004 | Unconfirmed-checkout cap per user (`checkout.maxUnconfirmedPerUser`) only |
+| FR-DSP-001 | Single-backing full refund of a backing on a live campaign, with reason, under FR-ID-007 (no threshold second approver while single-operator mode is on) |
+| FR-ID-001 | Email + password with confirmation link (Supabase Auth); sign out; reset-password and expired-link states. Magic link at M2, passkeys P1 |
+| FR-ID-002 | Staff only: second-factor (TOTP, Supabase `aal2`) session required for every privileged action, checked by the API |
+| FR-ID-003 | Actor and factor taken from the verified session and recorded; reviewer ≠ owner |
+| FR-ID-004 | Stripe Connect (test) onboarding link for the artist's payout account; sandbox account in CI |
+| FR-ID-005 | Guards on checkout and My backings (sign in and return); staff API refuses non-staff |
+| FR-ID-006 | Full |
+| FR-ID-007 | Full except the break-glass suspension (FR-CMP-007 is M2) |
+| FR-NTF-001 | Five templates (receipt, funded, failed + refund started, refund completed, milestone released), outbox-driven, logged with template version; the delivery provider is an open setup step (log transport until Wayne picks one) |
+| FR-PRV-001 | Mechanics: versioned placeholder documents, acceptance recorded with version, time, IP, user agent; re-acceptance blocks backing |
+| FR-PLT-006 | Full |
+| FR-ANL-001 (events) | First-party server-side funnel events: perk selected, checkout started, account created, backing confirmed, source (`ref`) |
+| NFR-SEC-01 | Column allowlist for `artists` and `profiles` (payout/identity refs never public) + automated test; full allowlist over every object at M2 |
+| NFR-SEC-02 | Every M1 write goes through the API |
+| NFR-SEC-04 | Fail closed: deployed environments refuse to start with the sandbox provider or without required config |
+| NFR-SEC-07 | Seed never loaded outside local/CI; no seeded staff outside local/CI |
+| NFR-SEC-12 | Logs redact the listed fields |
+| NFR-COMP-11 | Audit events carry actor kind, request/correlation id, factor level; ids only in payloads |
+| NFR-COMP-12 | Reject update/delete/truncate on ledger and audit tables |
+| NFR-OPS-04 | Correlation id on every request, job, provider call and audit row; structured logs. Error-tracker (Sentry) hookup is a setup step for Wayne |
+| NFR-OPS-05 | Bounded attempts, dead-letter, replay; no lock held across a provider call; one failing campaign never blocks others |
+| NFR-OPS-06 | Worker heartbeat row + `/api/health` reports its age; the external 5-minute check is a setup step |
+| NFR-QA-01 | Core: parallel backings, last-unit race, concurrent retries, duplicate and late events, refunds, many campaigns with one failing |
+| NFR-QA-02 | The golden journey above (other journeys M2) |
+
+**Not in M1** (still P0a, due at M2 unless re-prioritised): FR-CMP-007 suspension, FR-ADM-001 web queues (M1 has API queues only), FR-ADM-003 money view UI, FR-PLT-001 server flags, FR-PLT-002 route pruning, FR-PLT-005 uploads, FR-PRV-004, FR-TAX-004 per-user limits beyond the unconfirmed-checkout cap, NFR-SEC-03/05/06/09/13/14, NFR-OPS-01/02/07/08/09/11, NFR-PERF-03/04 as measured SLOs, NFR-A11Y-01..04 automation, NFR-QA-03/05. All P0b, P1, P2 work. The PRD trace (brief Q1) must be done before M2 starts.
 
 ---
 
@@ -127,18 +191,22 @@ A P0a requirement never depends on a P0b, P1 or P2 one. Numbers called "policy" 
 - Given the fan pays, then a confirmation screen shows their backing, the campaign deadline in their local time, what happens if the goal is or isn't met, and a share prompt.
 - Given the payment fails, then the fan stays on checkout with a message that states the reason category (declined, expired, authentication failed, network) and the next step, and nothing is charged.
 - Cards are supported at P0a; Apple Pay and Google Pay at P0b. Delayed-settlement bank methods stay off until FR-PAY-003 has run in production for one full campaign cycle. [NEEDS CLARIFICATION: confirm ACH stays off at launch]
-- Checkout states when the card is charged. [NEEDS CLARIFICATION: charge at backing (current design; refunded on failure) vs charge at success — depends on the custodian (FR-PAY-010)]
+- Checkout states when the card is charged. P0a builds **charge at backing**: the payment is captured when the fan backs and refunded in full if the campaign fails. Moving to charge-at-success is a change request once the custodian answers (FR-PAY-010). *(G1 pass-2 N8, resolved 2026-10-03.)*
 **Priority:** P0a (card) / P0b (wallet pay) · **Source:** E1 B11; Critic 1, Pragmatist P1
 
 ### FR-BCK-002: Choice survives sign-up
 **Story:** As a new fan arriving from a link, I want my chosen perk to still be selected after I create an account, so that I don't have to start over.
 **Acceptance criteria:**
-- Given a signed-out fan picks a perk, when they sign up or log in, then they land back on checkout with the same campaign and perk selected.
-- Given a fan is already signed in, then "Back" goes straight to checkout.
-- *(Card G1-B default: light account.)* Checkout asks only for email, 18+ attestation and terms acceptance; the account is created with it, and the email is verified by a link in the receipt. Profile and preferences are offered after the backing is confirmed.
-- A bot challenge appears at checkout only when a risk signal fires (FR-TAX-004).
-- [NEEDS CLARIFICATION: card G1-B — light account (default), guest checkout, or full account first]
-**Priority:** P0a · **Source:** Critic 1, Critic feature 1
+*(Card G1-B option 3, "full account first", Wayne 2026-10-03.)*
+- Given a signed-out fan picks a perk, when they choose "Back", then they are asked to sign up or sign in, with the campaign and perk they chose shown on that screen.
+- Given the fan signs up, then the account is created with email, password, 18+ attestation and acceptance of the current terms (FR-ID-006, FR-PRV-001), and a verification link is emailed; checkout stays unavailable until the email is verified (FR-ID-001).
+- Given the fan opens the verification link (on the same device), then they land on checkout with the same campaign and perk selected, already signed in.
+- Given a fan signs in with an existing verified account, then they land on checkout with the same campaign and perk selected.
+- Given a signed-in fan whose email isn't verified opens checkout, then checkout explains that the email must be verified first and offers to resend the link; the chosen perk is kept.
+- Given a fan is already signed in and verified, then "Back" goes straight to checkout.
+- Given the chosen perk sold out or the campaign closed while the fan was signing up, then checkout says so and offers the campaign page; nothing is charged.
+- A bot challenge on sign-up arrives at P0b (FR-TAX-004).
+**Priority:** P0a · **Source:** Critic 1, Critic feature 1; card G1-B (Wayne)
 
 ### FR-BCK-003: Manage a pledge while the campaign is live
 **Story:** As a fan, I want to change my perk, add to my pledge, or cancel before the deadline, so that I'm in control of my money.
@@ -315,7 +383,7 @@ A P0a requirement never depends on a P0b, P1 or P2 one. Numbers called "policy" 
 ### FR-ID-001: Real sign-in
 **Story:** As any user, I want to sign up and sign in for real, so that my backings and campaigns are mine.
 **Acceptance criteria:**
-- Email + password, magic link and passkeys are supported; email is verified before the first backing.
+- Email + password, magic link and passkeys are supported; email is verified before the first backing (card G1-B option 3; FR-BCK-002). M1 ships email + password only.
 - Sessions expire and can be revoked; signing out everywhere works.
 - Password reset, locked-account and expired-link states are handled with human messages.
 **Priority:** P0a (passkeys P1) · **Source:** E1 B11; Pragmatist P1
@@ -376,7 +444,7 @@ A P0a requirement never depends on a P0b, P1 or P2 one. Numbers called "policy" 
   - a weekly review lists every privileged action taken, and Wayne's sign-off on it is recorded;
   - the operator can't own or be linked to any campaign.
 - Break-glass: an emergency suspension (FR-CMP-007) can be applied instantly by the single operator; lifting it follows the delay rule.
-- **Exit condition:** single-operator mode must be off before any live money moves (P0b). Turning it off requires at least two people holding staff roles with MFA, a named on-call backup, and the dual-control rules of FR-ID-003, FR-CMP-007 and FR-DSP-001 active. [NEEDS CLARIFICATION: card G1-A]
+- **Exit condition:** single-operator mode must be off before any live money moves (P0b). Turning it off requires at least two people holding staff roles with MFA, a named on-call backup, and the dual-control rules of FR-ID-003, FR-CMP-007 and FR-DSP-001 active. *(Card G1-A option 1, Wayne 2026-10-03.)*
 **Priority:** P0a · **Source:** G1 blocker 2 (Architect, Skeptic, Pragmatist)
 
 ### FR-ID-008: Payout-account changes are slowed down
@@ -655,6 +723,15 @@ A P0a requirement never depends on a P0b, P1 or P2 one. Numbers called "policy" 
 - Image metadata (location) is stripped from public images.
 **Priority:** P0a · **Source:** G1 blocker 4 (Security)
 
+### FR-PLT-006: What test-money participants are promised
+**Story:** As a fan or artist in the test-money beta, I want to know that no real money moves and what that means for perks, so that nobody is misled or left out of pocket.
+**Acceptance criteria:**
+- Given the payment provider is in test mode, then every money surface (campaign page, checkout, confirmation, My backings, receipts and every money email) shows a persistent notice: test mode, no real money moves, use a test card.
+- Given a backing made in test mode, then the artist owes no perk for it; delivering anything is voluntary, and the campaign page and checkout say so.
+- Given no custodian is live (FR-PAY-010), then no screen or email names a custodian or says "escrow"; the promise is stated as "if the goal isn't met by the deadline, every backer is refunded in full".
+- Given the provider is switched to live mode, then the notice disappears only because FR-PAY-008 allowed live keys; nothing else turns it off.
+**Priority:** P0a · **Source:** G1 pass-2 N9 (Skeptic, Compliance/Ops)
+
 ---
 
 ## Non-functional requirements
@@ -799,8 +876,8 @@ Adopted from the Compliance/Ops seat (`gates/.E1-compliance-ops.md`), where each
 ## Out of scope (restated)
 Layer 2 investing and all `layer2`/`postBeta` builds (CR-001 stays spec-first: T-HV-01/02 only); general ticketing (show-perk QR codes are FR-FUL-004, P1), merch store, live streaming and backstage (each needs its own spec; routes hidden in production); native apps; multi-currency settlement; multi-tenant accounts.
 
-## Appendix A — Policy defaults (proposed)
-Every threshold a requirement calls "policy". Values are proposals for Wayne to accept as a set (as in D1 card B); each must be added to `packages/shared/src/policy.ts` before the requirement that uses it is built.
+## Appendix A — Policy defaults (accepted)
+Every threshold a requirement calls "policy". **Accepted as a set by Wayne, 2026-10-03.** Each must be added to `packages/shared/src/policy.ts` before the requirement that uses it is built. Keys marked "per counsel" or "per card" stay undecided until that answer arrives.
 | Key | Proposed default | Used by | Basis |
 |---|---|---|---|
 | `checkout.holdMinutes` | 15 | FR-PAY-001 | Common checkout hold; long enough for 3-D Secure |
@@ -827,13 +904,14 @@ Every threshold a requirement calls "policy". Values are proposals for Wayne to 
 | `ops.freezeAboveMinor` | 2500000 ($25,000) goal | NFR-OPS-12 | Policy default |
 | `staff.idleTimeoutMinutes` | 15 | NFR-SEC-06 | E1 Security |
 
-## Open items before G1 sign-off
-1. **PRD trace (brief Q1)** — the one G1 blocker only Wayne can clear: attach or commit the doc set.
-2. Founder cards: E1-A (scope), E1-B (custody posture), E1-C (dispute/refund-fee allocation), G1-A (single-operator rule), G1-B (checkout account).
-3. Accept Appendix A policy defaults as a set (or name the ones to change).
-4. `[NEEDS CLARIFICATION]` items: ACH at launch and charge timing (FR-BCK-001); staff identity provider (FR-ID-005); who screens backers (FR-TAX-003); sales-tax facilitator status (FR-TAX-005); 16 CFR 435 (FR-FUL-003); settlement entity for 1099-K (FR-TAX-002).
-5. Success-metric targets and volume assumptions (brief Q3, Q4).
+## Open items
+G1 is approved for M1 only. Before M2:
+1. **PRD trace (brief Q1)** — gates M2: attach or commit the doc set; every FR/NFR gets a PRD source or "new in v2".
+2. Founder cards still open: E1-A (scope), E1-B (custody posture; default "no live money" holds), E1-C (dispute/refund-fee allocation; M1 keeps FanZuP absorbing refund fees). G1-A, G1-B and Appendix A were decided 2026-10-03.
+3. `[NEEDS CLARIFICATION]` items: ACH at launch (FR-BCK-001); staff identity provider (FR-ID-005); who screens backers (FR-TAX-003); sales-tax facilitator status (FR-TAX-005); 16 CFR 435 (FR-FUL-003); settlement entity for 1099-K (FR-TAX-002).
+4. Success-metric targets and volume assumptions (brief Q3, Q4).
 
 ## Change log
 - 2026-10-03: v2 draft created from council E1 (Claude, on Wayne's request "evaluate and come up with an improvement spec … enterprise level"). Scope per E1 card A default.
 - 2026-10-03: revised after G1 pass 1. P0 split into P0a (test-mode beta) / P0b (live money). Added FR-PAY-010 custody integration, FR-PAY-011 undeliverable refunds, FR-CMP-008 discovery, FR-ID-007 single-operator mode, FR-ID-008 payout-account cooling-off, FR-TAX-005 sales tax, FR-PRV-005 marketing/tracking consent, FR-PRV-006 artist use of backer data, FR-PLT-005 safe uploads; NFR-SEC-12..14, NFR-COMP-19..23, NFR-OPS-12..13. System-derived actor + factor on privileged actions; two-person control placed on milestone verification, not release. Restored E1 levels for fan cancel, late-perk remedy, fan problems, export/deletion and status page (P0b). One number per obligation (auto-refund initiated ≤ 1 h, confirmed ≤ 5 business days). Audit payloads carry ids only; address purge outlasts dispute windows. Added E1-conditions trace and Appendix A policy defaults. Checkout per card G1-B default (light account).
+- 2026-10-03: G1 decisions recorded (Wayne): G1-C option 1 (M1 only; PRD trace gates M2), G1-A option 1, G1-B option 3 (full account first), Appendix A accepted. Added §Milestone M1 scope (from `.G1-pragmatist.md`). Rewrote FR-BCK-002 for full account first and aligned FR-ID-001 (N2). FR-BCK-001 charge at backing (N8). New FR-PLT-006 test-money promise (N9).
