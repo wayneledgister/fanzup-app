@@ -1,34 +1,30 @@
 /**
- * Background worker: settles campaigns at their deadline and drains the outbox
- * (refunds for failed campaigns, tranche releases for funded ones).
- * Run as its own process (one instance; the outbox uses SKIP LOCKED so a second is safe too).
+ * Background worker (design 02 §6): every WORKER_INTERVAL_MS runs one tick — heartbeat, expire holds, process
+ * provider events, settle due campaigns, drain the outbox, run outbound ops, extra steps, daily reconciliation.
+ * One instance is enough; a second is safe (SKIP LOCKED + leases).
  */
 import { loadEnv } from "./env";
 import { createDb } from "./db";
-import { createEscrow, createStripe } from "./escrow";
-import { settleDueCampaigns, drainOutbox } from "./money";
+import { createProvider } from "./provider";
+import { logOnlyNotify } from "./notify";
+import { runWorkerTick } from "./jobs";
+import { log, redact } from "./log";
 
 const env = loadEnv();
 const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
-const escrow = createEscrow(env, createStripe(env));
-const INTERVAL_MS = 30_000;
+const provider = createProvider(env, sql);
 let stopping = false;
-
-async function tick() {
-  const settled = await settleDueCampaigns(sql);
-  const processed = await drainOutbox(sql, escrow);
-  if (settled.length || processed) console.log(JSON.stringify({ msg: "worker.tick", settled, processed }));
-}
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { stopping = true; });
 
-console.log(JSON.stringify({ msg: "worker.start", escrow: escrow.name }));
+log("info", "worker.start", { provider: provider.name, intervalMs: env.WORKER_INTERVAL_MS });
 while (!stopping) {
   try {
-    await tick();
+    const r = await runWorkerTick({ sql, provider, notify: logOnlyNotify });
+    if (r.settled.length || r.processed || r.ops || r.events || r.holdsReleased || r.recon) log("info", "worker.tick", r);
   } catch (e) {
-    console.error(JSON.stringify({ msg: "worker.error", error: String(e) }));
+    log("error", "worker.error", { error: redact(String((e as Error).stack ?? e)) });
   }
-  await new Promise((r) => setTimeout(r, INTERVAL_MS));
+  await new Promise((r) => setTimeout(r, env.WORKER_INTERVAL_MS));
 }
 await sql.end({ timeout: 5 });

@@ -23,6 +23,46 @@ export const POLICY = {
   account: { deletionGraceDays: 14 },
   /** Card processing is passed through to the artist at cost (fees.html); fans pay sticker price. */
   processing: { pct: 0.029, fixedMinor: 30, payer: "artist" as "artist" | "fan" },
+
+  // ── v2 requirements Appendix A — accepted as a set by Wayne, 2026-10-03 (G1). ──
+  checkout: {
+    /** FR-PAY-001. Common checkout hold; long enough for 3-D Secure. */
+    holdMinutes: 15,
+    /** FR-TAX-004. Limits card-testing. */
+    maxUnconfirmedPerUser: 3,
+  },
+  refunds: {
+    /** FR-PAY-003, NFR-COMP-05 (E1 Compliance): auto-refunds initiated within this many minutes. */
+    autoInitiateMinutes: 60,
+    /** FR-DSP-001. Policy default ($500); replaced by FR-ID-007 rules while single-operator mode is on. */
+    secondApprovalAboveMinor: 500_00,
+  },
+  approvals: {
+    /** FR-PAY-005, FR-ID-003. Policy default ($5,000). */
+    secondVerifierAboveMinor: 5_000_00,
+  },
+  /** FR-ID-007 single-operator mode (card G1-A option 1). Policy defaults. */
+  singleOperator: {
+    delayAboveMinor: 1_000_00,
+    delayHours: 24,
+    dailyLimits: { refundsMinor: 5_000_00, verifications: 3 },
+  },
+  outbound: {
+    /** FR-PAY-004, NFR-OPS-05 (E1 Compliance). */
+    maxAttempts: 8,
+    /** Design §5: `wait_funds` retries don't count as attempts; raised as a break after this many days. */
+    waitFundsBreakDays: 7,
+  },
+  recon: {
+    /** FR-PAY-007 (E1 Compliance): $1. */
+    materialityMinor: 100,
+    maxBreakAgeBusinessDays: 1,
+  },
+  /** NFR-SEC-13, FR-TAX-004 (E1 Security). Recorded at M1; enforced at M2. */
+  rateLimits: { backingPerMinute: 5, backingPerHour: 20, writesPerMinutePerUser: 60, writesPerMinutePerIp: 120 },
+  staff: { idleTimeoutMinutes: 15 },
+  /** FR-PRV-001. Placeholder documents until counsel-approved versions (P0b). */
+  legal: { termsVersion: "2026-10-03-beta", privacyVersion: "2026-10-03-beta" },
 } as const;
 
 /** Processing deducted from an artist's proceeds for one charge. */

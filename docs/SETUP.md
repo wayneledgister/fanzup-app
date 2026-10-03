@@ -155,11 +155,15 @@ select pg_has_role('postgres','service_role','member') as svc,
 
 1. Create a Stripe account and stay in **Test mode**. Don't activate live payments.
 2. Copy the **Developers → API keys → Secret key** (`sk_test_…`) into `STRIPE_SECRET_KEY`.
-3. **Local:** run `stripe listen --forward-to localhost:8787/api/v1/webhooks/stripe` and put the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`. Set `ESCROW_PROVIDER=stripe-dev`.
+3. **Local:** run `stripe listen --forward-to localhost:8787/api/v1/webhooks/stripe` and put the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`. Set `ESCROW_PROVIDER=stripe-test` (the old name `stripe-dev` still works). Pay with test card `4000 0000 0000 0077` so funds are available for artist transfers immediately; other test cards leave transfers waiting for funds.
 4. **Hosted, after Part D (Vercel):**
    - Go to Developers → **Webhooks** → Add endpoint `https://<your-vercel-domain>/api/v1/webhooks/stripe`.
-   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed` and `charge.refunded`.
+   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `refund.created`, `refund.updated`, `refund.failed` and `transfer.created`.
    - Put its signing secret in Vercel as `STRIPE_WEBHOOK_SECRET`.
+5. Copy the **publishable key** (`pk_test_…`) into `STRIPE_PUBLISHABLE_KEY` (API) — the web app reads it from `/api/v1/config`.
+6. Turn on **Connect** (Express accounts) in test mode; artists onboard their payout account from the app.
+
+> **Fail closed (FR-PAY-008, M1).** A deployed API refuses to start with the sandbox provider or any non-test key. Until the Stripe test variables above are set, hosted `/api` answers **503 "misconfigured"** naming the missing variable. That's deliberate.
 
 ---
 
@@ -184,7 +188,9 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
    | `SUPABASE_URL` | `https://<ref>.supabase.co` |
    | `STRIPE_SECRET_KEY` | your `sk_test_…` key |
    | `STRIPE_WEBHOOK_SECRET` | from step C4 |
-   | `ESCROW_PROVIDER` | `stripe-dev` (or `sandbox` with no Stripe) |
+   | `ESCROW_PROVIDER` | `stripe-test` (the sandbox is refused in deployed environments) |
+   | `STRIPE_PUBLISHABLE_KEY` | your `pk_test_…` key |
+   | `PUBLIC_WEB_URL` | `https://<your-vercel-domain>` (return links for Stripe onboarding) |
    | `DB_POOL_MAX` | `3` |
    | `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` |
    | `VITE_SUPABASE_ANON_KEY` | Supabase **publishable (anon)** key. It's safe in the browser. **Never** put the secret/service key in a `VITE_` variable. |
@@ -248,4 +254,4 @@ When a partner is chosen, I add one file, `apps/api/src/escrow/<partner>.ts`, im
 
 The alternative is refunding backers net of fees, which breaks "refunded automatically" in spirit. The other alternative, only authorizing cards and capturing at the deadline, doesn't work for campaigns longer than about a week, because standard card authorizations expire.
 
-Tell me if you want it changed. It's one function, `record_backing_refunded`.
+Tell me if you want it changed. It's one function, `record_refund_confirmed` (E1 card C is still open; this stays the default until you decide it).

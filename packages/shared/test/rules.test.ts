@@ -31,3 +31,16 @@ describe("tiers (PRD 01 §6.3)", () => {
     expect(nextTier("Rising")?.name).toBe("Established");
   });
 });
+
+describe("Appendix A policy defaults (accepted 2026-10-03)", () => {
+  it("has every key M1 uses, with the accepted values", () => {
+    expect(POLICY.checkout).toEqual({ holdMinutes: 15, maxUnconfirmedPerUser: 3 });
+    expect(POLICY.refunds.autoInitiateMinutes).toBe(60);
+    expect(POLICY.refunds.secondApprovalAboveMinor).toBe(50_000);
+    expect(POLICY.approvals.secondVerifierAboveMinor).toBe(500_000);
+    expect(POLICY.singleOperator).toEqual({ delayAboveMinor: 100_000, delayHours: 24, dailyLimits: { refundsMinor: 500_000, verifications: 3 } });
+    expect(POLICY.outbound.maxAttempts).toBe(8);
+    expect(POLICY.recon).toEqual({ materialityMinor: 100, maxBreakAgeBusinessDays: 1 });
+    expect(POLICY.staff.idleTimeoutMinutes).toBe(15);
+  });
+});
