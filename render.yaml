@@ -1,59 +1,31 @@
-# ALTERNATIVE HOST. The default plan is Vercel Services (root vercel.json). Keep this only if the API/worker
-# move off Vercel (e.g. if you stay on Vercel Hobby, where cron can only run once a day).
-# Render Blueprint — API + worker (deploy: Render dashboard → New → Blueprint → this repo).
-# Region matches Supabase us-east-1 (N. Virginia) to keep DB latency low.
+# Render Blueprint — background WORKER only (ADR-002).
+# The website and API run on Vercel (root vercel.json). This always-on process settles campaigns at their
+# deadline and drains the outbox (refunds, milestone payouts) every 30 seconds.
+# Deploy: Render dashboard → New → Blueprint → this repo.
 services:
-  - type: web
-    name: fanzup-api
+  - type: worker
+    name: fanzup-worker
     runtime: node
-    region: virginia
+    region: virginia            # next to Supabase us-east-1
     plan: starter
     rootDir: .
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @fanzup/api build
-    startCommand: node apps/api/dist/server.js
-    healthCheckPath: /api/health
-    autoDeploy: true   # in the dashboard, set Auto-Deploy to "After CI checks pass" (see SETUP.md)
+    startCommand: node apps/api/dist/worker.js
+    autoDeploy: true            # in the dashboard, set Auto-Deploy to "After CI checks pass"
     buildFilter:
-      paths: ["apps/api/**", "packages/shared/**", "pnpm-lock.yaml"]
+      paths: ["apps/api/**", "packages/shared/**", "supabase/migrations/**", "pnpm-lock.yaml"]
     envVars:
       - key: NODE_VERSION
         value: "22"
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
+      - key: DATABASE_URL       # Supabase → Connect → Session pooler (port 5432); long-running process
         sync: false
       - key: SUPABASE_URL
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
       - key: ESCROW_PROVIDER
         value: stripe-dev
-      - key: CORS_ORIGINS
-        sync: false
-
-  - type: worker
-    name: fanzup-worker
-    runtime: node
-    region: virginia
-    plan: starter
-    rootDir: .
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @fanzup/api build
-    startCommand: node apps/api/dist/worker.js
-    autoDeploy: true
-    buildFilter:
-      paths: ["apps/api/**", "packages/shared/**", "pnpm-lock.yaml"]
-    envVars:
-      - key: NODE_VERSION
-        value: "22"
-      - key: NODE_ENV
-        value: production
-      - fromService: { type: web, name: fanzup-api, envVarKey: DATABASE_URL }
-        key: DATABASE_URL
-      - fromService: { type: web, name: fanzup-api, envVarKey: SUPABASE_URL }
-        key: SUPABASE_URL
-      - fromService: { type: web, name: fanzup-api, envVarKey: STRIPE_SECRET_KEY }
-        key: STRIPE_SECRET_KEY
-      - key: ESCROW_PROVIDER
-        value: stripe-dev
+      - key: DB_POOL_MAX
+        value: "5"

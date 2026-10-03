@@ -5,7 +5,7 @@ Direct-to-fan funding for independent artists. *Fund the culture. Own the future
 | Path | What | Hosted on |
 |---|---|---|
 | `apps/web` | React app (Brand v2.0, 93 routes) | Vercel service `web` at `/` |
-| `apps/api` | Fastify API: backings, escrow orchestration, settlement, refunds, milestone releases | Vercel service `api` at `/api` (+ cron tick) |
+| `apps/api` | Fastify API: backings, escrow orchestration, settlement, refunds, milestone releases | Vercel service `api` at `/api`; worker on Render ([ADR-002](docs/adr/ADR-002-hosting.md)) |
 | `packages/shared` | Rules shared by web and API: creator tiers (PRD 01 §6.3), policy defaults, money, campaign state machine, request schemas | — |
 | `supabase/` | Postgres schema: double-entry ledger, RLS, money functions, seed | Supabase |
 

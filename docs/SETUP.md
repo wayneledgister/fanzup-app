@@ -9,8 +9,8 @@ Everything that can be done in code is already in the repo. These are the steps 
 
 **Layout:**
 ```
-apps/web          React app        ┐ one Vercel project (root vercel.json):
-apps/api          API + cron tick  ┘ web at /, api at /api
+apps/web          React app   ┐ one Vercel project (root vercel.json): web at /, api at /api
+apps/api          API + worker┘ worker (worker.ts) runs on Render
 packages/shared   rules shared by web and API (tiers, policy, money, schemas)
 supabase/         migrations, seed, config  (Supabase)
 ```
@@ -163,41 +163,48 @@ select pg_has_role('postgres','service_role','member') as svc,
 
 ---
 
-## Part D: Host the web app and API on Vercel (one project, two services)
-The root `vercel.json` deploys both apps as **Vercel Services** in one project on one domain:
+## Part D: Hosting: Vercel (website + API) and Render (worker)
+Why the work is split this way is in [`docs/adr/ADR-002-hosting.md`](adr/ADR-002-hosting.md).
 
-| Path | Service | Source | Public? |
-|---|---|---|---|
-| `/api/*` | `api` | `apps/api` (Fastify, runs as one Vercel Function) | yes |
-| everything else | `web` | `apps/web` (Vite static site, falls back to `index.html`) | yes |
-| `/api/internal/tick` every 5 min | cron → `api` | replaces the worker loop on Vercel | only with `CRON_SECRET` |
+| Path | Runs on | Source |
+|---|---|---|
+| `/api/*` | Vercel service `api` (one Vercel Function) | `apps/api` |
+| everything else | Vercel service `web` (static site; deep links fall back to `index.html`) | `apps/web` |
+| background worker, every 30 s | Render (~$7/month) | `apps/api/src/worker.ts` |
 
-The browser calls the API at the same-origin `/api`, so there's no CORS and no API hostname to configure.
+The browser calls the API at the same-origin `/api`, so there's no CORS and no API hostname to set.
 
-1. **Plan check.** Vercel **Hobby** runs cron jobs at most **once a day**, and a deploy with the 5-minute schedule fails on Hobby. Settlement and refunds need it more often, so either use **Pro**, or tell me and I'll move the worker to Render (`render.yaml`, kept as the alternative).
-2. Go to vercel.com → **Add New → Project** → import `wayneledgister/fanzup-app`. Leave **Root Directory** as the repo root (`./`). Vercel reads `vercel.json` and shows the two services.
-3. **Environment variables** (Settings → Environment Variables; Preview = staging values, Production = prod values):
+### D1. Vercel
+1. Go to vercel.com → **Add New → Project** → import `wayneledgister/fanzup-app`. Leave **Root Directory** as the repo root (`./`). Vercel reads `vercel.json` and shows the two services.
+2. **Environment variables** (Settings → Environment Variables):
 
    | Variable | Value |
    |---|---|
-   | `DATABASE_URL` | Supabase → **Connect** → **Transaction pooler** string (port **6543**) with your password. Serverless functions should use the transaction pooler; the code turns prepared statements off for port 6543 automatically. |
+   | `DATABASE_URL` | Supabase → **Connect** → **Transaction pooler** (port **6543**) with your password. The code turns prepared statements off for 6543 automatically. |
    | `SUPABASE_URL` | `https://<ref>.supabase.co` |
-   | `CRON_SECRET` | a random string of 16+ characters (a password generator works). Vercel sends it to the cron endpoint automatically. |
    | `STRIPE_SECRET_KEY` | your `sk_test_…` key |
    | `STRIPE_WEBHOOK_SECRET` | from step C4 |
    | `ESCROW_PROVIDER` | `stripe-dev` (or `sandbox` with no Stripe) |
    | `DB_POOL_MAX` | `3` |
    | `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` |
-   | `VITE_SUPABASE_ANON_KEY` | Supabase → **publishable (anon)** key. It's safe in the browser because RLS protects the data. **Never** put the secret/service key in a `VITE_` variable. |
+   | `VITE_SUPABASE_ANON_KEY` | Supabase **publishable (anon)** key. It's safe in the browser. **Never** put the secret/service key in a `VITE_` variable. |
    | `VITE_FLAG_LAYER2`, `VITE_FLAG_POSTBETA` | `false` |
 
-4. **Deploy**, then run these checks against your Vercel URL:
+3. **Deploy**, then check:
    - `https://<your-app>.vercel.app/api/health` returns `{"ok":true,…}`
    - `https://<your-app>.vercel.app/campaigns/nova-live-band-tour` loads the page, not a 404
-   - Settings → **Cron Jobs** lists `/api/internal/tick`
-5. Put the Vercel URL into Supabase → Authentication → **Site URL** and **Redirect URLs** (B2).
+4. Put the Vercel URL into Supabase → Authentication → **Site URL** and **Redirect URLs** (B2).
 
-**Local:** `pnpm dev:web` + `pnpm dev:api` (Vite forwards `/api` to `:8787`), or `npx vercel dev` at the repo root to run both services exactly as Vercel does.
+### D2. Render (worker only)
+1. Go to render.com → sign in with GitHub → **New → Blueprint** → pick `wayneledgister/fanzup-app`. Render reads `render.yaml` and proposes one service, `fanzup-worker`.
+2. Fill in:
+   - `DATABASE_URL`: Supabase → **Connect** → **Session pooler** (port **5432**). Render connects over IPv4, and the shared pooler is Supabase's IPv4 route.
+   - `SUPABASE_URL`
+   - `STRIPE_SECRET_KEY`
+3. In the service → **Settings → Build & Deploy**, set **Auto-Deploy** to **"After CI checks pass"**.
+4. **✅ Check:** the logs show `{"msg":"worker.start",…}`, and a `worker.tick` line appears whenever there's work to do.
+
+**Local:** `pnpm dev:web` + `pnpm dev:api` (Vite forwards `/api` to `:8787`), plus `pnpm --filter @fanzup/api worker`. Or run `npx vercel dev` at the repo root for the two Vercel services.
 
 ---
 

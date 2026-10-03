@@ -34,11 +34,5 @@
         "service": "web"
       }
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/internal/tick",
-      "schedule": "*/5 * * * *"
-    }
   ]
 }
