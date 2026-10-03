@@ -1,7 +1,7 @@
 # FanZuP v2 — Brief: enterprise-grade Fund My Show
 **Tier:** Enterprise — money custody, consumer protection, tax and sanctions obligations, partner due diligence, and staff operations. (Requested by Wayne; confirmed by council E1.)
 **Version:** v2 (the v1 prototype is the 93-route mock app + money core at commit `a165610`)
-**Date:** 2026-10-03 · **Owner:** Wayne · **Status:** Draft for gate G1
+**Date:** 2026-10-03 · **Owner:** Wayne · **Status:** Draft for gate G1 (revised after pass 1)
 **One-liner:** Independent artists raise money for shows, tours and records from their own fans; every dollar waits with a third-party custodian and is refunded in full if the goal isn't met, and the platform is built to the standard a custodian, an auditor and a card network would expect.
 
 ## How this brief was made
@@ -34,16 +34,28 @@ Targets are proposed defaults; Wayne confirms at G1 (Q3).
 | Money correctness incidents (double payout, unrefunded capture, ledger imbalance) | **0** | The product's core promise |
 | Daily reconciliation completed with no unexplained break older than 1 business day | 100% of days | Custodian requirement (NFR-COMP-02) |
 | Failed-campaign refunds initiated within 1 hour of settlement | ≥ 99.9% | "Refunded automatically" |
-| Checkout conversion (perk selected → backing confirmed), mobile | ≥ 45% [proposed] | Growth runs on social traffic |
-| Share of backings that arrive via a shared link | measured from day 1; target ≥ 60% by GA [proposed] | Validates the growth features |
+| Checkout conversion (perk selected → backing confirmed), mobile | ≥ 45% [proposed]; measured from M1 | Growth runs on social traffic |
+| Share of backings that arrive via a shared link | logged from M1 (link source); per-fan attribution from M4; target ≥ 60% by GA [proposed] | Validates the growth features |
 | Campaign success rate (funded / settled) | ≥ 40% in Beta [proposed] | Platform health; informs refund-fee cost |
-| Perks delivered by their promised date | ≥ 90% [proposed] | Dispute driver |
+| Perks delivered by their promised date | ≥ 90% [proposed]; measured from M3 | Dispute driver |
 | Dispute (chargeback) ratio | < 0.5% of monthly transactions | Card-network monitoring starts near 0.9% |
 | Staff queue SLAs met (POLICY.adminSlaBusinessDays) | ≥ 95% | Ops quality |
 | WCAG 2.2 AA serious/critical violations on core journeys | 0 | Accessibility obligation |
 
+## Milestones
+Added at G1 pass 1. Priorities in `01-requirements.md` map to these.
+
+| Milestone | What's true at the end | Requirements |
+|---|---|---|
+| **M1 · Walking skeleton** (≈ 6–8 weeks of evenings) | On Stripe **test mode**: one campaign goes draft → review → live → funded → both tranches released; another goes live → failed → everyone refunded. Ledger ↔ processor diff is zero. Every step is audited and traceable with one correlation id. Production stack exists with PITR, alerts and no seeded staff. Funnel and referral-source events are logged from day one. | The P0a core (see the walking-skeleton list in `gates/.G1-pragmatist.md`) |
+| **M2 · Closed beta, test money** | All P0a requirements: 3–5 hand-picked artists and real fans on test cards; single-operator mode on. | All **P0a** |
+| **M3 · Live money** | Custodian (or counsel-approved interim posture) live; a second person holds second-approver and backup on-call; tax, sanctions, disputes, legal documents, recon against the custodian. | All **P0b** |
+| **M4 · GA** | Growth and community features; full staff console; status page history; pen test passed. | All **P1** |
+
+Calendar-bound work starts now and runs alongside M1–M2: custodian questions (SETUP Part G), one counsel engagement (custody posture and "escrow" wording, sales tax, 16 CFR 435, 1099-K settlement entity, CR-001 T-HV-02), tax and sanctions vendor selection.
+
 ## Constraints
-- **Team:** solo founder with a day job, plus Claude agents. Calendar time for partners and counsel dominates engineering time.
+- **Team:** solo founder with a day job, plus Claude agents. Calendar time for partners and counsel dominates engineering time. Until a second person joins, staff controls run in single-operator mode (FR-ID-007), which must end before live money.
 - **Stack (keep):** Vercel (web + API), Render (worker), Supabase Postgres + Auth, pnpm monorepo, React/Vite, Fastify (ADR-001, ADR-002).
 - **Money rules (keep, README):** FanZuP never holds cash; integer cents; double-entry append-only ledger; every money operation idempotent; clients never write money fields; target-or-refund.
 - **Brand & copy (keep):** Brand v2.0, `BUILD_CONVENTIONS.md`, banned-language list (`lint:copy`); Layer 1 never says invest/returns/ownership.
@@ -53,7 +65,7 @@ Targets are proposed defaults; Wayne confirms at G1 (Q3).
 
 ## Out of scope for v2
 - **Layer 2 (Reg CF):** investing, investor KYC, holdings, soft transfers, holder votes build (CR-001 T-HV-03..05). Screens stay frozen, hidden from production, and reachable only by staff.
-- **General commerce:** standalone ticketing, merch store, live streaming with tips, backstage subscriptions. Routes hidden in production until each has its own spec. (Show-perk QR tickets *are* in scope, FR-FUL-004.)
+- **General commerce:** standalone ticketing, merch store, live streaming with tips, backstage subscriptions. Routes hidden in production until each has its own spec. (Show-perk QR tickets *are* in scope at P1, FR-FUL-004.)
 - Native mobile apps (responsive web + installable PWA only); multi-currency settlement (display estimates only); multi-tenant org accounts; microservices / multi-region.
 
 ## Open questions
@@ -66,3 +78,6 @@ Targets are proposed defaults; Wayne confirms at G1 (Q3).
 | Q5 | Holdback size and window for disputes (if card C = artist holdback) | FR-DSP-005 | Wayne + counsel |
 | Q6 | Does 16 CFR 435 (mail-order rule) reach physical reward perks? | FR-FUL-003 | Counsel |
 | Q7 | Who is the payment settlement entity for 1099-K: processor, custodian or FanZuP? | FR-TAX-002 | Counsel + custodian |
+| Q8 | Is FanZuP a marketplace facilitator for sales tax on physical perks and tickets? | FR-TAX-005 | Counsel |
+| Q9 | G1 cards: G1-A single-operator rule; G1-B how much account a fan needs before paying | FR-ID-007, FR-BCK-002 | Wayne |
+| Q10 | Accept the policy defaults in requirements Appendix A as a set | Many P0 criteria | Wayne |
