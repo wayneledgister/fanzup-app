@@ -27,23 +27,35 @@ function misconfiguredApp(error: unknown) {
   return app;
 }
 
-let env: Env | null = null;
-let app;
-try {
-  env = loadEnv();
-  const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
-  const stripe = createStripe(env);
-  app = await buildApp({ env, sql, stripe, escrow: createEscrow(env, stripe), verify: createVerifier(env) });
-  for (const sig of ["SIGINT", "SIGTERM"] as const) {
-    process.on(sig, async () => {
-      await app!.close();
-      await sql.end({ timeout: 5 });
-      process.exit(0);
-    });
+/**
+ * No top-level await: Vercel's launcher may load this file with require(), and Node refuses
+ * require() of an ES module that uses top-level await (ERR_REQUIRE_ASYNC_MODULE).
+ */
+async function main() {
+  let env: Env | null = null;
+  let app;
+  try {
+    env = loadEnv();
+    const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
+    const stripe = createStripe(env);
+    const ready = await buildApp({ env, sql, stripe, escrow: createEscrow(env, stripe), verify: createVerifier(env) });
+    app = ready;
+    for (const sig of ["SIGINT", "SIGTERM"] as const) {
+      process.on(sig, async () => {
+        await ready.close();
+        await sql.end({ timeout: 5 });
+        process.exit(0);
+      });
+    }
+  } catch (e) {
+    app = misconfiguredApp(e);
   }
-} catch (e) {
-  app = misconfiguredApp(e);
+  await app.listen({ port: env?.PORT ?? Number(process.env.PORT ?? 8787), host: "0.0.0.0" });
 }
 
-await app.listen({ port: env?.PORT ?? Number(process.env.PORT ?? 8787), host: "0.0.0.0" });
+main().catch((e) => {
+  console.error("api.start_failed", e);
+  process.exit(1);
+});
+
 export { API_PREFIX };
