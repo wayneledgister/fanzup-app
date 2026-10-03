@@ -8,8 +8,11 @@ on:
     paths: ["supabase/migrations/**"]
   workflow_dispatch:
 
+# Off until Supabase + GitHub environments are set up (docs/SETUP.md Part E):
+# set the repository variable DB_DEPLOY_ENABLED = true to turn it on.
 jobs:
   staging:
+    if: vars.DB_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: staging
     env:
