@@ -54,7 +54,7 @@ jobs:
   e2e:
     # M1 golden journey (NFR-QA-02; ADR-006): real Supabase Auth (local stack) + API + worker + web, Playwright.
     # Separate from the fast jobs on purpose (G2 condition 10); make it a required check once it has been stable.
-    name: E2E · golden journey (Supabase local stack, Playwright)
+    name: E2E · golden + Layer 2 journeys (Supabase local stack, mock escrow, Playwright)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -76,16 +76,19 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ env.SB_API_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ env.SB_ANON_KEY }}
-      - name: Start API, worker and web preview
+      - name: Start mock escrow, API, worker and web preview
         run: |
-          export DATABASE_URL="$SB_DB_URL" SUPABASE_URL="$SB_API_URL" SUPABASE_JWT_SECRET="$SB_JWT_SECRET" ESCROW_PROVIDER=sandbox DEPLOY_ENV=ci NODE_ENV=development
+          # Layer 2 demo rails (CR-002, ADR-007): the mock escrow service loads fixtures that match supabase/seed_layer2.sql.
+          (cd apps/mock-escrow && MOCK_ESCROW_WEBHOOK_URL=http://127.0.0.1:8787/api/v1/webhooks/regcf nohup pnpm start > ../../escrow.log 2>&1 &)
+          export DATABASE_URL="$SB_DB_URL" SUPABASE_URL="$SB_API_URL" SUPABASE_JWT_SECRET="$SB_JWT_SECRET" ESCROW_PROVIDER=sandbox DEPLOY_ENV=ci NODE_ENV=development REGCF_PROVIDER=mock
           (cd apps/api && PORT=8787 CORS_ORIGINS=http://localhost:4173 nohup node dist/server.js > ../../api.log 2>&1 &)
           (cd apps/api && WORKER_INTERVAL_MS=1000 nohup node dist/worker.js > ../../worker.log 2>&1 &)
           (cd apps/web && nohup pnpm exec vite preview --port 4173 --strictPort > ../../web.log 2>&1 &)
-          for i in $(seq 1 60); do curl -fsS http://localhost:4173/api/health && break; sleep 2; done
+          for i in $(seq 1 60); do curl -fsS http://localhost:4173/api/health && curl -fsS http://127.0.0.1:8790/health && break; sleep 2; done
           curl -fsS http://localhost:4173/api/health
+          curl -fsS http://127.0.0.1:8790/health
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Golden journey
+      - name: Golden journey + Layer 2 journeys (album royalty Pool, failed-Pool refund)
         run: pnpm exec playwright test -c e2e/playwright.config.ts
         env:
           WEB_URL: http://localhost:4173
@@ -100,6 +103,7 @@ jobs:
           path: |
             api.log
             worker.log
+            escrow.log
             web.log
             e2e/playwright-report
             e2e/test-results

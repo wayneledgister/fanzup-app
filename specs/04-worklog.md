@@ -68,3 +68,22 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - **Not started (by design, M2+):** everything listed under "Not in M1" in `01-requirements.md`.
 - Exit tests: 1 ✅ 2 ✅ 3 ✅ (ledger ↔ **sandbox** provider; ledger ↔ Stripe test balance only after exit test 8) 4 ✅ 5 ✅ 6 ✅ 7 ✅ 8 ⏳ Wayne.
 - G4 (milestone review) not convened in this run; requested from Wayne with G2/G3 sign-off.
+
+## 2026-10-03 · CR-002 Layer 2 album royalty Pool (demo on mock rails)
+Founder request (Wayne, 2026-10-03) recorded in `specs/changes/CR-002-l2-album-royalty-pool.md`. Specs in `specs/l2/`; council `specs/gates/L2-G1G2.md` APPROVE WITH CONDITIONS (no founder decision). Tasks `specs/l2/03-tasks.md`.
+- L2-T-000 ✅ preflight: local Postgres 16 for tests; `node:sqlite` works under vitest; GoTrue v2.177.0 built from source for a local e2e harness (Docker unavailable here)
+- L2-T-001 ✅ shared rules (limit, badge, Waterfall, canonical JSON) — shared tests 23, run here
+- L2-T-002…004 ✅ migrations `20261005000100…000500` — exercised by API tests, run here
+- L2-T-005 ✅ `apps/mock-escrow` — 9 tests, run here
+- L2-T-006…011 ✅ provider boundary, webhooks, worker, API, Form C, staff actions, seed + fixture — API 129 tests (46 new), run here
+- L2-T-012…016 ✅ web (banner, `/pools`, Pool detail, Form C, investor onboarding, documents → purchase, confirmation, portfolio, holding, creator Pools, staff Pools/Pool/investors), copy lint extended — typecheck, lint:copy, screenshots at 1440/390, run here
+- L2-T-017 ✅ Playwright `e2e/l2.spec.ts` (2 journeys) — **passes locally** against GoTrue + API + worker + mock escrow + web preview; CI e2e job now starts the mock escrow
+- L2-T-018 ✅ `pnpm dev` starts the mock escrow; README demo section
+- Bug found by the local GoTrue harness: `auth.identities.id` is a uuid in real Supabase (the CI shim had text) → seed fixed, shim aligned (cf198ae). The first CI e2e run on PR 3 failed on exactly this.
+- Bug found by tests: Layer 2 notices used composite strings as the notifications `subject_id` (uuid) → fixed before commit.
+- Deviation L2-D-001: council condition 8 — "one fan at the cap" is shown as *Demo Tape EP*, whose single holder reached the 1.5× cap (with one Unit price per Pool every holder reaches the cap together). Spec impact: none.
+- Deviation L2-D-002: the limit's 5% branch (227.100(a)(2)(i)) is implemented literally, with no explicit cap; flagged for counsel. Spec impact: none.
+- Deviation L2-D-003: "funding target + minimum" read as target (= use of funds) + maximum (Units × price) + minimum Units per investor. Spec impact: FR-L2-CR-003 says so.
+- Deviation L2-D-004: no TOTP enrollment UI existed; Layer 2 staff screens enroll/verify an authenticator in place (`StaffGate`). The M1 staff API rules are unchanged.
+- Deviation L2-D-005: `e2e/support.ts` `staffToken` caches the TOTP secret per run so several spec files can act as the same staff member.
+- Not run here: the CI Supabase-CLI e2e job (no Docker); a real TransactAPI sandbox (keys not self-serve).

@@ -1,5 +1,5 @@
 # Layer 2 · Album royalty Pool (CR-002) — Plan and tasks
-**Status:** in progress · **Date:** 2026-10-03 · **Requirements:** `01-requirements.md` · **Design:** `02-design.md` · **Gate:** `../gates/L2-G1G2.md` (APPROVE WITH CONDITIONS)
+**Status:** built (all tasks ✅ — evidence in `specs/04-worklog.md` §CR-002) · **Date:** 2026-10-03 · **Requirements:** `01-requirements.md` · **Design:** `02-design.md` · **Gate:** `../gates/L2-G1G2.md` (APPROVE WITH CONDITIONS)
 
 Delivery as stacked PRs (base = the branch below; never `main`):
 1. **Spec** — CR-002, requirements, design, ADR-007, gate record, this plan.

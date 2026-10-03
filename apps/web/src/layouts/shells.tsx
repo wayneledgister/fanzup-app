@@ -1,6 +1,7 @@
 import { useState, type ComponentType } from "react";
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from "react-router";
 import {
+  Disc3, Fingerprint,
   Bell, CalendarDays, Compass, Gem, Home, LayoutDashboard, LineChart, Menu, Package, Radio, Receipt, Settings, ShieldCheck,
   Sparkles, Ticket, Upload, User, Users, Wallet, X, Megaphone, Landmark, Vote, ClipboardList,
 } from "lucide-react";
@@ -179,6 +180,7 @@ const FAN_NAV: NavItem[] = [
   { to: "/merch", label: "Merch", icon: Package },
   { to: "/backstage", label: "Backstage", icon: Sparkles },
   { to: "/live", label: "Live", icon: Radio },
+  { to: "/pools", label: "Pools", icon: Disc3, flag: "layer2" },
   { to: "/portfolio", label: "Portfolio", icon: LineChart, flag: "layer2" },
   { to: "/governance", label: "Holder votes", icon: Vote, flag: "postBeta" },
 ];
@@ -190,6 +192,7 @@ const FAN_SECONDARY: NavItem[] = [
 const CREATOR_NAV: NavItem[] = [
   { to: "/creator", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/creator/campaigns", label: "Campaigns", icon: Megaphone },
+  { to: "/creator/pools", label: "Royalty Pools", icon: Disc3, flag: "layer2" },
   { to: "/creator/revenue", label: "Revenue", icon: LineChart },
   { to: "/creator/content", label: "Content", icon: Upload },
   { to: "/creator/events", label: "Events", icon: CalendarDays },
@@ -202,6 +205,8 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/admin", label: "Queues", icon: ClipboardList, end: true },
   { to: "/admin/review/under-review", label: "Campaign review", icon: ShieldCheck },
   { to: "/admin/kyc", label: "Identity review", icon: Users },
+  { to: "/admin/pools", label: "Pools (Layer 2)", icon: Disc3, flag: "layer2" },
+  { to: "/admin/investors", label: "Investor KYC", icon: Fingerprint, flag: "layer2" },
 ];
 
 function SideNav({ items, secondary, onNavigate }: { items: NavItem[]; secondary?: NavItem[]; onNavigate?: () => void }) {

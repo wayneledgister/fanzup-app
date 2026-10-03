@@ -18,7 +18,7 @@ export class ApiError extends Error {
 
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
-async function request<T>(path: string, init: RequestInit & { auth?: boolean; idempotencyKey?: string } = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit & { auth?: boolean; idempotencyKey?: string } = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body) headers.set("content-type", "application/json");
   headers.set("x-correlation-id", newId());
