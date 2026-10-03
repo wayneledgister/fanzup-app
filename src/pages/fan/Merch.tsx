@@ -6,6 +6,7 @@ import { Chip, Modal, OrderSummary, QtyStepper, processingFeeMinor } from "@/com
 import { artistById, artists, merch as mockMerch, type MerchItem } from "@/lib/mock";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { POLICY } from "@/config/policy";
 
 /**
  * Source: FanZuP MerchBag.tsx (store part).
@@ -279,7 +280,8 @@ function CartPanel({ lines, subtotal, placed, onRemove, onCheckout }: { lines: C
         <p className="text-sm text-muted">Pick something from an artist you love.</p>
       </Card>
     );
-  const shipping = 600;
+  // Shipping is set by each artist per item (policy: no platform flat rate); demo artists ship free in the US.
+  const shipping = POLICY.merch.platformFlatShippingMinor;
   return (
     <Card className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Cart</h2>
@@ -300,7 +302,7 @@ function CartPanel({ lines, subtotal, placed, onRemove, onCheckout }: { lines: C
           </li>
         ))}
       </ul>
-      <OrderSummary subtotalMinor={subtotal} extraMinor={shipping} extra={<KeyValue k="Shipping (flat, US)" v={<span className="num">{formatMoney(shipping, { cents: true })}</span>} />} />
+      <OrderSummary subtotalMinor={subtotal} extraMinor={shipping} extra={<KeyValue k="Shipping" v={<span className="num">{shipping ? formatMoney(shipping, { cents: true }) : "Free (US)"}</span>} />} />
       <Button block onClick={onCheckout}>
         Check out · <span className="num">{formatMoney(subtotal + processingFeeMinor(subtotal + shipping) + shipping, { cents: true })}</span>
       </Button>

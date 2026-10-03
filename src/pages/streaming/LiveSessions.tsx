@@ -6,6 +6,7 @@ import { Modal, OrderSummary, processingFeeMinor } from "@/components/fan/kit";
 import { liveSessions, formatSessionTime, type LiveSession } from "@/components/fan/live-data";
 import { artistById } from "@/lib/mock";
 import { formatMoney, formatNumber } from "@/lib/format";
+import { POLICY } from "@/config/policy";
 
 /**
  * Source: FPS streaming/FanPurchaseStream.tsx.
@@ -158,7 +159,7 @@ function PurchaseDialog({ s, onClose }: { s: LiveSession | null; onClose: () => 
         <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
           <li>Your access code works for this session on one device at a time.</li>
           <li>If the artist cancels, you're refunded automatically.</li>
-          <li>A replay is available to pass holders for 48 hours after the stream ends.</li>
+          <li>A replay is available to pass holders for {POLICY.streaming.replayHours} hours after the stream ends.</li>
         </ul>
       </div>
     </Modal>

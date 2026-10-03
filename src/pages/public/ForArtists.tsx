@@ -2,49 +2,50 @@ import { Link } from "react-router";
 import { ArrowRight, BadgeCheck, CalendarClock, Check, Gift, Lock, Megaphone, Milestone, RotateCcw, ShieldCheck, Sparkles, Target, Users } from "lucide-react";
 import { Badge, Button, Callout, Card, Container, IconChip, SectionHeading } from "@/components/brand";
 import { cn } from "@/lib/utils";
+import { TIERS, tier, type TierName } from "@/config/tiers";
+import { formatMoney } from "@/lib/format";
 
 /**
  * Source: (new) artist value prop + creator tier table from PRD 01 §6.3 (via docs/CONSOLIDATION.md).
  * Doc-driven notes: Layer 1 only — campaigns are perks-for-backing, no securities. Rising+ Reg CF features
- * are marked "Coming later". Established / Pro entry criteria aren't published in the docs we have, so
+ * are marked "Coming later". Established / Pro criteria come from PRD 01 §6.3 via @/config/tiers (council D1); previously
  * they're described qualitatively rather than with invented thresholds. Rising thresholds follow
  * CONSOLIDATION.md (≥1k listeners, 90-day history), not the wireframe's 5,000.
  */
 
-const TIERS = [
-  {
-    name: "Starter",
+/** Gates and caps come from @/config/tiers (PRD 01 §6.3) — council D1 Blocker 1. Copy below is launch-availability only. */
+const LAUNCH: Record<TierName, { available: boolean; cap: string; unlocks: string[]; later: string[] }> = {
+  Starter: {
     available: true,
-    cap: "Campaign goals up to $10K",
-    requires: ["Identity verification (KYC)", "Verified email and phone", "100% complete profile", "At least one released track"],
+    cap: `Campaign goals up to ${formatMoney(tier("Starter").campaignCapMinor)}`,
     unlocks: ["Reward campaigns with perks", "Escrow-protected backing with auto-refunds", "Subscriptions, merch, tickets and live streams"],
     later: [],
   },
-  {
-    name: "Rising",
+  Rising: {
     available: true,
-    cap: "Higher campaign goals",
-    requires: ["Everything in Starter", "Business entity with an EIN (e.g. an LLC)", "1,000+ monthly listeners", "90 days of release history"],
+    cap: `Campaign goals up to ${formatMoney(tier("Rising").campaignCapMinor)}`,
     unlocks: ["Larger reward campaigns", "Milestone-based releases for bigger projects", "Rising badge on your profile"],
-    later: ["Revenue-share Pools under Regulation Crowdfunding"],
+    later: [`Revenue-share Pools under Regulation Crowdfunding, up to ${formatMoney(tier("Rising").regCfCapMinor!, { compact: true })} per 12 months`],
   },
-  {
-    name: "Established",
+  Established: {
     available: false,
-    cap: "Larger raises",
-    requires: ["Sustained audience and a track record of delivered campaigns", "Exact criteria published before this tier opens"],
-    unlocks: ["Everything in Rising", "Higher campaign limits"],
-    later: ["Larger Pool offerings"],
+    cap: `Reg CF raises up to ${formatMoney(tier("Established").regCfCapMinor!, { compact: true })} per 12 months`,
+    unlocks: ["Everything in Rising"],
+    later: ["Equity, publishing and sync participation offerings", "Dedicated onboarding manager for your Form C"],
   },
-  {
-    name: "Pro",
+  Pro: {
     available: false,
-    cap: "Largest raises",
-    requires: ["Professional catalog and team", "Exact criteria published before this tier opens"],
-    unlocks: ["Everything in Established", "Highest campaign limits"],
-    later: ["Brand and Project Pools"],
+    cap: `Reg CF raises up to ${formatMoney(tier("Pro").regCfCapMinor!, { compact: true })} per 12 months, across all Reg CF offerings`,
+    unlocks: ["Everything in Established"],
+    later: ["Hybrid offerings with white-glove compliance support", "Investor-relations tools"],
   },
-] as const;
+};
+
+const TIER_CARDS = TIERS.map((t, i) => ({
+  name: t.name,
+  ...LAUNCH[t.name],
+  requires: i === 0 ? t.gates : [`Everything in ${TIERS[i - 1].name}`, ...t.gates],
+}));
 
 export default function ForArtists() {
   return (
@@ -136,7 +137,7 @@ export default function ForArtists() {
             reward campaigns only — securities features are marked <em>Coming later</em>.
           </p>
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {TIERS.map((t) => (
+            {TIER_CARDS.map((t) => (
               <Card key={t.name} className={cn("flex flex-col gap-5", t.name === "Starter" && "border-gold/40")}>
                 <div className="flex items-center justify-between">
                   <h3 className="text-xl font-bold">{t.name}</h3>

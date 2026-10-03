@@ -10,7 +10,8 @@ import { formatMoney } from "@/lib/format";
  * Source: FanZuP TaxCenter.tsx / TaxPortal.
  * Doc-driven: "Institutional Tax Center", "Automated revenue harvesting" and "Run annual harvest" removed.
  * Layer 1: fan purchases (backings, tickets, merch, subscriptions) produce receipts, not tax forms (Mechanism 05 §4).
- * Layer 2 (`layer2`): 1099s for Pool distributions with cost basis notes and W-9 update (PRD 01 §11.1, Mechanism 04).
+ * Layer 2 (`layer2`): 1099-DIV for Pool distributions (Mechanism 04 Decision 1; council D1 Blocker 2 — was 1099-MISC),
+ * cost basis notes and W-9 update (PRD 01 §11.1). Final form type per offering confirmed by tax counsel (D1 Card C).
  */
 
 const RECEIPTS = [
@@ -19,8 +20,8 @@ const RECEIPTS = [
 ];
 
 const FORMS = [
-  { id: "f1", year: 2026, form: "1099-MISC", pool: "Kai Marlo — next two albums", amountMinor: 3_140, costBasisMinor: 50_000, status: "Available Jan 31, 2027" as const },
-  { id: "f2", year: 2026, form: "1099-MISC", pool: "Velvet Circuit — 2027 tour", amountMinor: 0, costBasisMinor: 20_000, status: "No form needed" as const },
+  { id: "f1", year: 2026, form: "1099-DIV", pool: "Kai Marlo — next two albums", amountMinor: 3_140, costBasisMinor: 50_000, status: "Available Jan 31, 2027" as const },
+  { id: "f2", year: 2026, form: "1099-DIV", pool: "Velvet Circuit — 2027 tour", amountMinor: 0, costBasisMinor: 20_000, status: "No form needed" as const },
 ];
 
 export default function TaxDocuments() {
@@ -79,8 +80,9 @@ export default function TaxDocuments() {
         <section className="flex flex-col gap-4">
           <SectionHeading eyebrow="Investments" title="Pool tax forms" />
           <p className="text-sm text-muted">
-            If you hold Units in a Pool and receive distributions, we send you a Form 1099 for each year you were paid. Your cost basis — what you paid
-            for your Units — is shown alongside so you or your tax professional can report correctly.
+            If you hold Units in a Pool and receive distributions, you get a Form 1099-DIV for each year you were paid. The exact form for each offering is
+            confirmed by tax counsel and stated in its Form C. Your cost basis (what you paid for your Units) is shown alongside so you or your tax
+            professional can report correctly.
           </p>
 
           <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
@@ -89,7 +91,7 @@ export default function TaxDocuments() {
               <div>
                 <p className="font-medium">Tax info (W-9) {w9OnFile ? <Badge tone="success">On file</Badge> : <Badge tone="warning">Needs update</Badge>}</p>
                 <p className="text-sm text-muted">
-                  {w9OnFile ? "Taxpayer ID ending ••• •• 4821, certified today." : "We need a current W-9 before we can issue your 1099 or send distributions."}
+                  {w9OnFile ? "Taxpayer ID ending ••• •• 4821, certified today." : "A current W-9 is required before you can invest, and before we can issue your 1099 or send distributions."}
                 </p>
               </div>
             </div>

@@ -83,11 +83,14 @@ function Review({ pool }: { pool: Pool }) {
   const [name, setName] = useState("");
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Mechanism 04 hard rule (council D1 Blocker 2): collect the TIN before purchase, not at payout.
+  const [w9, setW9] = useState({ onFile: false, tin: "", certify: false });
+  const w9Valid = w9.onFile || (/^\d{9}$/.test(w9.tin.replace(/-/g, "")) && w9.certify);
 
   const allDocs = docs.every((d) => acked[d.key]);
   const allAcks = Object.values(ack).every(Boolean);
   const signed = name.trim().length >= 3;
-  const ready = allDocs && allAcks && signed && withinLimit;
+  const ready = allDocs && allAcks && signed && withinLimit && w9Valid;
   const doneCount = docs.filter((d) => acked[d.key]).length;
 
   const open = (k: DocKey) => {
@@ -224,6 +227,23 @@ function Review({ pool }: { pool: Pool }) {
               .
             </Callout>
           )}
+        </Card>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">Tax info (W-9)</h2>
+        <Card className="flex flex-col gap-4">
+          <p className="text-sm text-muted">
+            We need your taxpayer ID before you invest so we can issue your 1099-DIV for any distributions. It's encrypted, used only for tax
+            reporting, and never shown in full.
+          </p>
+          <Field label="Social Security number or ITIN" htmlFor="w9-tin" error={touched && !w9Valid && !/^\d{9}$/.test(w9.tin.replace(/-/g, "")) ? "Enter your 9-digit taxpayer ID." : undefined}>
+            <TextInput id="w9-tin" type="password" inputMode="numeric" autoComplete="off" className="num" value={w9.tin} onChange={(e) => setW9({ ...w9, tin: e.target.value })} />
+          </Field>
+          <Checkbox id="w9-certify" checked={w9.certify} onChange={(v) => setW9({ ...w9, certify: v })}>
+            Under penalties of perjury, I certify this taxpayer ID is correct, I'm not subject to backup withholding, and I'm a U.S. person.
+          </Checkbox>
+          {touched && !w9Valid && /^\d{9}$/.test(w9.tin.replace(/-/g, "")) && <p className="text-sm text-error">Certify your tax info to continue.</p>}
         </Card>
       </section>
 

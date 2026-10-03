@@ -7,6 +7,7 @@ import { formatSessionTime, sessionById } from "@/components/fan/live-data";
 import { artistById, fan } from "@/lib/mock";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { POLICY } from "@/config/policy";
 
 /**
  * Source: FPS streaming/LiveStreamView.tsx.
@@ -203,7 +204,7 @@ function TipDialog({ open, artist, onClose, onTip }: { open: boolean; artist: st
   const reset = () => window.setTimeout(() => (setAmount(500), setCustom(""), setNote(""), setError(null)), 200);
   const submit = () => {
     if (!minor || minor < 100) return setError("Tips start at $1.");
-    if (minor > 50000) return setError("Tips are capped at $500 per stream.");
+    if (minor > POLICY.streaming.tipCapMinor) return setError(`Tips are capped at $${POLICY.streaming.tipCapMinor / 100} per stream.`);
     onTip(minor, note.trim());
     onClose();
     reset();

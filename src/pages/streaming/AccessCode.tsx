@@ -5,6 +5,7 @@ import { ArtistArt, Button, Card, Container, Field, KeyValue, TextInput } from "
 import { CopyCode } from "@/components/fan/kit";
 import { formatSessionTime, sessionByCode, sessionById } from "@/components/fan/live-data";
 import { artistById } from "@/lib/mock";
+import { POLICY } from "@/config/policy";
 
 /**
  * Source: FPS streaming/AccessCodeEntry.tsx.
@@ -70,7 +71,7 @@ export default function AccessCode() {
         <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
           <li>Each code works for one session, on one device at a time.</li>
           <li>The player opens at the scheduled start time.</li>
-          <li>Replays stay available to code holders for 48 hours.</li>
+          <li>Replays stay available to code holders for {POLICY.streaming.replayHours} hours.</li>
         </ul>
       </Card>
     </Container>

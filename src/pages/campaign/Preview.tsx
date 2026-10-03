@@ -6,6 +6,7 @@ import { FormSection, WizardFooter, WizardHeader } from "@/components/campaign/W
 import { CampaignFanView, viewFromDraft } from "@/components/campaign/CampaignFanView";
 import { CREATOR, SUBMITTED_PATH, STEP_PATH, exampleDraft, replaceDraft, stepStatus, tierLimit, updateDraft, useDraft } from "@/components/campaign/draft";
 import { cn } from "@/lib/utils";
+import { Receipt } from "lucide-react";
 
 /**
  * Source: FPS src/pages/campaign/CampaignPreview.tsx
@@ -88,6 +89,11 @@ export default function Preview() {
           </Button>
         ))}
       </div>
+
+      <Callout tone="info" icon={<Receipt />} title="What you'll receive if you're funded" className="mt-10">
+        Backers pay exactly the perk price. Card processing (2.9% + $0.30 per backing) is deducted from the funds released to you, along with
+        FanZuP's platform fee once it's finalized.
+      </Callout>
 
       <FormSection title="What our reviewers check" description="We review every campaign before it goes live. That usually takes about 2 business days (estimate)." className="mt-10 border-t pt-8">
         <ul className="grid gap-2 sm:grid-cols-2">

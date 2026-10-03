@@ -9,6 +9,7 @@ import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/format";
 import { Badge, KeyValue, Divider } from "@/components/brand";
+import { POLICY, processingFeeMinor as artistProcessingFeeMinor } from "@/config/policy";
 
 /* ── Modal: bottom sheet on mobile, centered dialog from sm ── */
 
@@ -196,10 +197,13 @@ export function QtyStepper({ value, onChange, min = 1, max, id }: { value: numbe
 
 /* ── Fees ── */
 
-/** Card processing pass-through (products/fees.html): 2.9% + $0.30 per charge. Platform fee is TBD and not shown. */
+/**
+ * Fee the FAN pays on top of the price. Card processing is passed through to the artist at cost
+ * (products/fees.html; council D1 Q3), so fans pay the sticker price and this is 0 unless policy changes.
+ */
 export function processingFeeMinor(subtotalMinor: number) {
-  if (subtotalMinor <= 0) return 0;
-  return Math.round(subtotalMinor * 0.029) + 30;
+  if (subtotalMinor <= 0 || POLICY.processing.payer !== "fan") return 0;
+  return artistProcessingFeeMinor(subtotalMinor);
 }
 
 export function OrderSummary({ lines, subtotalMinor, extra, extraMinor = 0 }: { lines?: { k: ReactNode; v: ReactNode }[]; subtotalMinor: number; extra?: ReactNode; extraMinor?: number }) {
@@ -211,8 +215,8 @@ export function OrderSummary({ lines, subtotalMinor, extra, extraMinor = 0 }: { 
       <KeyValue
         k={
           <span className="flex flex-col">
-            <span>Card processing</span>
-            <span className="text-xs">Passed through at cost: 2.9% + $0.30</span>
+            <span>Fees</span>
+            <span className="text-xs">{fee ? "Card processing, passed through at cost" : "None. Card processing is covered by the artist."}</span>
           </span>
         }
         v={<span className="num">{formatMoney(fee, { cents: true })}</span>}

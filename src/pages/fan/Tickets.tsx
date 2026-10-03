@@ -5,6 +5,7 @@ import { ArtistArt, Badge, Button, Callout, Card, Container, EmptyState, Field, 
 import { Modal, OrderSummary, QtyStepper, processingFeeMinor, formatDay } from "@/components/fan/kit";
 import { artistById, campaigns, events as mockEvents, fan, type EventItem } from "@/lib/mock";
 import { formatMoney } from "@/lib/format";
+import { POLICY } from "@/config/policy";
 
 /**
  * Source: FanZuP TicketMarketplace.tsx.
@@ -188,7 +189,7 @@ function PurchaseDialog({ event, onClose }: { event: Ev | null; onClose: () => v
     }, 700);
   };
   if (!event) return <Modal open={false} onOpenChange={() => undefined} title="" />;
-  const max = Math.min(6, event.remaining);
+  const max = Math.min(POLICY.tickets.maxPerOrder, event.remaining);
   const q = Math.min(qty, max);
   const subtotal = event.priceMinor * q;
   const total = subtotal + processingFeeMinor(subtotal);

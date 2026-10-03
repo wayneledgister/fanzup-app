@@ -3,7 +3,7 @@
  * Times are relative to "now" so SLA ages stay meaningful in the prototype.
  */
 import { artistById, type Artist, type CreatorTier } from "@/lib/mock";
-import { perksOnlyIssue, TIER_LIMIT_DOLLARS, type PerkKind, type ShipsTo } from "./draft";
+import { perksOnlyIssue, tierLimit, type PerkKind, type ShipsTo } from "./draft";
 import type { CampaignView } from "./CampaignFanView";
 
 export const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
@@ -270,7 +270,7 @@ export function autoSignal(s: Submission, id: CheckId): { tone: "success" | "war
     case "identity":
       return s.identity === "verified" ? { tone: "success", text: "Verified" } : s.identity === "pending" ? { tone: "warning", text: "Pending KYC" } : { tone: "error", text: "Failed" };
     case "tier": {
-      const cap = TIER_LIMIT_DOLLARS[s.artist.tier as CreatorTier] ?? 100_000;
+      const cap = tierLimit(s.artist.tier as CreatorTier);
       return v.goalMinor / 100 > cap ? { tone: "error", text: `Over ${s.artist.tier} $${cap.toLocaleString()}` } : { tone: "success", text: `Within $${cap.toLocaleString()}` };
     }
     case "escrow":

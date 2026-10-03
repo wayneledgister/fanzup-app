@@ -5,9 +5,11 @@
 import type { Requirement } from "./RequirementsChecklist";
 import { profileCompletion, type ArtistDraft } from "./draft";
 
-/** Starter reward-campaign cap, in cents. */
-export const STARTER_CAMPAIGN_CAP_MINOR = 10_000_00;
-export const RISING_MIN_MONTHLY_LISTENERS = 1_000;
+import { tier } from "@/config/tiers";
+
+/** Re-exported from @/config/tiers, the single source (council D1 Blocker 1). */
+export const STARTER_CAMPAIGN_CAP_MINOR = tier("Starter").campaignCapMinor;
+export const RISING_MIN_MONTHLY_LISTENERS = tier("Rising").minMonthlyListeners!;
 export const RISING_MIN_HISTORY_DAYS = 90;
 
 export const STARTER_UNLOCKS = [

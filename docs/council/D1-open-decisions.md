@@ -126,4 +126,32 @@ Every Layer 2 and post-Beta decision here sits on top of the reward-vs-profit-sh
 - **Who decides:** tax counsel. Ask them: "For a C-corp-taxed Reg CF issuer paying fans a capped revenue share, which information return applies, and does FanZuP or the servicer act as paying agent?"
 
 ## User decision
-_Pending: sign-off on pass 1 plus Cards A and B._
+**APPROVED WITH DIRECTION:** Wayne, 2026-10-03.
+- **Pass 1 fixes:** apply both blockers and all six conditions.
+- **Card A:** **Keep building**, overruling the council's default (Freeze). Holder communications & votes becomes an in-scope workstream. Under change control (sdd-change) it needs a proper spec before more UI work. The council's dissent stays on record: four seats preferred Freeze, and the Pragmatist preferred Remove.
+- **Card B:** accept the default policy set.
+- **Card C:** routed to tax counsel. The 1099-DIV default holds until they answer.
+
+---
+
+## Pass 2 · 2026-10-03
+Re-examined only the pass-1 blockers and conditions, plus anything the revisions touched.
+
+| Prior item | Status | Evidence |
+|---|---|---|
+| Blocker 1: tier criteria | **Resolved** | New single source in `src/config/tiers.ts` (PRD 01 §6.3 + creator-tier3/4.html). It now feeds the For Artists table (doc gates, $1M and $5M Reg CF caps), the creator dashboard's "Path to Established" (LLC/EIN, business bank, 10,000 listeners, 12 months) and the artist module. The campaign wizard and reviewer tier limits also read from it. |
+| Blocker 2: 1099-MISC | **Resolved** | Fan Pool forms now say 1099-DIV, with "confirmed by tax counsel per offering". The investing document review now **requires a W-9 (TIN plus certification) before purchase** (Mechanism 04 hard rule). |
+| C1: milestone split | Resolved | Creator demo changed to 50/50. The wizard default now reads from `POLICY.campaign.defaultTranchesPct`. |
+| C2: processing disclosure | Resolved | Notes added to the wizard's Basics goal hint and Preview ("what you'll receive"). Payouts already said amounts are after processing. |
+| C3: badge rules | Resolved | Profile states that badges count engagement only and that self-backing and linked accounts are excluded. Code comment ties this to PRD 03. |
+| C4: Pro cap wording | Resolved | "Reg CF raises up to $5M per 12 months, across all Reg CF offerings." |
+| C5: policy file | Resolved | `src/config/policy.ts` now drives campaign length, tranches, ticket limit, tip cap, replay window, deletion grace, merch shipping and the processing payer. Admin SLAs and the review estimate are recorded there too, though the admin screens still display their own copies. |
+| C6: Form C fee disclosure | Already met | The Fees page `layer2` section already lists processing among the fees disclosed in the Form C. |
+
+**New finding (Critic, from the revision):** fan checkouts (tickets, merch, streams, tips) were adding card processing on top of the price, which contradicts Q3. **Fixed:** the fan-side fee is now 0 while `POLICY.processing.payer = "artist"`, and the summary says "None. Card processing is covered by the artist." The Pragmatist notes that switching the payer later is one line of config.
+
+Verification: typecheck clean · copy lint clean · all 93 routes swept at 390 and 1440 with no console errors or overflow · changed screens checked visually.
+
+**Pass 2 verdict: APPROVE.** Carried forward:
+- Card C is with tax counsel.
+- Governance is now in scope (Card A, Keep building) and goes through sdd-change before any further UI work.

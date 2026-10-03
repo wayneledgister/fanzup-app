@@ -94,7 +94,7 @@ export default function Basics() {
           </ul>
         </div>
 
-        <Field label="Goal" htmlFor="goal" error={errors.goal} hint={`Between $${MIN_GOAL.toLocaleString()} and $${cap.toLocaleString()}. Set what the project actually costs, including perks and shipping.`}>
+        <Field label="Goal" htmlFor="goal" error={errors.goal} hint={`Between $${MIN_GOAL.toLocaleString()} and $${cap.toLocaleString()}. Set what the project actually costs, including perks, shipping and card processing (about 2.9% + $0.30 per backing comes out of what you raise).`}>
           <MoneyInput id="goal" value={d.goal} onChange={(v) => updateDraft({ goal: v })} invalid={!!errors.goal} placeholder="18,000" className="max-w-xs" />
         </Field>
 

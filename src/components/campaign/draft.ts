@@ -11,14 +11,15 @@
  */
 import { useSyncExternalStore } from "react";
 import { artistById, type CampaignType, type CreatorTier } from "@/lib/mock";
+import { POLICY } from "@/config/policy";
+import { tier } from "@/config/tiers";
 
 /* ── Creator context (signed-in demo creator) ───────────── */
 
 export const CREATOR = artistById("nova-reyes");
 
-/** Campaign limits per tier. Established / Pro limits are set at tier review and not shown here. */
-export const TIER_LIMIT_DOLLARS: Partial<Record<CreatorTier, number>> = { Starter: 10_000, Rising: 100_000 };
-export const tierLimit = (t: CreatorTier) => TIER_LIMIT_DOLLARS[t] ?? 100_000;
+/** Reward-campaign limits per tier, from @/config/tiers (council D1 Blocker 1). */
+export const tierLimit = (t: CreatorTier) => tier(t).campaignCapMinor / 100;
 export const MIN_GOAL = 500;
 
 /** Realistic-goal guidance from the creator's existing supporters (guidance, not a rule). */
@@ -96,11 +97,7 @@ export const emptyPerk = (kind: PerkKind = "digital"): PerkDraft => ({
   shipsTo: "us",
 });
 
-const defaultTranches = (): Tranche[] => [
-  { id: uid("tr"), pct: "50", milestone: "", targetDate: "", evidence: "" },
-  { id: uid("tr"), pct: "50", milestone: "", targetDate: "", evidence: "" },
-];
-
+const defaultTranches = (): Tranche[] => POLICY.campaign.defaultTranchesPct.map((pct) => ({ id: uid("tr"), pct: String(pct), milestone: "", targetDate: "", evidence: "" }));
 export const emptyDraft = (): CampaignDraft => ({
   title: "",
   type: "",
@@ -256,7 +253,7 @@ export function validateBasics(d: CampaignDraft): Errors {
   else if (g > cap) e.goal = `${CREATOR.tier} campaigns can raise up to $${cap.toLocaleString()}. Lower your goal or grow your tier first.`;
   const n = toInt(d.duration);
   if (!Number.isFinite(n)) e.duration = "Choose how long the campaign runs.";
-  else if (n < 7 || n > 60) e.duration = "Campaigns run between 7 and 60 days.";
+  else if (n < POLICY.campaign.minDays || n > POLICY.campaign.maxDays) e.duration = `Campaigns run between ${POLICY.campaign.minDays} and ${POLICY.campaign.maxDays} days.`;
   if (d.launch === "scheduled") {
     if (!d.launchDate) e.launchDate = "Pick a launch date.";
     else {

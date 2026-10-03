@@ -90,6 +90,8 @@ export default function Profile() {
           {/* Badges */}
           <section>
             <SectionHeading eyebrow="Engagement" title="Badges" />
+            {/* Council D1 condition 3: badges never count Layer 2 holdings or amounts, and exclude self-backing (PRD 03 FR-MKT). */}
+            <p className="-mt-2 mb-4 text-sm text-muted">Badges count how you show up, not how much you spend. Backing your own campaign, or one from a linked account, doesn't count.</p>
             <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {BADGES.map((b) => {
                 const done = !!b.earnedOn;

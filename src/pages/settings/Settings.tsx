@@ -4,6 +4,7 @@ import { Bell, ChevronRight, CreditCard, FileText, KeyRound, Link2, Lock, Music,
 import { Badge, Button, Callout, Card, Container, Field, IconChip, PageHeader, TextInput } from "@/components/brand";
 import { Modal, Toggle, useToast } from "@/components/fan/kit";
 import { fan } from "@/lib/mock";
+import { POLICY } from "@/config/policy";
 
 /**
  * Source: routes.tsx stub AC — notifications, privacy, connected accounts, security, danger zone.
@@ -269,7 +270,7 @@ function DeleteDialog({ open, onClose }: { open: boolean; onClose: () => void })
     >
       {done ? (
         <p className="text-sm text-muted">
-          Your account will be deleted in <span className="num text-fg">14</span> days. Sign in before then to cancel. We've emailed you a confirmation.
+          Your account will be deleted in <span className="num text-fg">{POLICY.account.deletionGraceDays}</span> days. Sign in before then to cancel. We've emailed you a confirmation.
         </p>
       ) : (
         <div className="flex flex-col gap-4">

@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
  * Doc-driven changes: "Pool Unit Holders", "Investors", "Pool Distributions" and "purchased pool units" activity
  * removed from this Layer 1 dashboard (Brand §7.4, CONSOLIDATION Layer 1); KPI row is campaign raised/goal,
  * backers, subscribers and monthly listeners. New-creator empty state reachable via `?state=new`.
- * Established tier criteria are placeholders until PRD 01 §6.3 defines them.
+ * Established tier criteria come from PRD 01 §6.3 via @/config/tiers (council D1).
  */
 export default function Dashboard() {
   const [params] = useSearchParams();
@@ -291,7 +291,7 @@ function ActiveDashboard() {
                   <div className="flex items-baseline justify-between gap-2 text-sm">
                     <span className={met ? "text-fg" : "text-muted"}>{k.label}</span>
                     <span className="num text-xs text-muted">
-                      {met ? <span className="text-success">Met</span> : `${formatNumber(k.current, k.target >= 10000)} / ${formatNumber(k.target, k.target >= 10000)}`}
+                      {met ? <span className="text-success">Met</span> : k.target === 1 ? "Not yet" : `${formatNumber(k.current, k.target >= 10000)} / ${formatNumber(k.target, k.target >= 10000)}`}
                     </span>
                   </div>
                   <ProgressBar value={k.current} max={k.target} tone={met ? "success" : "gold"} label={k.label} />

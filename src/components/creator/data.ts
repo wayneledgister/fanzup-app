@@ -4,6 +4,7 @@
  * Fees: only the Stripe pass-through (2.9% + $0.30) is known; platform fee is TBD (docs/brand/fees.html).
  */
 import { artistById, campaignById, events as allEvents, type Campaign, type CampaignType, type Perk } from "@/lib/mock";
+import { tier } from "@/config/tiers";
 
 export const ME = artistById("nova-reyes");
 export const LIVE_CAMPAIGN_ID = "nova-live-band-tour";
@@ -112,9 +113,9 @@ export const creatorCampaignById = (id?: string) => creatorCampaigns.find((c) =>
 
 /** Milestone release schedule for the live campaign (Mechanism 05 §2.4 — optional milestone release). */
 export const milestoneSchedule = [
-  { id: "m1", label: "Goal met — booking and deposits", sharePct: 40, when: "When the goal is met", status: "Waiting on goal" as const },
-  { id: "m2", label: "Tour starts — first show played", sharePct: 35, when: "Feb 2027", status: "Not started" as const },
-  { id: "m3", label: "Final show + all perks delivered", sharePct: 25, when: "Mar 2027", status: "Not started" as const },
+  // Council D1 condition 1: matches the wizard default and Mechanism 05 §2.4 (50/50).
+  { id: "m1", label: "Goal met — booking and deposits", sharePct: 50, when: "When the goal is met", status: "Waiting on goal" as const },
+  { id: "m2", label: "Tour starts — first show played", sharePct: 50, when: "Feb 2027", status: "Not started" as const },
 ];
 
 export type FulfillmentStatus = "Not started" | "Date needed" | "Scheduled" | "In progress" | "Delivered";
@@ -248,12 +249,16 @@ export const creatorEvents: CreatorEvent[] = [
 
 /* ── Tier progress ─────────────────────────────────────── */
 
-/** Placeholder Established criteria — PRD 01 §6.3 only specifies Starter and Rising in this repo. */
+/**
+ * Progress toward Established, per PRD 01 §6.3 via @/config/tiers (council D1 Blocker 1 —
+ * replaces invented targets). Demo status for Nova Reyes.
+ */
+const EST = tier("Established");
 export const establishedCriteria = [
-  { label: "Funded campaigns", current: 2, target: 2, unit: "" },
-  { label: "Monthly listeners", current: ME.monthlyListeners, target: 100_000, unit: "" },
-  { label: "Subscribers", current: ME.subscribers, target: 2_500, unit: "" },
-  { label: "Months with every perk delivered on time", current: 8, target: 12, unit: "" },
+  { label: "LLC and EIN verified", current: 1, target: 1, unit: "" },
+  { label: "Business bank account linked and verified", current: 0, target: 1, unit: "" },
+  { label: "Monthly listeners", current: ME.monthlyListeners, target: EST.minMonthlyListeners!, unit: "" },
+  { label: "Months of streaming history", current: 9, target: EST.minHistoryMonths!, unit: "" },
 ];
 
 export const CAMPAIGN_TYPES: CampaignType[] = ["Album", "Tour", "Music Video", "Show", "Documentary"];
