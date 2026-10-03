@@ -13,6 +13,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 # Off until Supabase + GitHub environments are set up (docs/SETUP.md Part E):
 # set the repository variable DB_DEPLOY_ENABLED = true to turn it on.
 jobs:
