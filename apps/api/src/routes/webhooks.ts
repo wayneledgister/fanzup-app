@@ -3,6 +3,7 @@ import { asService } from "../db";
 import { ingestEvent, ignoreEvent, processEventById } from "../inbox";
 import { log } from "../log";
 import type { Deps } from "../app";
+import { registerRegCfWebhook } from "../l2/routes";
 
 /**
  * Stripe webhooks (FR-PAY-002, FR-PAY-008). Verified against the raw body, stored, acknowledged, then processed.
@@ -35,4 +36,7 @@ export const webhookRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     if (inserted) void processEventById(d.sql, d.provider, id).catch(() => undefined);
     return reply;
   });
+
+  // Layer 2 Reg CF provider webhooks (ADR-007): verified, stored, acknowledged, processed.
+  registerRegCfWebhook(app, d);
 };

@@ -42,6 +42,11 @@ jobs:
       - uses: supabase/setup-cli@v3
         with: { version: latest }
       - run: supabase link --project-ref "$PROJECT_REF"
+      # The Layer 2 demo seed (CR-002) is local/CI only: never let --include-seed carry it to a hosted project.
+      - name: Drop the Layer 2 demo seed from the seed list
+        run: |
+          sed -i 's#, "./seed_layer2.sql"##' supabase/config.toml
+          if grep -q seed_layer2 supabase/config.toml; then echo "::error::seed_layer2.sql is still in the seed list"; exit 1; fi
       - run: supabase db push ${{ inputs.include_seed && '--include-seed' || '' }}
 
   production:

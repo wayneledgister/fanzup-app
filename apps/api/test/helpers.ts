@@ -10,7 +10,7 @@ export const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgres://postgres@l
 export const JWT_SECRET = "test-secret-test-secret-test-secret-0123456789";
 
 /** Fresh database: Supabase shim + every migration + seed. Mirrors `supabase db reset`. */
-export async function freshDb(): Promise<{ sql: Sql; url: string; drop: () => Promise<void> }> {
+export async function freshDb(opts: { layer2Seed?: boolean } = {}): Promise<{ sql: Sql; url: string; drop: () => Promise<void> }> {
   const name = `fz_test_${randomBytes(4).toString("hex")}`;
   const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
   await admin.unsafe(`create database ${name}`);
@@ -21,6 +21,7 @@ export async function freshDb(): Promise<{ sql: Sql; url: string; drop: () => Pr
   const dir = join(ROOT, "supabase/migrations");
   for (const f of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) await boot.unsafe(readFileSync(join(dir, f), "utf8"));
   await boot.unsafe(readFileSync(join(ROOT, "supabase/seed.sql"), "utf8"));
+  if (opts.layer2Seed) await boot.unsafe(readFileSync(join(ROOT, "supabase/seed_layer2.sql"), "utf8"));
   await boot.end();
   const sql = createDb(url);
   return {
@@ -88,8 +89,8 @@ export interface Kit {
   close: () => Promise<void>;
 }
 
-export async function kit(extra: Partial<Deps> = {}, envOverrides: Record<string, string> = {}): Promise<Kit> {
-  const db = await freshDb();
+export async function kit(extra: Partial<Deps> = {}, envOverrides: Record<string, string> = {}, dbOpts: { layer2Seed?: boolean } = {}): Promise<Kit> {
+  const db = await freshDb(dbOpts);
   const provider = new SandboxProvider(db.sql);
   const env = loadEnv({ DATABASE_URL: db.url, SUPABASE_JWT_SECRET: JWT_SECRET, ESCROW_PROVIDER: "sandbox", NODE_ENV: "test", DEPLOY_ENV: "ci", ...envOverrides } as NodeJS.ProcessEnv);
   const deps: Deps = { env, sql: db.sql, provider, verify: createVerifier(env), ...extra };

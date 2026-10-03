@@ -1,0 +1,548 @@
+{
+  "note": "Generated from supabase/seed_layer2.sql by apps/api/scripts/l2-fixture.ts. Do not edit by hand.",
+  "objects": {
+    "issuer": [
+      {
+        "id": "iss_seed_nova",
+        "name": "Nova Reyes Music LLC (demo issuer)",
+        "entityType": "LLC",
+        "externalId": "c36385da-a6c6-532b-a362-360bfbe4b9f7",
+        "status": "active"
+      },
+      {
+        "id": "iss_seed_sol",
+        "name": "Sol Amara Music LLC (demo issuer)",
+        "entityType": "LLC",
+        "externalId": "8b5216b0-9616-5f1c-8013-6c409baebb52",
+        "status": "active"
+      },
+      {
+        "id": "iss_seed_velvet",
+        "name": "Velvet Circuit Music LLC (demo issuer)",
+        "entityType": "LLC",
+        "externalId": "4640e639-ea55-507e-b76d-1665950cebc4",
+        "status": "active"
+      }
+    ],
+    "offering": [
+      {
+        "id": "off_seed_demo",
+        "issuerId": "iss_seed_nova",
+        "name": "Demo Tape EP",
+        "targetAmount": 100000,
+        "maxAmount": 100000,
+        "unitPrice": 5000,
+        "endDate": "seed",
+        "externalId": "9001a000-0000-4000-8000-000000000004",
+        "status": "closed",
+        "escrowAccount": "esc_off_seed_demo"
+      },
+      {
+        "id": "off_seed_night",
+        "issuerId": "iss_seed_nova",
+        "name": "Night Bloom",
+        "targetAmount": 2000000,
+        "maxAmount": 4000000,
+        "unitPrice": 5000,
+        "endDate": "seed",
+        "externalId": "9001a000-0000-4000-8000-000000000001",
+        "status": "open",
+        "escrowAccount": "esc_off_seed_night"
+      },
+      {
+        "id": "off_seed_sol",
+        "issuerId": "iss_seed_sol",
+        "name": "Sol Sessions Vol. 1",
+        "targetAmount": 1000000,
+        "maxAmount": 1000000,
+        "unitPrice": 5000,
+        "endDate": "seed",
+        "externalId": "9001a000-0000-4000-8000-000000000002",
+        "status": "closed",
+        "escrowAccount": "esc_off_seed_sol"
+      },
+      {
+        "id": "off_seed_velvet",
+        "issuerId": "iss_seed_velvet",
+        "name": "Afterhours LP",
+        "targetAmount": 1500000,
+        "maxAmount": 3000000,
+        "unitPrice": 5000,
+        "endDate": "seed",
+        "externalId": "9001a000-0000-4000-8000-000000000003",
+        "status": "cancelled",
+        "escrowAccount": "esc_off_seed_velvet"
+      }
+    ],
+    "collectionAccount": [
+      {
+        "id": "ca_seed_demo",
+        "offeringId": "off_seed_demo",
+        "externalId": "9001a000-0000-4000-8000-000000000004"
+      },
+      {
+        "id": "ca_seed_night",
+        "offeringId": "off_seed_night",
+        "externalId": "9001a000-0000-4000-8000-000000000001"
+      },
+      {
+        "id": "ca_seed_sol",
+        "offeringId": "off_seed_sol",
+        "externalId": "9001a000-0000-4000-8000-000000000002"
+      },
+      {
+        "id": "ca_seed_velvet",
+        "offeringId": "off_seed_velvet",
+        "externalId": "9001a000-0000-4000-8000-000000000003"
+      }
+    ],
+    "party": [
+      {
+        "id": "P_seed_ava",
+        "externalId": "5a1e0000-0000-4000-8000-00000000a1a1",
+        "state": "PA",
+        "kycStatus": "approved",
+        "amlStatus": "cleared",
+        "lastNameUpper": "SEED"
+      },
+      {
+        "id": "P_seed_ben",
+        "externalId": "5a1e0000-0000-4000-8000-00000000b2b2",
+        "state": "NJ",
+        "kycStatus": "approved",
+        "amlStatus": "cleared",
+        "lastNameUpper": "SEED"
+      },
+      {
+        "id": "P_seed_cleo",
+        "externalId": "5a1e0000-0000-4000-8000-00000000c3c3",
+        "state": "DE",
+        "kycStatus": "rejected",
+        "amlStatus": "rejected",
+        "lastNameUpper": "SEED"
+      },
+      {
+        "id": "P_seed_dev",
+        "externalId": "5a1e0000-0000-4000-8000-00000000d4d4",
+        "state": "NY",
+        "kycStatus": "manual_review",
+        "amlStatus": "hold",
+        "lastNameUpper": "SEED"
+      },
+      {
+        "id": "P_seed_jordan",
+        "externalId": "daba7ea1-c397-554c-87d4-ab17c5c4669e",
+        "state": "AR",
+        "kycStatus": "approved",
+        "amlStatus": "cleared",
+        "lastNameUpper": "SEED"
+      }
+    ],
+    "account": [
+      {
+        "id": "A_seed_ava",
+        "partyId": "P_seed_ava",
+        "externalId": "5a1e0000-0000-4000-8000-00000000a1a1",
+        "type": "individual"
+      },
+      {
+        "id": "A_seed_ben",
+        "partyId": "P_seed_ben",
+        "externalId": "5a1e0000-0000-4000-8000-00000000b2b2",
+        "type": "individual"
+      },
+      {
+        "id": "A_seed_cleo",
+        "partyId": "P_seed_cleo",
+        "externalId": "5a1e0000-0000-4000-8000-00000000c3c3",
+        "type": "individual"
+      },
+      {
+        "id": "A_seed_dev",
+        "partyId": "P_seed_dev",
+        "externalId": "5a1e0000-0000-4000-8000-00000000d4d4",
+        "type": "individual"
+      },
+      {
+        "id": "A_seed_jordan",
+        "partyId": "P_seed_jordan",
+        "externalId": "daba7ea1-c397-554c-87d4-ab17c5c4669e",
+        "type": "individual"
+      }
+    ],
+    "link": [
+      {
+        "id": "L_seed_ava",
+        "accountId": "A_seed_ava",
+        "partyId": "P_seed_ava",
+        "relationship": "owner"
+      },
+      {
+        "id": "L_seed_ben",
+        "accountId": "A_seed_ben",
+        "partyId": "P_seed_ben",
+        "relationship": "owner"
+      },
+      {
+        "id": "L_seed_cleo",
+        "accountId": "A_seed_cleo",
+        "partyId": "P_seed_cleo",
+        "relationship": "owner"
+      },
+      {
+        "id": "L_seed_dev",
+        "accountId": "A_seed_dev",
+        "partyId": "P_seed_dev",
+        "relationship": "owner"
+      },
+      {
+        "id": "L_seed_jordan",
+        "accountId": "A_seed_jordan",
+        "partyId": "P_seed_jordan",
+        "relationship": "owner"
+      }
+    ],
+    "trade": [
+      {
+        "id": "T_seed_ava_night",
+        "offeringId": "off_seed_night",
+        "accountId": "A_seed_ava",
+        "units": 20,
+        "unitPrice": 5000,
+        "amount": 100000,
+        "externalId": "T_seed_ava_night",
+        "status": "funded",
+        "fundMoveId": "FM_seed_ava_night"
+      },
+      {
+        "id": "T_seed_ava_sol",
+        "offeringId": "off_seed_sol",
+        "accountId": "A_seed_ava",
+        "units": 20,
+        "unitPrice": 5000,
+        "amount": 100000,
+        "externalId": "T_seed_ava_sol",
+        "status": "funded",
+        "fundMoveId": "FM_seed_ava_sol"
+      },
+      {
+        "id": "T_seed_ava_velvet",
+        "offeringId": "off_seed_velvet",
+        "accountId": "A_seed_ava",
+        "units": 10,
+        "unitPrice": 5000,
+        "amount": 50000,
+        "externalId": "T_seed_ava_velvet",
+        "status": "refunded",
+        "fundMoveId": "FM_seed_ava_velvet"
+      },
+      {
+        "id": "T_seed_ben_demo",
+        "offeringId": "off_seed_demo",
+        "accountId": "A_seed_ben",
+        "units": 20,
+        "unitPrice": 5000,
+        "amount": 100000,
+        "externalId": "T_seed_ben_demo",
+        "status": "funded",
+        "fundMoveId": "FM_seed_ben_demo"
+      },
+      {
+        "id": "T_seed_ben_night",
+        "offeringId": "off_seed_night",
+        "accountId": "A_seed_ben",
+        "units": 100,
+        "unitPrice": 5000,
+        "amount": 500000,
+        "externalId": "T_seed_ben_night",
+        "status": "funded",
+        "fundMoveId": "FM_seed_ben_night"
+      },
+      {
+        "id": "T_seed_ben_sol",
+        "offeringId": "off_seed_sol",
+        "accountId": "A_seed_ben",
+        "units": 140,
+        "unitPrice": 5000,
+        "amount": 700000,
+        "externalId": "T_seed_ben_sol",
+        "status": "funded",
+        "fundMoveId": "FM_seed_ben_sol"
+      },
+      {
+        "id": "T_seed_jordan_sol",
+        "offeringId": "off_seed_sol",
+        "accountId": "A_seed_jordan",
+        "units": 40,
+        "unitPrice": 5000,
+        "amount": 200000,
+        "externalId": "T_seed_jordan_sol",
+        "status": "funded",
+        "fundMoveId": "FM_seed_jordan_sol"
+      },
+      {
+        "id": "T_seed_jordan_velvet",
+        "offeringId": "off_seed_velvet",
+        "accountId": "A_seed_jordan",
+        "units": 10,
+        "unitPrice": 5000,
+        "amount": 50000,
+        "externalId": "T_seed_jordan_velvet",
+        "status": "refunded",
+        "fundMoveId": "FM_seed_jordan_velvet"
+      }
+    ],
+    "fundMove": [
+      {
+        "id": "FM_seed_ava_night",
+        "tradeId": "T_seed_ava_night",
+        "offeringId": "off_seed_night",
+        "amount": 100000,
+        "externalId": "T_seed_ava_night",
+        "status": "settled"
+      },
+      {
+        "id": "FM_seed_ava_sol",
+        "tradeId": "T_seed_ava_sol",
+        "offeringId": "off_seed_sol",
+        "amount": 100000,
+        "externalId": "T_seed_ava_sol",
+        "status": "settled"
+      },
+      {
+        "id": "FM_seed_ava_velvet",
+        "tradeId": "T_seed_ava_velvet",
+        "offeringId": "off_seed_velvet",
+        "amount": 50000,
+        "externalId": "T_seed_ava_velvet",
+        "status": "settled"
+      },
+      {
+        "id": "FM_seed_ben_demo",
+        "tradeId": "T_seed_ben_demo",
+        "offeringId": "off_seed_demo",
+        "amount": 100000,
+        "externalId": "T_seed_ben_demo",
+        "status": "settled"
+      },
+      {
+        "id": "FM_seed_ben_night",
+        "tradeId": "T_seed_ben_night",
+        "offeringId": "off_seed_night",
+        "amount": 500000,
+        "externalId": "T_seed_ben_night",
+        "status": "settled"
+      },
+      {
+        "id": "FM_seed_ben_sol",
+        "tradeId": "T_seed_ben_sol",
+        "offeringId": "off_seed_sol",
+        "amount": 700000,
+        "externalId": "T_seed_ben_sol",
+        "status": "settled"
+      },
+      {
+        "id": "FM_seed_jordan_sol",
+        "tradeId": "T_seed_jordan_sol",
+        "offeringId": "off_seed_sol",
+        "amount": 200000,
+        "externalId": "T_seed_jordan_sol",
+        "status": "settled"
+      },
+      {
+        "id": "FM_seed_jordan_velvet",
+        "tradeId": "T_seed_jordan_velvet",
+        "offeringId": "off_seed_velvet",
+        "amount": 50000,
+        "externalId": "T_seed_jordan_velvet",
+        "status": "settled"
+      }
+    ],
+    "refund": [
+      {
+        "id": "RF_seed_T_seed_ava_velvet",
+        "tradeId": "T_seed_ava_velvet",
+        "offeringId": "off_seed_velvet",
+        "amount": 50000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "RF_seed_T_seed_jordan_velvet",
+        "tradeId": "T_seed_jordan_velvet",
+        "offeringId": "off_seed_velvet",
+        "amount": 50000,
+        "externalId": "seed",
+        "status": "settled"
+      }
+    ],
+    "disbursement": [
+      {
+        "id": "DB_seed_demo_1",
+        "offeringId": "off_seed_demo",
+        "amount": 50000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "DB_seed_demo_2",
+        "offeringId": "off_seed_demo",
+        "amount": 50000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "DB_seed_sol_1",
+        "offeringId": "off_seed_sol",
+        "amount": 600000,
+        "externalId": "seed",
+        "status": "settled"
+      }
+    ],
+    "deposit": [
+      {
+        "id": "DP_seed_demo_q1",
+        "collectionAccountId": "ca_seed_demo",
+        "amount": 300000,
+        "reference": "Quarter 1",
+        "externalId": "9001a000-0000-4000-8000-000000000004",
+        "status": "settled"
+      },
+      {
+        "id": "DP_seed_sol_q1",
+        "collectionAccountId": "ca_seed_sol",
+        "amount": 400000,
+        "reference": "Quarter 1",
+        "externalId": "9001a000-0000-4000-8000-000000000002",
+        "status": "settled"
+      },
+      {
+        "id": "DP_seed_sol_q2",
+        "collectionAccountId": "ca_seed_sol",
+        "amount": 600000,
+        "reference": "Quarter 2",
+        "externalId": "9001a000-0000-4000-8000-000000000002",
+        "status": "settled"
+      }
+    ],
+    "payout": [
+      {
+        "id": "PO_seed_demo_q1_T_seed_ben_demo",
+        "collectionAccountId": "ca_seed_demo",
+        "recipientType": "investor",
+        "recipientRef": "A_seed_ben",
+        "amount": 150000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_demo_q1_creator",
+        "collectionAccountId": "ca_seed_demo",
+        "recipientType": "issuer",
+        "recipientRef": "iss_seed_nova",
+        "amount": 135000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_demo_q1_platform",
+        "collectionAccountId": "ca_seed_demo",
+        "recipientType": "platform",
+        "recipientRef": "fanzup-platform",
+        "amount": 15000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q1_T_seed_ava_sol",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "investor",
+        "recipientRef": "A_seed_ava",
+        "amount": 12000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q1_T_seed_ben_sol",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "investor",
+        "recipientRef": "A_seed_ben",
+        "amount": 84000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q1_T_seed_jordan_sol",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "investor",
+        "recipientRef": "A_seed_jordan",
+        "amount": 24000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q1_creator",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "issuer",
+        "recipientRef": "iss_seed_sol",
+        "amount": 260000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q1_platform",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "platform",
+        "recipientRef": "fanzup-platform",
+        "amount": 20000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q2_T_seed_ava_sol",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "investor",
+        "recipientRef": "A_seed_ava",
+        "amount": 18000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q2_T_seed_ben_sol",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "investor",
+        "recipientRef": "A_seed_ben",
+        "amount": 126000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q2_T_seed_jordan_sol",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "investor",
+        "recipientRef": "A_seed_jordan",
+        "amount": 36000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q2_creator",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "issuer",
+        "recipientRef": "iss_seed_sol",
+        "amount": 390000,
+        "externalId": "seed",
+        "status": "settled"
+      },
+      {
+        "id": "PO_seed_sol_q2_platform",
+        "collectionAccountId": "ca_seed_sol",
+        "recipientType": "platform",
+        "recipientRef": "fanzup-platform",
+        "amount": 30000,
+        "externalId": "seed",
+        "status": "settled"
+      }
+    ]
+  }
+}

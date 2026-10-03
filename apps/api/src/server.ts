@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadEnv, type Env } from "./env";
 import { createDb } from "./db";
 import { createProvider } from "./provider";
+import { createRegCf } from "./regcf";
 import { createVerifier } from "./lib/auth";
 import { buildApp, API_PREFIX } from "./app";
 
@@ -33,7 +34,7 @@ async function createApp(): Promise<{ app: FastifyInstance; env: Env | null }> {
   try {
     const env = loadEnv();
     const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
-    const app = await buildApp({ env, sql, provider: createProvider(env, sql), verify: createVerifier(env) });
+    const app = await buildApp({ env, sql, provider: createProvider(env, sql), regcf: createRegCf(env), verify: createVerifier(env) });
     app.addHook("onClose", async () => {
       await sql.end({ timeout: 5 });
     });
