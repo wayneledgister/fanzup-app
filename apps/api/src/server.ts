@@ -5,7 +5,7 @@ import { createVerifier } from "./lib/auth";
 import { buildApp } from "./app";
 
 const env = loadEnv();
-const sql = createDb(env.DATABASE_URL);
+const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
 const stripe = createStripe(env);
 const app = await buildApp({ env, sql, stripe, escrow: createEscrow(env, stripe), verify: createVerifier(env) });
 

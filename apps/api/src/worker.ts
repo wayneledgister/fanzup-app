@@ -9,7 +9,7 @@ import { createEscrow, createStripe } from "./escrow";
 import { settleDueCampaigns, drainOutbox } from "./money";
 
 const env = loadEnv();
-const sql = createDb(env.DATABASE_URL);
+const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
 const escrow = createEscrow(env, createStripe(env));
 const INTERVAL_MS = 30_000;
 let stopping = false;

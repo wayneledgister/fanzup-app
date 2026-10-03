@@ -4,8 +4,8 @@ Direct-to-fan funding for independent artists. *Fund the culture. Own the future
 
 | Path | What | Hosted on |
 |---|---|---|
-| `apps/web` | React app (Brand v2.0, 93 routes) | Vercel |
-| `apps/api` | Fastify API + worker: backings, escrow orchestration, settlement, refunds, milestone releases | Render |
+| `apps/web` | React app (Brand v2.0, 93 routes) | Vercel service `web` at `/` |
+| `apps/api` | Fastify API: backings, escrow orchestration, settlement, refunds, milestone releases | Vercel service `api` at `/api` (+ cron tick) |
 | `packages/shared` | Rules shared by web and API: creator tiers (PRD 01 §6.3), policy defaults, money, campaign state machine, request schemas | — |
 | `supabase/` | Postgres schema: double-entry ledger, RLS, money functions, seed | Supabase |
 
@@ -21,7 +21,7 @@ Direct-to-fan funding for independent artists. *Fund the culture. Own the future
 pnpm install
 pnpm db:start && pnpm db:reset   # local Supabase (Docker) with migrations + seed
 pnpm dev:web                     # http://localhost:5173
-pnpm dev:api                     # http://localhost:8787
+pnpm dev:api                     # http://localhost:8787/api  (or `npx vercel dev` for both)
 pnpm --filter @fanzup/api worker # settlement + outbox worker
 pnpm test                        # needs TEST_DATABASE_URL (see SETUP.md A6)
 pnpm typecheck && pnpm lint:copy

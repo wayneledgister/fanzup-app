@@ -7,6 +7,10 @@ const Env = z.object({
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   ESCROW_PROVIDER: z.enum(["sandbox", "stripe-dev"]).default("sandbox"),
+  /** Vercel Cron sends `Authorization: Bearer $CRON_SECRET` to /api/internal/tick. */
+  CRON_SECRET: z.string().min(16).optional(),
+  /** Connections per instance. Keep low on serverless (Vercel), higher on a long-running host. */
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(5),
   PORT: z.coerce.number().default(8787),
   CORS_ORIGINS: z.string().default("http://localhost:5173"),
   NODE_ENV: z.string().default("development"),

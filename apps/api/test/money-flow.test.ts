@@ -21,7 +21,7 @@ const balances = (campaignId: string) =>
 const bal = async (campaignId: string) => Object.fromEntries((await balances(campaignId)).map((r) => [r.kind, n(r.balance_minor)]));
 
 async function back(campaignId: string, perkId: string, quantity: number, key: string, auth = fanAuth) {
-  return app.inject({ method: "POST", url: "/v1/backings", headers: { authorization: auth, "idempotency-key": key }, payload: { campaignId, perkId, quantity } });
+  return app.inject({ method: "POST", url: "/api/v1/backings", headers: { authorization: auth, "idempotency-key": key }, payload: { campaignId, perkId, quantity } });
 }
 const deadlinePlus1h = async (campaignId: string) => {
   const [c] = await asService(sql, (tx) => tx<{ ends_at: Date }[]>`select ends_at from public.campaigns where id = ${campaignId}`);
@@ -45,12 +45,12 @@ afterAll(async () => {
 
 describe("public reads", () => {
   it("lists live campaigns without signing in", async () => {
-    const r = await app.inject({ method: "GET", url: "/v1/campaigns" });
+    const r = await app.inject({ method: "GET", url: "/api/v1/campaigns" });
     expect(r.statusCode).toBe(200);
     expect(r.json().campaigns.map((c: { slug: string }) => c.slug)).toContain("nova-live-band-tour");
   });
   it("returns perks with remaining counts", async () => {
-    const r = await app.inject({ method: "GET", url: "/v1/campaigns/nova-live-band-tour" });
+    const r = await app.inject({ method: "GET", url: "/api/v1/campaigns/nova-live-band-tour" });
     expect(r.json().perks.find((p: { id: string }) => p.id === ids.novaPerkTickets).remaining).toBe(60);
   });
 });
@@ -80,15 +80,15 @@ describe("funded campaign: capture → settle → milestone releases", () => {
     expect(r.statusCode).toBe(201);
     const backingId = r.json().backingId as string;
 
-    await app.inject({ method: "POST", url: `/v1/dev/sandbox/confirm-payment/${backingId}` });
+    await app.inject({ method: "POST", url: `/api/v1/dev/sandbox/confirm-payment/${backingId}` });
     // Confirming twice must not double-count (idempotent capture).
-    await app.inject({ method: "POST", url: `/v1/dev/sandbox/confirm-payment/${backingId}` });
+    await app.inject({ method: "POST", url: `/api/v1/dev/sandbox/confirm-payment/${backingId}` });
     const fee = processingFeeMinor(60000);
     let b = await bal(ids.novaCampaign);
     expect(b.escrow_cash).toBe(60000 - fee);
     expect(b.backer_liability).toBe(-60000);
 
-    const tick = await app.inject({ method: "POST", url: `/v1/dev/sandbox/tick?now=${await deadlinePlus1h(ids.novaCampaign)}` });
+    const tick = await app.inject({ method: "POST", url: `/api/v1/dev/sandbox/tick?now=${await deadlinePlus1h(ids.novaCampaign)}` });
     expect(tick.json().settled).toContainEqual({ id: ids.novaCampaign, outcome: "funded" });
 
     const net = 60000 - fee;
@@ -115,8 +115,8 @@ describe("funded campaign: capture → settle → milestone releases", () => {
 describe("failed campaign: target-or-refund", () => {
   it("refunds every backer in full and FanZuP absorbs the processing fee", async () => {
     const r = await back(ids.solCampaign, ids.solPerkGA, 1, "k-fail-0001"); // $30 of a $6,000 goal
-    await app.inject({ method: "POST", url: `/v1/dev/sandbox/confirm-payment/${r.json().backingId}` });
-    const tick = await app.inject({ method: "POST", url: `/v1/dev/sandbox/tick?now=${await deadlinePlus1h(ids.solCampaign)}` });
+    await app.inject({ method: "POST", url: `/api/v1/dev/sandbox/confirm-payment/${r.json().backingId}` });
+    const tick = await app.inject({ method: "POST", url: `/api/v1/dev/sandbox/tick?now=${await deadlinePlus1h(ids.solCampaign)}` });
     expect(tick.json().settled).toContainEqual({ id: ids.solCampaign, outcome: "failed" });
 
     const refunds = escrow.calls.filter((c) => c.op === "refund");
@@ -132,10 +132,27 @@ describe("failed campaign: target-or-refund", () => {
   });
 });
 
+describe("routing and scheduled work", () => {
+  it("serves everything under /api (Vercel passes /api/* through unchanged)", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/campaigns" })).statusCode).toBe(404);
+  });
+  it("cron tick is hidden without CRON_SECRET and rejects a wrong secret", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/internal/tick" })).statusCode).toBe(404);
+    const env = loadEnv({ DATABASE_URL: db.url, SUPABASE_JWT_SECRET: JWT_SECRET, ESCROW_PROVIDER: "sandbox", NODE_ENV: "test", CRON_SECRET: "cron-secret-0123456789" } as NodeJS.ProcessEnv);
+    const cronApp = await buildApp({ env, sql, escrow, stripe: null, verify: createVerifier(env) });
+    expect((await cronApp.inject({ method: "GET", url: "/api/internal/tick", headers: { authorization: "Bearer nope" } })).statusCode).toBe(401);
+    const ok = await cronApp.inject({ method: "GET", url: "/api/internal/tick", headers: { authorization: "Bearer cron-secret-0123456789" } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toHaveProperty("processed");
+    await cronApp.close();
+  });
+});
+
 describe("edge cases", () => {
   it("a failed campaign with no backers closes out as refunded", async () => {
     const [v] = await asService(sql, (tx) => tx<{ id: string; ends_at: Date }[]>`select id, ends_at from public.campaigns where slug = 'velvet-circuit-video'`);
-    await app.inject({ method: "POST", url: `/v1/dev/sandbox/tick?now=${new Date(v.ends_at.getTime() + 3_600_000).toISOString()}` });
+    await app.inject({ method: "POST", url: `/api/v1/dev/sandbox/tick?now=${new Date(v.ends_at.getTime() + 3_600_000).toISOString()}` });
     const [c] = await asService(sql, (tx) => tx<{ status: string }[]>`select status::text from public.campaigns where id = ${v.id}`);
     expect(c.status).toBe("refunded");
   });

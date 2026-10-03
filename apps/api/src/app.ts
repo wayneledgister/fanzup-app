@@ -9,6 +9,10 @@ import { campaignRoutes } from "./routes/campaigns";
 import { backingRoutes } from "./routes/backings";
 import { stripeWebhook } from "./routes/webhooks";
 import { devRoutes } from "./routes/dev";
+import { internalRoutes } from "./routes/internal";
+
+/** Public path prefix. Vercel routes /api/* to this service and does NOT strip the prefix. */
+export const API_PREFIX = "/api";
 
 export interface Deps {
   env: Env;
@@ -38,16 +42,17 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     return reply.status(500).send({ error: "internal", message: "Something went wrong on our side." });
   });
 
-  app.get("/health", async () => {
+  app.get(`${API_PREFIX}/health`, async () => {
     await deps.sql`select 1`;
     return { ok: true, escrow: deps.escrow.name };
   });
 
-  await app.register(campaignRoutes(deps), { prefix: "/v1" });
-  await app.register(backingRoutes(deps), { prefix: "/v1" });
-  await app.register(stripeWebhook(deps), { prefix: "/v1/webhooks" });
+  await app.register(campaignRoutes(deps), { prefix: `${API_PREFIX}/v1` });
+  await app.register(backingRoutes(deps), { prefix: `${API_PREFIX}/v1` });
+  await app.register(stripeWebhook(deps), { prefix: `${API_PREFIX}/v1/webhooks` });
+  await app.register(internalRoutes(deps), { prefix: `${API_PREFIX}/internal` });
   if (deps.env.NODE_ENV !== "production" && deps.escrow.name === "sandbox") {
-    await app.register(devRoutes(deps), { prefix: "/v1/dev" });
+    await app.register(devRoutes(deps), { prefix: `${API_PREFIX}/v1/dev` });
   }
   return app;
 }

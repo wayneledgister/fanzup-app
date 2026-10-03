@@ -3,9 +3,22 @@ import postgres from "postgres";
 export type Sql = postgres.Sql;
 export type Tx = postgres.TransactionSql;
 
-/** One pool per process. Supabase: use the Session pooler URL (prepared statements work). */
-export function createDb(url: string): Sql {
-  return postgres(url, { max: 10, idle_timeout: 20, connect_timeout: 10, types: { bigint: postgres.BigInt } });
+/**
+ * One pool per process/function instance.
+ * On Vercel use Supabase's *Transaction* pooler (port 6543): serverless instances come and go, and the
+ * transaction pooler multiplexes them. It doesn't support prepared statements, so they're turned off for
+ * port 6543. Every query here runs inside an explicit transaction (asUser/asService), so `set local`
+ * role switching is safe in transaction mode.
+ */
+export function createDb(url: string, max = 5): Sql {
+  const transactionPooler = new URL(url).port === "6543";
+  return postgres(url, {
+    max,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    prepare: !transactionPooler,
+    types: { bigint: postgres.BigInt },
+  });
 }
 
 export interface Claims {
