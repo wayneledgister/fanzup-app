@@ -8,6 +8,7 @@ import type { PaymentProvider } from "./provider/types";
 import { ensurePayoutOp, ensureRefundOp } from "./outbound";
 import { log, redact } from "./log";
 import type { NotifyHandler } from "./notify";
+import { handleL2Notify } from "./l2/notices";
 
 const SYSTEM = { actorId: null, actorKind: "system:worker", aal: null } as const;
 
@@ -101,6 +102,7 @@ export async function drainOutbox(sql: Sql, notify: NotifyHandler, limit = 100) 
     if (ev.topic === "campaign.funded") return notify(sql, "notify.campaign_funded", ev.payload);
     if (ev.topic === "campaign.failed") return notify(sql, "notify.campaign_failed", ev.payload);
     if (ev.topic.startsWith("notify.")) return notify(sql, ev.topic, ev.payload);
+    if (ev.topic === "l2.notify") return handleL2Notify(sql, ev.payload);
     throw new Error(`unknown outbox topic ${ev.topic}`);
   }
 }

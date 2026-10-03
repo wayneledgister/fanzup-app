@@ -6,6 +6,7 @@
 import { loadEnv } from "./env";
 import { createDb } from "./db";
 import { createProvider } from "./provider";
+import { createRegCf } from "./regcf";
 import { runWorkerTick } from "./jobs";
 import { jobDeps } from "./app";
 import { createVerifier } from "./lib/auth";
@@ -14,7 +15,7 @@ import { log, redact } from "./log";
 const env = loadEnv();
 const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
 const provider = createProvider(env, sql);
-const deps = jobDeps({ env, sql, provider, verify: createVerifier(env) });
+const deps = jobDeps({ env, sql, provider, regcf: createRegCf(env), verify: createVerifier(env) });
 let stopping = false;
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { stopping = true; });

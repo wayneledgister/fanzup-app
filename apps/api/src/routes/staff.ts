@@ -113,6 +113,14 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     return { action: await privileged(d, { action: "recon.override", subjectId: null, reason }) };
   });
 
+  /** FR-PLT-001: flag changes are privileged and audited. Layer 2 additionally needs REGCF_PROVIDER=mock, refused when deployed. */
+  app.post<{ Params: { flag: string } }>("/flags/:flag", async (req) => {
+    if (req.params.flag !== "layer2") throw new HttpError(404, "not_found", "Unknown flag.");
+    const b = z.object({ on: z.boolean(), reason: z.string() }).parse(req.body);
+    if (b.on && !d.regcf) throw new HttpError(409, "provider_missing", "Layer 2 needs a Reg CF provider (REGCF_PROVIDER=mock, local/CI only).");
+    return { action: await privileged(d, { action: "flag.set", subjectId: null, reason: b.reason, params: { flag: "layer2", on: b.on } }) };
+  });
+
   /** Everything carrying one correlation id, in time order (M1 exit test 4). */
   app.get<{ Params: { cid: string } }>("/trace/:cid", async (req) => {
     const cid = req.params.cid;

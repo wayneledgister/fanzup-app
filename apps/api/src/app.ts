@@ -19,6 +19,10 @@ import { meRoutes } from "./routes/me";
 import { artistRoutes } from "./routes/artist";
 import { staffRoutes } from "./routes/staff";
 import { executeDueActions } from "./staff";
+import type { RegCfProvider } from "./regcf";
+import { l2CreatorRoutes, l2DevRoutes, l2FanRoutes, l2StaffRoutes } from "./l2/routes";
+import { l2On } from "./l2/gate";
+import { l2Tick } from "./l2/service";
 
 /** Public path prefix. Vercel routes /api/* to this service and does NOT strip the prefix. */
 export const API_PREFIX = "/api";
@@ -27,6 +31,8 @@ export interface Deps {
   env: Env;
   sql: Sql;
   provider: PaymentProvider;
+  /** Layer 2 Reg CF provider (ADR-007). Undefined unless REGCF_PROVIDER=mock. */
+  regcf?: RegCfProvider;
   verify: Verify;
   notify?: NotifyHandler;
   /** Extra worker steps (registered by the staff module). */
@@ -34,7 +40,7 @@ export interface Deps {
 }
 
 const defaultNotifier = createNotifier();
-export const jobDeps = (d: Deps): JobDeps => ({ sql: d.sql, provider: d.provider, notify: d.notify ?? defaultNotifier, extraSteps: [...(d.extraSteps ?? []), (now) => executeDueActions(d, now)] });
+export const jobDeps = (d: Deps): JobDeps => ({ sql: d.sql, provider: d.provider, notify: d.notify ?? defaultNotifier, extraSteps: [...(d.extraSteps ?? []), (now) => executeDueActions(d, now), ...(d.regcf ? [(now: Date) => l2Tick(d, now)] : [])] });
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({
@@ -114,6 +120,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     provider: deps.provider.name,
     testMode: deps.provider.testMode,
     stripePublishableKey: deps.provider.publishableKey,
+    // FR-PLT-001: the server's view of the flags (the web app's ?flags= override reveals mock-only screens, never data).
+    flags: { layer2: await l2On(deps).catch(() => false) },
   }));
 
   await app.register(campaignRoutes(deps), { prefix: `${API_PREFIX}/v1` });
@@ -123,6 +131,13 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   await app.register(artistRoutes(deps), { prefix: `${API_PREFIX}/v1/artist` });
   await app.register(staffRoutes(deps), { prefix: `${API_PREFIX}/v1/staff` });
   await app.register(internalRoutes(deps), { prefix: `${API_PREFIX}/internal` });
+  // Layer 2 (CR-002): every route is behind the server-side layer2 gate.
+  await app.register(l2FanRoutes(deps), { prefix: `${API_PREFIX}/v1` });
+  await app.register(l2CreatorRoutes(deps), { prefix: `${API_PREFIX}/v1/creator` });
+  await app.register(l2StaffRoutes(deps), { prefix: `${API_PREFIX}/v1/staff/l2` });
+  if (!deps.env.deployed && deps.regcf && deps.env.NODE_ENV !== "production") {
+    await app.register(l2DevRoutes(deps), { prefix: `${API_PREFIX}/v1/dev/l2` });
+  }
   // Dev routes exist only with the sandbox provider outside deployed environments (design §9).
   if (!deps.env.deployed && deps.provider.name === "sandbox" && deps.env.NODE_ENV !== "production") {
     await app.register(devRoutes(deps), { prefix: `${API_PREFIX}/v1/dev` });

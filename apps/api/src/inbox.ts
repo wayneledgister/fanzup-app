@@ -9,6 +9,7 @@ import { runWithCtx } from "./context";
 import type { NormalizedEvent, PaymentProvider } from "./provider/types";
 import { confirmPayout, confirmRefund, type OpRow } from "./outbound";
 import { log, redact } from "./log";
+import { handleRegCfEvent } from "./l2/events";
 
 /** How long an event for an object we can't see yet keeps retrying before it's "unmatched" (design §5). */
 const GRACE_MS = 10 * 60_000;
@@ -120,6 +121,7 @@ async function opFor(sql: Sql, kind: "refund" | "payout", p: EventPayload, objec
 
 async function handle(sql: Sql, provider: PaymentProvider, row: EventRow): Promise<Outcome> {
   const p = row.payload;
+  if (row.type.startsWith("regcf.")) return handleRegCfEvent(sql, row);
   switch (p.type) {
     case "payment.succeeded": {
       const backingId = p.metadata?.backing_id ?? null;

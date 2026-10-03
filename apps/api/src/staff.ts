@@ -14,6 +14,7 @@ import { HttpError, requireUser } from "./lib/auth";
 import { log, redact } from "./log";
 import type { Deps } from "./app";
 import { processEventById } from "./inbox";
+import { commitDistribution } from "./l2/service";
 
 export async function requireStaff(req: FastifyRequest, d: Pick<Deps, "verify" | "sql">): Promise<Claims> {
   const u = await requireUser(req, d.verify);
@@ -30,10 +31,13 @@ export async function singleOperatorMode(sql: Sql): Promise<boolean> {
   return r.on;
 }
 
-export type ActionName = "campaign.review" | "tranche.verify" | "backing.refund" | "recon.override" | "provider_event.replay" | "outbound_op.replay" | "weekly_review.signoff";
+export type ActionName =
+  | "campaign.review" | "tranche.verify" | "backing.refund" | "recon.override" | "provider_event.replay" | "outbound_op.replay" | "weekly_review.signoff"
+  // Layer 2 (CR-002)
+  | "pool.review" | "pool.collection_execute" | "investor.kyc_decide" | "pool_tranche.verify" | "pool.distribution_commit" | "pool.collection_state" | "flag.set";
 
 /** Actions that move money (delay + daily limits apply while single-operator mode is on). */
-const MONEY_ACTIONS = new Set<ActionName>(["tranche.verify", "backing.refund"]);
+const MONEY_ACTIONS = new Set<ActionName>(["tranche.verify", "backing.refund", "pool_tranche.verify", "pool.distribution_commit"]);
 
 interface ActionRow {
   id: string;
@@ -49,7 +53,8 @@ interface ActionRow {
   execute_after: Date;
 }
 
-type Executor = (d: Pick<Deps, "sql" | "provider">, a: ActionRow) => Promise<void>;
+type ActionDeps = Pick<Deps, "sql" | "provider"> & { regcf?: Deps["regcf"] };
+type Executor = (d: ActionDeps, a: ActionRow) => Promise<void>;
 
 const EXECUTORS: Record<ActionName, Executor> = {
   "campaign.review": async (d, a) => {
@@ -79,6 +84,40 @@ const EXECUTORS: Record<ActionName, Executor> = {
     if (!r) throw new HttpError(409, "not_replayable", "Only dead-lettered or failed operations can be replayed.");
   },
   "weekly_review.signoff": async () => undefined, // the sign-off row is written by the route itself
+  // ── Layer 2 (CR-002). Reviewer ≠ owner is enforced here (campaignOwner) and again in SQL. ──
+  "pool.review": async (d, a) => {
+    const p = a.params as { decision: string; notes?: string };
+    await asService(d.sql, (tx) => tx`select public.review_pool(${a.subject_id}, ${a.actor_id}, ${p.decision}, ${p.notes ?? null})`);
+  },
+  "pool.collection_execute": async (d, a) => {
+    await asService(d.sql, (tx) => tx`select public.execute_collection_mechanism(${a.subject_id}, ${a.actor_id}, ${tx.json(((a.params as { details?: unknown }).details ?? {}) as never)})`);
+  },
+  "investor.kyc_decide": async (d, a) => {
+    const decision = (a.params as { decision: "approved" | "rejected" }).decision;
+    const [ip] = await asService(d.sql, (tx) => tx<{ party: string | null; status: string }[]>`select provider_party_ref as party, kyc_status::text as status from public.investor_profiles where user_id = ${a.subject_id}`);
+    if (!ip?.party || ip.status !== "manual_review") throw new HttpError(409, "kyc_not_in_review", "This investor isn't waiting for a manual KYC decision.");
+    if (!d.regcf) throw new HttpError(404, "layer2_disabled", "Investing isn't open yet.");
+    await d.regcf.setPartyKyc(ip.party, decision, `kyc-decision:${a.id}`);
+    await asService(d.sql, async (tx) => {
+      await tx`update public.investor_profiles set kyc_status = ${decision}::public.kyc_status, kyc_decided_by = ${a.actor_id}, kyc_updated_at = now() where user_id = ${a.subject_id}`;
+      await tx`insert into public.outbox (topic, payload) values ('l2.notify', ${tx.json({ template: "kyc_result", user_id: a.subject_id, status: decision })})`;
+    });
+  },
+  "pool_tranche.verify": async (d, a) => {
+    await asService(d.sql, (tx) => tx`select public.verify_pool_tranche(${a.subject_id}, ${a.actor_id})`);
+  },
+  "pool.distribution_commit": async (d, a) => {
+    const p = a.params as { label: string; hash: string };
+    await commitDistribution(d.sql, a.subject_id!, p.label, p.hash, a.actor_id);
+  },
+  "pool.collection_state": async (d, a) => {
+    await asService(d.sql, (tx) => tx`select public.set_collection_state(${a.subject_id}, ${a.actor_id}, ${(a.params as { to: string }).to}::public.collection_state, ${a.reason})`);
+  },
+  "flag.set": async (d, a) => {
+    const p = a.params as { flag: string; on: boolean };
+    await asService(d.sql, (tx) => tx`
+      update public.platform_settings set value = ${tx.json(p.on)}, updated_at = now(), updated_by = ${a.actor_id} where key = ${"flag." + p.flag}`);
+  },
 };
 
 /** The campaign a subject belongs to (for the reviewer ≠ owner rule), or null. */
@@ -88,6 +127,13 @@ async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | n
     "campaign.review": "public.campaigns c join public.artists a on a.id = c.artist_id where c.id = $1",
     "tranche.verify": "public.campaign_tranches t join public.campaigns c on c.id = t.campaign_id join public.artists a on a.id = c.artist_id where t.id = $1",
     "backing.refund": "public.backings b join public.campaigns c on c.id = b.campaign_id join public.artists a on a.id = c.artist_id where b.id = $1",
+    "pool.review": "public.pools p join public.artists a on a.id = p.artist_id where p.id = $1",
+    "pool.collection_execute": "public.pools p join public.artists a on a.id = p.artist_id where p.id = $1",
+    "pool.distribution_commit": "public.pools p join public.artists a on a.id = p.artist_id where p.id = $1",
+    "pool.collection_state": "public.pools p join public.artists a on a.id = p.artist_id where p.id = $1",
+    "pool_tranche.verify": "public.pool_tranches t join public.pools p on p.id = t.pool_id join public.artists a on a.id = p.artist_id where t.id = $1",
+    // Staff can't decide their own KYC: the "owner" of an investor subject is the investor.
+    "investor.kyc_decide": "(select $1::uuid as owner_id) a",
   };
   const clause = from[action];
   if (!clause) return null;
@@ -97,7 +143,7 @@ async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | n
 }
 
 export async function privileged(
-  d: Pick<Deps, "sql" | "provider">,
+  d: ActionDeps,
   input: { action: ActionName; subjectId: string | null; reason: unknown; amountMinor?: number | null; params?: Record<string, unknown> },
 ) {
   const c = currentCtx();
@@ -143,7 +189,7 @@ export async function privileged(
   return execute(d, row);
 }
 
-async function execute(d: Pick<Deps, "sql" | "provider">, a: ActionRow) {
+async function execute(d: ActionDeps, a: ActionRow) {
   try {
     await EXECUTORS[a.action](d, a);
     await asService(d.sql, async (tx) => {
@@ -159,7 +205,7 @@ async function execute(d: Pick<Deps, "sql" | "provider">, a: ActionRow) {
 }
 
 /** Worker step: run scheduled actions whose delay has passed, as their original actor. */
-export async function executeDueActions(d: Pick<Deps, "sql" | "provider">, now = new Date()) {
+export async function executeDueActions(d: ActionDeps, now = new Date()) {
   const due = await asService(d.sql, (tx) => tx<ActionRow[]>`
     select * from public.privileged_actions where status = 'scheduled' and execute_after <= ${now} order by execute_after limit 20`);
   for (const a of due) {
