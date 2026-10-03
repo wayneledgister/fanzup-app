@@ -26,6 +26,8 @@ services:
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: ESCROW_PROVIDER
-        value: stripe-dev
+        value: stripe-test        # sandbox is refused in deployed environments (FR-PAY-008)
+      - key: DEPLOY_ENV
+        value: staging
       - key: DB_POOL_MAX
         value: "5"

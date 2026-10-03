@@ -60,8 +60,8 @@ All changes are **new migrations** (the three existing ones are never edited). M
 |---|---|
 | `20261004000100_m1_enums.sql` | `backing_status` gains `refund_pending`. Separate file because a new enum value can't be used in the transaction that adds it. |
 | `20261004000200_m1_context_and_inbox.sql` | Request context helpers; correlation/actor columns; `provider_events`; `outbound_ops`; `worker_heartbeats`; `platform_settings` |
-| `20261004000300_m1_checkout_and_money.sql` | Checkout holds; revised capture; late-capture + refund functions; staff refund; fan money-state function; distinct-backer counting |
-| `20261004000400_m1_staff_and_recon.sql` | `privileged_actions`, `review_signoffs`, `tranche_evidence`, `recon_runs`, `recon_breaks`, `notifications`, `funnel_events`, `consents`; revised workflow functions |
+| `20261004000300_m1_checkout_and_money.sql` | Checkout holds; revised capture; late-capture + refund functions; staff refund; distinct-backer counting; `tranche_evidence` + `submit_tranche_evidence`; revised `verify_tranche`/`record_tranche_released`; `recon_runs`/`recon_breaks` + `recon_ledger_by_campaign()` *(as built, D-001)* |
+| `20261004000400_m1_identity_and_staff.sql` | `privileged_actions`, `review_signoffs`, `notifications`, `funnel_events`, `consents`, identity trigger, `fan_backings()`; revised workflow functions *(as built, D-001)* |
 | `20261004000500_m1_grants.sql` | Column allowlists for `artists`/`profiles`; revoke client execute on workflow functions; grants for new functions to `service_role` |
 
 ### 3.1 Request context (ADR-005)
