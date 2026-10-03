@@ -4,13 +4,13 @@ Everything that can be done in code is already in the repo. These are the steps 
 
 **Time:**
 - Part A (local): about 30 minutes
-- Parts B–F (hosted): about 1–2 hours
+- Parts B–E (hosted): about 1–2 hours
 - Part G (escrow partner): weeks, and it runs alongside everything else
 
 **Layout:**
 ```
-apps/web          React app (Vercel)
-apps/api          API + worker (Render)
+apps/web          React app   ┐ one Vercel project (root vercel.json): web at /, api at /api
+apps/api          API + worker┘ worker (worker.ts) runs on Render
 packages/shared   rules shared by web and API (tiers, policy, money, schemas)
 supabase/         migrations, seed, config  (Supabase)
 ```
@@ -62,7 +62,7 @@ pnpm dev:api        # http://localhost:8787
 ```
 The defaults in `.env` already point at local Supabase.
 
-**✅ Check:** `curl localhost:8787/health` returns `{"ok":true,"escrow":"sandbox"}`.
+**✅ Check:** `curl localhost:8787/api/health` returns `{"ok":true,"escrow":"sandbox"}`.
 
 If authenticated calls return 401, your local Supabase signs tokens with the legacy shared secret. Copy `JWT_SECRET` from `pnpm exec supabase status -o env` into `SUPABASE_JWT_SECRET` in `apps/api/.env`, then restart the API.
 
@@ -74,14 +74,14 @@ TOKEN=$(curl -s "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
   -d '{"email":"fan@fanzup.test","password":"FanzupDev123"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).access_token')
 
 # Back Sol Amara's show: General admission, $30
-curl -s localhost:8787/v1/backings -H "authorization: Bearer $TOKEN" -H "idempotency-key: demo-0001" \
+curl -s localhost:8787/api/v1/backings -H "authorization: Bearer $TOKEN" -H "idempotency-key: demo-0001" \
   -H "content-type: application/json" \
   -d '{"campaignId":"dbe19d49-d0c5-54da-b4bf-0ff0c03d5e27","perkId":"3835231c-7f19-5da7-88f7-02e8a3f255b6","quantity":1}'
 # → {"backingId":"…"}  then pretend the processor confirmed it:
-curl -s -X POST localhost:8787/v1/dev/sandbox/confirm-payment/<backingId>
+curl -s -X POST localhost:8787/api/v1/dev/sandbox/confirm-payment/<backingId>
 
 # Jump past the deadline: the goal isn't met, so the campaign fails and the backer is refunded in full
-curl -s -X POST "localhost:8787/v1/dev/sandbox/tick?now=2027-03-01T00:00:00Z"
+curl -s -X POST "localhost:8787/api/v1/dev/sandbox/tick?now=2027-03-01T00:00:00Z"
 ```
 **✅ Check:** in Studio, look at `campaigns`, `backings` and the `ledger_balances` view:
 - the campaign is `refunded`
@@ -112,7 +112,7 @@ TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres pnpm t
 
 ### B2. Auth settings (both projects): Dashboard → Authentication
 1. **URL Configuration:**
-   - Site URL = your web URL. Use the Vercel URL from Part F for now; switch to your domain later.
+   - Site URL = your web URL. Use the Vercel URL from Part D for now; switch to your domain later.
    - Add the same URL to **Redirect URLs**.
 2. **Sign In / Providers → Email:**
    - **Confirm email:** on
@@ -155,30 +155,56 @@ select pg_has_role('postgres','service_role','member') as svc,
 
 1. Create a Stripe account and stay in **Test mode**. Don't activate live payments.
 2. Copy the **Developers → API keys → Secret key** (`sk_test_…`) into `STRIPE_SECRET_KEY`.
-3. **Local:** run `stripe listen --forward-to localhost:8787/v1/webhooks/stripe` and put the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`. Set `ESCROW_PROVIDER=stripe-dev`.
-4. **Hosted, after Part D:**
-   - Go to Developers → **Webhooks** → Add endpoint `https://<your-render-api>/v1/webhooks/stripe`.
+3. **Local:** run `stripe listen --forward-to localhost:8787/api/v1/webhooks/stripe` and put the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`. Set `ESCROW_PROVIDER=stripe-dev`.
+4. **Hosted, after Part D (Vercel):**
+   - Go to Developers → **Webhooks** → Add endpoint `https://<your-vercel-domain>/api/v1/webhooks/stripe`.
    - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed` and `charge.refunded`.
-   - Put its signing secret in Render as `STRIPE_WEBHOOK_SECRET`.
+   - Put its signing secret in Vercel as `STRIPE_WEBHOOK_SECRET`.
 
 ---
 
-## Part D: Host the API and worker on Render
-1. Go to render.com → sign in with GitHub → **New → Blueprint** and pick `wayneledgister/fanzup-app`. Render reads `render.yaml` and proposes `fanzup-api` (web service) and `fanzup-worker`.
-2. Fill in the values marked "sync: false" for **staging**:
+## Part D: Hosting: Vercel (website + API) and Render (worker)
+Why the work is split this way is in [`docs/adr/ADR-002-hosting.md`](adr/ADR-002-hosting.md).
+
+| Path | Runs on | Source |
+|---|---|---|
+| `/api/*` | Vercel service `api` (one Vercel Function) | `apps/api` |
+| everything else | Vercel service `web` (static site; deep links fall back to `index.html`) | `apps/web` |
+| background worker, every 30 s | Render (~$7/month) | `apps/api/src/worker.ts` |
+
+The browser calls the API at the same-origin `/api`, so there's no CORS and no API hostname to set.
+
+### D1. Vercel
+1. Go to vercel.com → **Add New → Project** → import `wayneledgister/fanzup-app`. Leave **Root Directory** as the repo root (`./`). Vercel reads `vercel.json` and shows the two services.
+2. **Environment variables** (Settings → Environment Variables):
 
    | Variable | Value |
    |---|---|
-   | `DATABASE_URL` | Supabase → **Connect** (top of the dashboard) → **Session pooler** connection string, port 5432, with your password. Render connects over IPv4, and Supabase's shared pooler is the IPv4 route; don't use the direct connection. |
-   | `SUPABASE_URL` | `https://<staging-ref>.supabase.co` |
+   | `DATABASE_URL` | Supabase → **Connect** → **Transaction pooler** (port **6543**) with your password. The code turns prepared statements off for 6543 automatically. |
+   | `SUPABASE_URL` | `https://<ref>.supabase.co` |
    | `STRIPE_SECRET_KEY` | your `sk_test_…` key |
    | `STRIPE_WEBHOOK_SECRET` | from step C4 |
-   | `CORS_ORIGINS` | your Vercel URL from Part F (comma-separate several) |
+   | `ESCROW_PROVIDER` | `stripe-dev` (or `sandbox` with no Stripe) |
+   | `DB_POOL_MAX` | `3` |
+   | `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` |
+   | `VITE_SUPABASE_ANON_KEY` | Supabase **publishable (anon)** key. It's safe in the browser. **Never** put the secret/service key in a `VITE_` variable. |
+   | `VITE_FLAG_LAYER2`, `VITE_FLAG_POSTBETA` | `false` |
 
-3. In each service → **Settings → Build & Deploy**, set **Auto-Deploy** to **"After CI checks pass"**. This way a red CI run never ships.
-4. **✅ Check:** `https://<fanzup-api>.onrender.com/health` returns `{"ok":true,…}`, and the worker logs show `worker.start`.
+3. **Deploy**, then check:
+   - `https://<your-app>.vercel.app/api/health` returns `{"ok":true,…}`
+   - `https://<your-app>.vercel.app/campaigns/nova-live-band-tour` loads the page, not a 404
+4. Put the Vercel URL into Supabase → Authentication → **Site URL** and **Redirect URLs** (B2).
 
-When you add production, make a second pair of services (or a second Blueprint) that point at `fanzup-prod`.
+### D2. Render (worker only)
+1. Go to render.com → sign in with GitHub → **New → Blueprint** → pick `wayneledgister/fanzup-app`. Render reads `render.yaml` and proposes one service, `fanzup-worker`.
+2. Fill in:
+   - `DATABASE_URL`: Supabase → **Connect** → **Session pooler** (port **5432**). Render connects over IPv4, and the shared pooler is Supabase's IPv4 route.
+   - `SUPABASE_URL`
+   - `STRIPE_SECRET_KEY`
+3. In the service → **Settings → Build & Deploy**, set **Auto-Deploy** to **"After CI checks pass"**.
+4. **✅ Check:** the logs show `{"msg":"worker.start",…}`, and a `worker.tick` line appears whenever there's work to do.
+
+**Local:** `pnpm dev:web` + `pnpm dev:api` (Vite forwards `/api` to `:8787`), plus `pnpm --filter @fanzup/api worker`. Or run `npx vercel dev` at the repo root for the two Vercel services.
 
 ---
 
@@ -192,17 +218,6 @@ When you add production, make a second pair of services (or a second Blueprint) 
 2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema (and, on staging, the demo data) without a local clone, go to **Actions → Deploy database migrations → Run workflow** and tick *include_seed*.
 3. **Branches → add rule for `main`:** require a pull request and the status checks **"Web · typecheck, copy rules, build"** and **"API · migrations, ledger, RLS, flow tests"**. These check names appear after the first CI run.
 4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, the **Deploy database migrations** workflow runs on staging, then waits for your approval before production.
-
----
-
-## Part F: Host the web app on Vercel
-1. Go to vercel.com → **Add New → Project** → import `wayneledgister/fanzup-app`.
-2. Set **Root Directory** to `apps/web`. The build settings come from `apps/web/vercel.json`.
-3. Environment variables (Preview = staging, Production = prod):
-   - `VITE_API_URL` = the Render API URL
-   - `VITE_SUPABASE_URL` = `https://<ref>.supabase.co`
-   - `VITE_SUPABASE_ANON_KEY` = Supabase → Connect / API Keys → **publishable (anon)** key. It's safe in a browser because RLS protects the data. **Never** put the secret/service key here.
-4. **✅ Check:** every pull request gets a preview link, and production deploys from `main`.
 
 ---
 
