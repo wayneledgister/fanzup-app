@@ -53,9 +53,20 @@ const ready = createApp();
  * also loads under require().
  */
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
-  const { app } = await ready;
-  await app.ready();
-  app.server.emit("request", req, res);
+  try {
+    const { app } = await ready;
+    await app.ready();
+    app.server.emit("request", req, res);
+  } catch (e) {
+    // A throw here would surface only as an opaque FUNCTION_INVOCATION_FAILED. Log it, and
+    // return its type and a redacted message (URLs/credentials stripped) so it's diagnosable.
+    console.error("api.handler_failed", e);
+    const err = e as { name?: string; code?: string; message?: string };
+    const message = String(err?.message ?? e).replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<url>").slice(0, 300);
+    res.statusCode = 500;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ ok: false, error: "startup_failed", name: err?.name, code: err?.code, message }));
+  }
 }
 
 // Everywhere else (local dev, Render, tests via `node dist/server.js`): listen on a port.
