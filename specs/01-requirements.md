@@ -65,7 +65,7 @@ Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the co
 | FR-PLT-006 | Full |
 | FR-ANL-001 (events) | First-party server-side funnel events: perk selected, checkout started, account created, backing confirmed, source (`ref`) |
 | NFR-SEC-01 | Column allowlist for `artists` and `profiles` (payout/identity refs never public) + automated test; full allowlist over every object at M2 |
-| NFR-SEC-02 | Every M1 write goes through the API |
+| NFR-SEC-02 | Every M1 money, workflow, backing and staff write goes through the API; clients lose direct execute on workflow functions. Revoking clients' direct draft-table grants waits for the wizard wiring at M2 |
 | NFR-SEC-04 | Fail closed: deployed environments refuse to start with the sandbox provider or without required config |
 | NFR-SEC-07 | Seed never loaded outside local/CI; no seeded staff outside local/CI |
 | NFR-SEC-12 | Logs redact the listed fields |
