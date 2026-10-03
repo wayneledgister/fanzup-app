@@ -103,7 +103,7 @@ Legend — **Keep**: port from Fan Profile Setup, reskin. **Build**: placeholder
 | `/backstage` | FanZuP `BackstagePassGallery`/`Claim`/`Content` | Rebuild | Exclusive content unlocked by subscription or campaign perk. Not unlocked by units held. |
 | Fan badges / All-Access | FanZuP `FanLoyaltyBadges`, `FanTierRewards` | Rebuild | Engagement badges (backed N campaigns, subscriber streak, shows attended) + All-Access card (Brand §6.2/§9). **Dropped:** Star/Nebula/Galaxy/Supernova dollar-invested tiers, "stake more to unlock", NFT collectible, priority payouts. |
 | `/secondary` | FanZuP-Draft `SecondaryMarket` | Rebuild · Gate (`layer2`) | **Beta = P0:** per-holding lock-up countdown + illiquidity disclosure. **`postBeta`:** P1 soft-transfer request (issuer / accredited / family only, no price) per Mechanism 07. No order book, prices, volume, liquidity vault or ETH. |
-| `/governance` | FanZuP `GovernancePortal` | Gate (`postBeta`) | No PRD defines governance. Only basis: SPV pass-through voting rights (Mechanism 03). Stub page "Holder communications & votes" for SPV-structured Pools; no on-chain, delegation, slashing or tier-weighted voting. **Open question for Wayne.** |
+| `/governance` | FanZuP `GovernancePortal` | Gate (`postBeta`) | No PRD defines governance. Only basis: SPV pass-through voting rights (Mechanism 03). Stub page "Holder communications & votes" for SPV-structured Pools; no on-chain, delegation, slashing or tier-weighted voting. **In scope: see CR-001.** |
 
 ### Admin / compliance
 | `/compliance/*` | FPS | Keep | Under review / revisions / approved queues. Add KYC queue + Form C review per PRD 01 FR-ADMIN as stubs. |
@@ -117,7 +117,7 @@ Supernova executive lounge, cosmic profile, stakeholder chat / network chat over
 
 ## Open questions (decisions for Wayne)
 
-1. **Governance:** kept as gated (`postBeta`) "Holder communications & votes" for SPV-structured Pools only. Keep, or drop from scope? No PRD covers it.
+1. ~~Governance~~ **Decided 2026-10-03: keep building** (council D1 Card A). Scope and constraints are in [`specs/changes/CR-001-holder-votes.md`](../specs/changes/CR-001-holder-votes.md): spec-first via PRD 04, then build behind `postBeta`.
 2. **Fan engagement:** badges count engagement (backed campaigns, subscriber streaks, shows attended), not dollars. The All-Access card is a profile artifact, not a payment card. OK?
 3. **Fees:** platform fee rates show "Being finalized" per `products/fees.html`; only Stripe 2.9% + $0.30 is shown. Who absorbs card processing on fan checkout: artist (current copy, per fees.html) or fan?
 4. **Landing stats:** removed until verified live figures exist (Brand §10).
