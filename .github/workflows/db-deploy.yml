@@ -1,11 +1,9 @@
 name: Deploy database migrations
 
-# Runs only when migrations change on main (or by hand). Each environment is a GitHub
-# Environment with required reviewers, so production migrations always need your approval.
+# Manual fallback only. Migrations normally deploy through Supabase's own GitHub integration
+# (Supabase > Project Settings > Integrations > GitHub, "Deploy to production" on main), which
+# needs no GitHub secrets. Running both on every push would race, so this one never auto-runs.
 on:
-  push:
-    branches: [main]
-    paths: ["supabase/migrations/**"]
   workflow_dispatch:
     inputs:
       include_seed:
