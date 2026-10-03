@@ -1,6 +1,9 @@
-import { PagePlaceholder } from "@/components/PagePlaceholder";
+import { ReviewWorkspace } from "@/components/campaign/ReviewWorkspace";
 
-/** Source: src/pages/compliance/ReviewApproved.tsx */
+/**
+ * Source: FPS src/pages/compliance/ReviewApproved.tsx
+ * Doc-driven changes: "FINRA Broker-Dealer Review / Securities compliance approved", "Investment Opens" and "∞ Potential Investors" removed. Shows the approval record, read-only checklist and audit log.
+ */
 export default function ReviewApproved() {
-  return <PagePlaceholder title="Review Approved" route="/admin/review/approved" source={"src/pages/compliance/ReviewApproved.tsx"} />;
+  return <ReviewWorkspace status="approved" />;
 }

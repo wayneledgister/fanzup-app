@@ -12,90 +12,92 @@ const P3 = lazy(() => import("@/pages/discover/ArtistProfile"));
 const P4 = lazy(() => import("@/pages/public/ForArtists"));
 const P5 = lazy(() => import("@/pages/public/Fees"));
 const P6 = lazy(() => import("@/pages/public/Trust"));
-const P7 = lazy(() => import("@/pages/auth/SignUp"));
-const P8 = lazy(() => import("@/pages/auth/LogIn"));
-const P9 = lazy(() => import("@/pages/auth/ResetPassword"));
-const P10 = lazy(() => import("@/pages/auth/VerifyEmail"));
-const P11 = lazy(() => import("@/pages/auth/AuthError"));
-const P12 = lazy(() => import("@/pages/onboarding/Account"));
-const P13 = lazy(() => import("@/pages/onboarding/PathChoice"));
-const P14 = lazy(() => import("@/pages/onboarding/Profile"));
-const P15 = lazy(() => import("@/pages/onboarding/Discover"));
-const P16 = lazy(() => import("@/pages/onboarding/Payment"));
-const P17 = lazy(() => import("@/pages/onboarding/Complete"));
-const P18 = lazy(() => import("@/pages/kyc/KycHandoff"));
-const P19 = lazy(() => import("@/pages/kyc/KycIdType"));
-const P20 = lazy(() => import("@/pages/kyc/KycDocument"));
-const P21 = lazy(() => import("@/pages/kyc/KycSelfie"));
-const P22 = lazy(() => import("@/pages/kyc/KycReview"));
-const P23 = lazy(() => import("@/pages/kyc/KycPending"));
-const P24 = lazy(() => import("@/pages/invest/InvestorCertification"));
-const P25 = lazy(() => import("@/pages/kyc/KycOutcomePending"));
-const P26 = lazy(() => import("@/pages/kyc/KycOutcomeApproved"));
-const P27 = lazy(() => import("@/pages/kyc/KycOutcomeRejected"));
-const P28 = lazy(() => import("@/pages/fan/HomeFeed"));
-const P29 = lazy(() => import("@/pages/fan/BackedAndPerks"));
-const P30 = lazy(() => import("@/pages/fan/Tickets"));
-const P31 = lazy(() => import("@/pages/fan/Merch"));
-const P32 = lazy(() => import("@/pages/fan/Backstage"));
-const P33 = lazy(() => import("@/pages/fan/Profile"));
-const P34 = lazy(() => import("@/pages/settings/Settings"));
-const P35 = lazy(() => import("@/pages/settings/Payments"));
-const P36 = lazy(() => import("@/pages/settings/TaxDocuments"));
-const P37 = lazy(() => import("@/pages/streaming/LiveSessions"));
-const P38 = lazy(() => import("@/pages/streaming/AccessCode"));
-const P39 = lazy(() => import("@/pages/streaming/LiveView"));
-const P40 = lazy(() => import("@/pages/invest/PoolsExplore"));
-const P41 = lazy(() => import("@/pages/invest/PoolDetail"));
-const P42 = lazy(() => import("@/pages/invest/DocumentReview"));
-const P43 = lazy(() => import("@/pages/invest/InvestmentConfirmation"));
-const P44 = lazy(() => import("@/pages/invest/Portfolio"));
-const P45 = lazy(() => import("@/pages/invest/HoldingDetail"));
-const P46 = lazy(() => import("@/pages/invest/SoftTransfer"));
-const P47 = lazy(() => import("@/pages/invest/HolderVotes"));
-const P48 = lazy(() => import("@/pages/artist/BasicInfo"));
-const P49 = lazy(() => import("@/pages/artist/MediaUploads"));
-const P50 = lazy(() => import("@/pages/artist/SocialLinks"));
-const P51 = lazy(() => import("@/pages/artist/StreamingLinks"));
-const P52 = lazy(() => import("@/pages/artist/Review"));
-const P53 = lazy(() => import("@/pages/artist/KycIntro"));
-const P54 = lazy(() => import("@/pages/artist/KycIdType"));
-const P55 = lazy(() => import("@/pages/artist/KycDocument"));
-const P56 = lazy(() => import("@/pages/artist/KycSelfie"));
-const P57 = lazy(() => import("@/pages/artist/KycReview"));
-const P58 = lazy(() => import("@/pages/artist/KycPending"));
-const P59 = lazy(() => import("@/pages/artist/KycApproved"));
-const P60 = lazy(() => import("@/pages/artist/KycRejected"));
-const P61 = lazy(() => import("@/pages/artist/StarterUnlocked"));
-const P62 = lazy(() => import("@/pages/artist/Complete"));
-const P63 = lazy(() => import("@/pages/artist/RisingIntro"));
-const P64 = lazy(() => import("@/pages/artist/RisingBusiness"));
-const P65 = lazy(() => import("@/pages/artist/RisingStreaming"));
-const P66 = lazy(() => import("@/pages/artist/RisingSocial"));
-const P67 = lazy(() => import("@/pages/artist/RisingComplete"));
-const P68 = lazy(() => import("@/pages/creator/Dashboard"));
-const P69 = lazy(() => import("@/pages/creator/Campaigns"));
-const P70 = lazy(() => import("@/pages/creator/CampaignLive"));
-const P71 = lazy(() => import("@/pages/creator/Revenue"));
-const P72 = lazy(() => import("@/pages/creator/Content"));
-const P73 = lazy(() => import("@/pages/creator/Upload"));
-const P74 = lazy(() => import("@/pages/creator/Events"));
-const P75 = lazy(() => import("@/pages/creator/CreateEvent"));
-const P76 = lazy(() => import("@/pages/creator/StreamDashboard"));
-const P77 = lazy(() => import("@/pages/creator/Payouts"));
-const P78 = lazy(() => import("@/pages/creator/TaxDocuments"));
-const P79 = lazy(() => import("@/pages/creator/RevenueSources"));
-const P80 = lazy(() => import("@/pages/campaign/Basics"));
-const P81 = lazy(() => import("@/pages/campaign/Details"));
-const P82 = lazy(() => import("@/pages/campaign/Perks"));
-const P83 = lazy(() => import("@/pages/campaign/Preview"));
-const P84 = lazy(() => import("@/pages/campaign/Submitted"));
-const P85 = lazy(() => import("@/pages/admin/Queues"));
-const P86 = lazy(() => import("@/pages/admin/ReviewUnderReview"));
-const P87 = lazy(() => import("@/pages/admin/ReviewRevisions"));
-const P88 = lazy(() => import("@/pages/admin/ReviewApproved"));
-const P89 = lazy(() => import("@/pages/admin/IdentityQueue"));
-const P90 = lazy(() => import("@/pages/ds/DesignSystem"));
+const P7 = lazy(() => import("@/pages/public/Legal"));
+const P8 = lazy(() => import("@/pages/public/Support"));
+const P9 = lazy(() => import("@/pages/auth/SignUp"));
+const P10 = lazy(() => import("@/pages/auth/LogIn"));
+const P11 = lazy(() => import("@/pages/auth/ResetPassword"));
+const P12 = lazy(() => import("@/pages/auth/VerifyEmail"));
+const P13 = lazy(() => import("@/pages/auth/AuthError"));
+const P14 = lazy(() => import("@/pages/onboarding/Account"));
+const P15 = lazy(() => import("@/pages/onboarding/PathChoice"));
+const P16 = lazy(() => import("@/pages/onboarding/Profile"));
+const P17 = lazy(() => import("@/pages/onboarding/Discover"));
+const P18 = lazy(() => import("@/pages/onboarding/Payment"));
+const P19 = lazy(() => import("@/pages/onboarding/Complete"));
+const P20 = lazy(() => import("@/pages/kyc/KycHandoff"));
+const P21 = lazy(() => import("@/pages/kyc/KycIdType"));
+const P22 = lazy(() => import("@/pages/kyc/KycDocument"));
+const P23 = lazy(() => import("@/pages/kyc/KycSelfie"));
+const P24 = lazy(() => import("@/pages/kyc/KycReview"));
+const P25 = lazy(() => import("@/pages/kyc/KycPending"));
+const P26 = lazy(() => import("@/pages/invest/InvestorCertification"));
+const P27 = lazy(() => import("@/pages/kyc/KycOutcomePending"));
+const P28 = lazy(() => import("@/pages/kyc/KycOutcomeApproved"));
+const P29 = lazy(() => import("@/pages/kyc/KycOutcomeRejected"));
+const P30 = lazy(() => import("@/pages/fan/HomeFeed"));
+const P31 = lazy(() => import("@/pages/fan/BackedAndPerks"));
+const P32 = lazy(() => import("@/pages/fan/Tickets"));
+const P33 = lazy(() => import("@/pages/fan/Merch"));
+const P34 = lazy(() => import("@/pages/fan/Backstage"));
+const P35 = lazy(() => import("@/pages/fan/Profile"));
+const P36 = lazy(() => import("@/pages/settings/Settings"));
+const P37 = lazy(() => import("@/pages/settings/Payments"));
+const P38 = lazy(() => import("@/pages/settings/TaxDocuments"));
+const P39 = lazy(() => import("@/pages/streaming/LiveSessions"));
+const P40 = lazy(() => import("@/pages/streaming/AccessCode"));
+const P41 = lazy(() => import("@/pages/streaming/LiveView"));
+const P42 = lazy(() => import("@/pages/invest/PoolsExplore"));
+const P43 = lazy(() => import("@/pages/invest/PoolDetail"));
+const P44 = lazy(() => import("@/pages/invest/DocumentReview"));
+const P45 = lazy(() => import("@/pages/invest/InvestmentConfirmation"));
+const P46 = lazy(() => import("@/pages/invest/Portfolio"));
+const P47 = lazy(() => import("@/pages/invest/HoldingDetail"));
+const P48 = lazy(() => import("@/pages/invest/SoftTransfer"));
+const P49 = lazy(() => import("@/pages/invest/HolderVotes"));
+const P50 = lazy(() => import("@/pages/artist/BasicInfo"));
+const P51 = lazy(() => import("@/pages/artist/MediaUploads"));
+const P52 = lazy(() => import("@/pages/artist/SocialLinks"));
+const P53 = lazy(() => import("@/pages/artist/StreamingLinks"));
+const P54 = lazy(() => import("@/pages/artist/Review"));
+const P55 = lazy(() => import("@/pages/artist/KycIntro"));
+const P56 = lazy(() => import("@/pages/artist/KycIdType"));
+const P57 = lazy(() => import("@/pages/artist/KycDocument"));
+const P58 = lazy(() => import("@/pages/artist/KycSelfie"));
+const P59 = lazy(() => import("@/pages/artist/KycReview"));
+const P60 = lazy(() => import("@/pages/artist/KycPending"));
+const P61 = lazy(() => import("@/pages/artist/KycApproved"));
+const P62 = lazy(() => import("@/pages/artist/KycRejected"));
+const P63 = lazy(() => import("@/pages/artist/StarterUnlocked"));
+const P64 = lazy(() => import("@/pages/artist/Complete"));
+const P65 = lazy(() => import("@/pages/artist/RisingIntro"));
+const P66 = lazy(() => import("@/pages/artist/RisingBusiness"));
+const P67 = lazy(() => import("@/pages/artist/RisingStreaming"));
+const P68 = lazy(() => import("@/pages/artist/RisingSocial"));
+const P69 = lazy(() => import("@/pages/artist/RisingComplete"));
+const P70 = lazy(() => import("@/pages/creator/Dashboard"));
+const P71 = lazy(() => import("@/pages/creator/Campaigns"));
+const P72 = lazy(() => import("@/pages/creator/CampaignLive"));
+const P73 = lazy(() => import("@/pages/creator/Revenue"));
+const P74 = lazy(() => import("@/pages/creator/Content"));
+const P75 = lazy(() => import("@/pages/creator/Upload"));
+const P76 = lazy(() => import("@/pages/creator/Events"));
+const P77 = lazy(() => import("@/pages/creator/CreateEvent"));
+const P78 = lazy(() => import("@/pages/creator/StreamDashboard"));
+const P79 = lazy(() => import("@/pages/creator/Payouts"));
+const P80 = lazy(() => import("@/pages/creator/TaxDocuments"));
+const P81 = lazy(() => import("@/pages/creator/RevenueSources"));
+const P82 = lazy(() => import("@/pages/campaign/Basics"));
+const P83 = lazy(() => import("@/pages/campaign/Details"));
+const P84 = lazy(() => import("@/pages/campaign/Perks"));
+const P85 = lazy(() => import("@/pages/campaign/Preview"));
+const P86 = lazy(() => import("@/pages/campaign/Submitted"));
+const P87 = lazy(() => import("@/pages/admin/Queues"));
+const P88 = lazy(() => import("@/pages/admin/ReviewUnderReview"));
+const P89 = lazy(() => import("@/pages/admin/ReviewRevisions"));
+const P90 = lazy(() => import("@/pages/admin/ReviewApproved"));
+const P91 = lazy(() => import("@/pages/admin/IdentityQueue"));
+const P92 = lazy(() => import("@/pages/ds/DesignSystem"));
 
 const S = (n: ReactNode) => <Suspense fallback={<RouteFallback />}>{n}</Suspense>;
 
@@ -110,117 +112,119 @@ export const router = createBrowserRouter([
       { path: "/for-artists", element: S(<P4 />) },
       { path: "/fees", element: S(<P5 />) },
       { path: "/trust", element: S(<P6 />) },
+      { path: "/legal/:doc", element: S(<P7 />) },
+      { path: "/support", element: S(<P8 />) },
     ],
   },
   {
     element: <AuthShell />,
     children: [
-      { path: "/signup", element: S(<P7 />) },
-      { path: "/login", element: S(<P8 />) },
-      { path: "/reset-password", element: S(<P9 />) },
-      { path: "/verify-email", element: S(<P10 />) },
-      { path: "/auth/error", element: S(<P11 />) },
+      { path: "/signup", element: S(<P9 />) },
+      { path: "/login", element: S(<P10 />) },
+      { path: "/reset-password", element: S(<P11 />) },
+      { path: "/verify-email", element: S(<P12 />) },
+      { path: "/auth/error", element: S(<P13 />) },
     ],
   },
   {
     element: <WizardShell />,
     children: [
-      { path: "/onboarding/account", element: S(<P12 />) },
-      { path: "/onboarding/path", element: S(<P13 />) },
-      { path: "/onboarding/profile", element: S(<P14 />) },
-      { path: "/onboarding/discover", element: S(<P15 />) },
-      { path: "/onboarding/payment", element: S(<P16 />) },
-      { path: "/onboarding/complete", element: S(<P17 />) },
-      { path: "/onboarding/kyc", element: S(<FeatureRoute flag="layer2"><P18 /></FeatureRoute>) },
-      { path: "/onboarding/kyc/id-type", element: S(<FeatureRoute flag="layer2"><P19 /></FeatureRoute>) },
-      { path: "/onboarding/kyc/document", element: S(<FeatureRoute flag="layer2"><P20 /></FeatureRoute>) },
-      { path: "/onboarding/kyc/selfie", element: S(<FeatureRoute flag="layer2"><P21 /></FeatureRoute>) },
-      { path: "/onboarding/kyc/review", element: S(<FeatureRoute flag="layer2"><P22 /></FeatureRoute>) },
-      { path: "/onboarding/kyc/pending", element: S(<FeatureRoute flag="layer2"><P23 /></FeatureRoute>) },
-      { path: "/investor/certification", element: S(<FeatureRoute flag="layer2"><P24 /></FeatureRoute>) },
-      { path: "/artist-onboarding/basic", element: S(<P48 />) },
-      { path: "/artist-onboarding/media", element: S(<P49 />) },
-      { path: "/artist-onboarding/social", element: S(<P50 />) },
-      { path: "/artist-onboarding/streaming", element: S(<P51 />) },
-      { path: "/artist-onboarding/review", element: S(<P52 />) },
-      { path: "/artist-onboarding/verify", element: S(<P53 />) },
-      { path: "/artist-onboarding/verify/id-type", element: S(<P54 />) },
-      { path: "/artist-onboarding/verify/document", element: S(<P55 />) },
-      { path: "/artist-onboarding/verify/selfie", element: S(<P56 />) },
-      { path: "/artist-onboarding/verify/review", element: S(<P57 />) },
-      { path: "/artist-onboarding/verify/pending", element: S(<P58 />) },
-      { path: "/artist-onboarding/verify/approved", element: S(<P59 />) },
-      { path: "/artist-onboarding/verify/rejected", element: S(<P60 />) },
-      { path: "/artist-onboarding/starter-unlocked", element: S(<P61 />) },
-      { path: "/artist-onboarding/complete", element: S(<P62 />) },
-      { path: "/tier/rising", element: S(<FeatureRoute flag="layer2"><P63 /></FeatureRoute>) },
-      { path: "/tier/rising/business", element: S(<FeatureRoute flag="layer2"><P64 /></FeatureRoute>) },
-      { path: "/tier/rising/streaming", element: S(<FeatureRoute flag="layer2"><P65 /></FeatureRoute>) },
-      { path: "/tier/rising/social", element: S(<FeatureRoute flag="layer2"><P66 /></FeatureRoute>) },
-      { path: "/tier/rising/complete", element: S(<FeatureRoute flag="layer2"><P67 /></FeatureRoute>) },
-      { path: "/creator/campaigns/new/basics", element: S(<P80 />) },
-      { path: "/creator/campaigns/new/details", element: S(<P81 />) },
-      { path: "/creator/campaigns/new/perks", element: S(<P82 />) },
-      { path: "/creator/campaigns/new/preview", element: S(<P83 />) },
-      { path: "/creator/campaigns/new/submitted", element: S(<P84 />) },
+      { path: "/onboarding/account", element: S(<P14 />) },
+      { path: "/onboarding/path", element: S(<P15 />) },
+      { path: "/onboarding/profile", element: S(<P16 />) },
+      { path: "/onboarding/discover", element: S(<P17 />) },
+      { path: "/onboarding/payment", element: S(<P18 />) },
+      { path: "/onboarding/complete", element: S(<P19 />) },
+      { path: "/onboarding/kyc", element: S(<FeatureRoute flag="layer2"><P20 /></FeatureRoute>) },
+      { path: "/onboarding/kyc/id-type", element: S(<FeatureRoute flag="layer2"><P21 /></FeatureRoute>) },
+      { path: "/onboarding/kyc/document", element: S(<FeatureRoute flag="layer2"><P22 /></FeatureRoute>) },
+      { path: "/onboarding/kyc/selfie", element: S(<FeatureRoute flag="layer2"><P23 /></FeatureRoute>) },
+      { path: "/onboarding/kyc/review", element: S(<FeatureRoute flag="layer2"><P24 /></FeatureRoute>) },
+      { path: "/onboarding/kyc/pending", element: S(<FeatureRoute flag="layer2"><P25 /></FeatureRoute>) },
+      { path: "/investor/certification", element: S(<FeatureRoute flag="layer2"><P26 /></FeatureRoute>) },
+      { path: "/artist-onboarding/basic", element: S(<P50 />) },
+      { path: "/artist-onboarding/media", element: S(<P51 />) },
+      { path: "/artist-onboarding/social", element: S(<P52 />) },
+      { path: "/artist-onboarding/streaming", element: S(<P53 />) },
+      { path: "/artist-onboarding/review", element: S(<P54 />) },
+      { path: "/artist-onboarding/verify", element: S(<P55 />) },
+      { path: "/artist-onboarding/verify/id-type", element: S(<P56 />) },
+      { path: "/artist-onboarding/verify/document", element: S(<P57 />) },
+      { path: "/artist-onboarding/verify/selfie", element: S(<P58 />) },
+      { path: "/artist-onboarding/verify/review", element: S(<P59 />) },
+      { path: "/artist-onboarding/verify/pending", element: S(<P60 />) },
+      { path: "/artist-onboarding/verify/approved", element: S(<P61 />) },
+      { path: "/artist-onboarding/verify/rejected", element: S(<P62 />) },
+      { path: "/artist-onboarding/starter-unlocked", element: S(<P63 />) },
+      { path: "/artist-onboarding/complete", element: S(<P64 />) },
+      { path: "/tier/rising", element: S(<FeatureRoute flag="layer2"><P65 /></FeatureRoute>) },
+      { path: "/tier/rising/business", element: S(<FeatureRoute flag="layer2"><P66 /></FeatureRoute>) },
+      { path: "/tier/rising/streaming", element: S(<FeatureRoute flag="layer2"><P67 /></FeatureRoute>) },
+      { path: "/tier/rising/social", element: S(<FeatureRoute flag="layer2"><P68 /></FeatureRoute>) },
+      { path: "/tier/rising/complete", element: S(<FeatureRoute flag="layer2"><P69 /></FeatureRoute>) },
+      { path: "/creator/campaigns/new/basics", element: S(<P82 />) },
+      { path: "/creator/campaigns/new/details", element: S(<P83 />) },
+      { path: "/creator/campaigns/new/perks", element: S(<P84 />) },
+      { path: "/creator/campaigns/new/preview", element: S(<P85 />) },
+      { path: "/creator/campaigns/new/submitted", element: S(<P86 />) },
     ],
   },
   {
     element: <FanShell />,
     children: [
-      { path: "/kyc/pending", element: S(<FeatureRoute flag="layer2"><P25 /></FeatureRoute>) },
-      { path: "/kyc/approved", element: S(<FeatureRoute flag="layer2"><P26 /></FeatureRoute>) },
-      { path: "/kyc/rejected", element: S(<FeatureRoute flag="layer2"><P27 /></FeatureRoute>) },
-      { path: "/home", element: S(<P28 />) },
-      { path: "/backed", element: S(<P29 />) },
-      { path: "/tickets", element: S(<P30 />) },
-      { path: "/merch", element: S(<P31 />) },
-      { path: "/backstage", element: S(<P32 />) },
-      { path: "/profile", element: S(<P33 />) },
-      { path: "/settings", element: S(<P34 />) },
-      { path: "/settings/payments", element: S(<P35 />) },
-      { path: "/settings/tax", element: S(<P36 />) },
-      { path: "/live", element: S(<P37 />) },
-      { path: "/live/access", element: S(<P38 />) },
-      { path: "/live/:id", element: S(<P39 />) },
-      { path: "/pools", element: S(<FeatureRoute flag="layer2"><P40 /></FeatureRoute>) },
-      { path: "/pools/:id", element: S(<FeatureRoute flag="layer2"><P41 /></FeatureRoute>) },
-      { path: "/invest/:id/documents", element: S(<FeatureRoute flag="layer2"><P42 /></FeatureRoute>) },
-      { path: "/invest/:id/confirmation", element: S(<FeatureRoute flag="layer2"><P43 /></FeatureRoute>) },
-      { path: "/portfolio", element: S(<FeatureRoute flag="layer2"><P44 /></FeatureRoute>) },
-      { path: "/portfolio/:poolId", element: S(<FeatureRoute flag="layer2"><P45 /></FeatureRoute>) },
-      { path: "/portfolio/:poolId/transfer", element: S(<FeatureRoute flag="postBeta"><P46 /></FeatureRoute>) },
-      { path: "/governance", element: S(<FeatureRoute flag="postBeta"><P47 /></FeatureRoute>) },
+      { path: "/kyc/pending", element: S(<FeatureRoute flag="layer2"><P27 /></FeatureRoute>) },
+      { path: "/kyc/approved", element: S(<FeatureRoute flag="layer2"><P28 /></FeatureRoute>) },
+      { path: "/kyc/rejected", element: S(<FeatureRoute flag="layer2"><P29 /></FeatureRoute>) },
+      { path: "/home", element: S(<P30 />) },
+      { path: "/backed", element: S(<P31 />) },
+      { path: "/tickets", element: S(<P32 />) },
+      { path: "/merch", element: S(<P33 />) },
+      { path: "/backstage", element: S(<P34 />) },
+      { path: "/profile", element: S(<P35 />) },
+      { path: "/settings", element: S(<P36 />) },
+      { path: "/settings/payments", element: S(<P37 />) },
+      { path: "/settings/tax", element: S(<P38 />) },
+      { path: "/live", element: S(<P39 />) },
+      { path: "/live/access", element: S(<P40 />) },
+      { path: "/live/:id", element: S(<P41 />) },
+      { path: "/pools", element: S(<FeatureRoute flag="layer2"><P42 /></FeatureRoute>) },
+      { path: "/pools/:id", element: S(<FeatureRoute flag="layer2"><P43 /></FeatureRoute>) },
+      { path: "/invest/:id/documents", element: S(<FeatureRoute flag="layer2"><P44 /></FeatureRoute>) },
+      { path: "/invest/:id/confirmation", element: S(<FeatureRoute flag="layer2"><P45 /></FeatureRoute>) },
+      { path: "/portfolio", element: S(<FeatureRoute flag="layer2"><P46 /></FeatureRoute>) },
+      { path: "/portfolio/:poolId", element: S(<FeatureRoute flag="layer2"><P47 /></FeatureRoute>) },
+      { path: "/portfolio/:poolId/transfer", element: S(<FeatureRoute flag="postBeta"><P48 /></FeatureRoute>) },
+      { path: "/governance", element: S(<FeatureRoute flag="postBeta"><P49 /></FeatureRoute>) },
     ],
   },
   {
     element: <CreatorShell />,
     children: [
-      { path: "/creator", element: S(<P68 />) },
-      { path: "/creator/campaigns", element: S(<P69 />) },
-      { path: "/creator/campaigns/:id", element: S(<P70 />) },
-      { path: "/creator/revenue", element: S(<P71 />) },
-      { path: "/creator/content", element: S(<P72 />) },
-      { path: "/creator/content/upload", element: S(<P73 />) },
-      { path: "/creator/events", element: S(<P74 />) },
-      { path: "/creator/events/new", element: S(<P75 />) },
-      { path: "/creator/streaming", element: S(<P76 />) },
-      { path: "/creator/payouts", element: S(<P77 />) },
-      { path: "/creator/tax", element: S(<P78 />) },
-      { path: "/creator/revenue-sources", element: S(<FeatureRoute flag="layer2"><P79 /></FeatureRoute>) },
+      { path: "/creator", element: S(<P70 />) },
+      { path: "/creator/campaigns", element: S(<P71 />) },
+      { path: "/creator/campaigns/:id", element: S(<P72 />) },
+      { path: "/creator/revenue", element: S(<P73 />) },
+      { path: "/creator/content", element: S(<P74 />) },
+      { path: "/creator/content/upload", element: S(<P75 />) },
+      { path: "/creator/events", element: S(<P76 />) },
+      { path: "/creator/events/new", element: S(<P77 />) },
+      { path: "/creator/streaming", element: S(<P78 />) },
+      { path: "/creator/payouts", element: S(<P79 />) },
+      { path: "/creator/tax", element: S(<P80 />) },
+      { path: "/creator/revenue-sources", element: S(<FeatureRoute flag="layer2"><P81 /></FeatureRoute>) },
     ],
   },
   {
     element: <AdminShell />,
     children: [
-      { path: "/admin", element: S(<P85 />) },
-      { path: "/admin/review/under-review", element: S(<P86 />) },
-      { path: "/admin/review/revisions", element: S(<P87 />) },
-      { path: "/admin/review/approved", element: S(<P88 />) },
-      { path: "/admin/kyc", element: S(<P89 />) },
+      { path: "/admin", element: S(<P87 />) },
+      { path: "/admin/review/under-review", element: S(<P88 />) },
+      { path: "/admin/review/revisions", element: S(<P89 />) },
+      { path: "/admin/review/approved", element: S(<P90 />) },
+      { path: "/admin/kyc", element: S(<P91 />) },
     ],
   },
-  { path: "/ds", element: S(<P90 />) },
+  { path: "/ds", element: S(<P92 />) },
   { path: "/dashboard", element: <Navigate to="/home" replace /> },
   { element: <PublicShell />, children: [{ path: "*", element: <NotFound /> }] },
 ]);

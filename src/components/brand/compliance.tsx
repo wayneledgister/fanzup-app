@@ -8,7 +8,7 @@ import { Lock, ShieldCheck, TriangleAlert, Hourglass } from "lucide-react";
 import { Link } from "react-router";
 import type { ReactNode } from "react";
 import { Callout } from "./primitives";
-import { formatDate } from "@/lib/format";
+import { formatDate, parseDate } from "@/lib/format";
 
 /** Layer 1 reward campaigns ("Fund My Show", Mechanism 05). */
 export function EscrowNotice({ compact = false }: { compact?: boolean }) {
@@ -49,7 +49,7 @@ export function InvestmentRiskDisclosure({ lockupMonths = 12 }: { lockupMonths?:
 
 /** Per-holding lock-up state — Mechanism 07 P0 (Beta). */
 export function LockupNotice({ unlocksOn }: { unlocksOn: string }) {
-  const locked = new Date(unlocksOn) > new Date();
+  const locked = parseDate(unlocksOn) > new Date();
   return (
     <Callout tone={locked ? "info" : "success"} icon={locked ? <Lock /> : <Hourglass />} title={locked ? `Locked until ${formatDate(unlocksOn)}` : "Resale lock-up ended"}>
       {locked

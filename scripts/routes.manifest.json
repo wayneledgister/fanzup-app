@@ -1,93 +1,653 @@
 [
-  ["public", "/", "public/Landing", "", "src/pages/LandingPage.tsx"],
-  ["public", "/explore", "discover/Explore", "", "src/pages/marketplace/MarketplaceExplore.tsx + MarketplaceHomepage.tsx + CreatorCardShowcase.tsx + NonContentStatesShowcase.tsx + search/SearchOverlay.tsx"],
-  ["public", "/campaigns/:id", "campaigns/CampaignDetail", "", "src/pages/campaign/CampaignDetailPage.tsx"],
-  ["public", "/artist/:id", "discover/ArtistProfile", "", "src/pages/profile/PublicCreatorProfile.tsx"],
-  ["public", "/for-artists", "public/ForArtists", "", "(new) artist value prop + tier table from PRD 01 §6.3"],
-  ["public", "/fees", "public/Fees", "", "FanZuP PlatformFeeTransparency.tsx — numbers from docs/brand/fees.html (TBD)"],
-  ["public", "/trust", "public/Trust", "", "(new) escrow/refund + how money moves, from Mechanism 05 §2"],
-  ["auth", "/signup", "auth/SignUp", "", "src/pages/SignUpFlows.tsx"],
-  ["auth", "/login", "auth/LogIn", "", "src/pages/LoginAndPasswordFlow.tsx"],
-  ["auth", "/reset-password", "auth/ResetPassword", "", "src/pages/LoginAndPasswordFlow.tsx"],
-  ["auth", "/verify-email", "auth/VerifyEmail", "", "src/pages/EmailVerification.tsx"],
-  ["auth", "/auth/error", "auth/AuthError", "", "src/pages/AuthErrorStates.tsx"],
-  ["wizard", "/onboarding/account", "onboarding/Account", "", "routes.tsx stub AC notes: email+password, DOB age gate, terms consent"],
-  ["wizard", "/onboarding/path", "onboarding/PathChoice", "", "src/pages/onboarding/StepPathChoice.tsx"],
-  ["wizard", "/onboarding/profile", "onboarding/Profile", "", "src/pages/onboarding/StepProfile.tsx"],
-  ["wizard", "/onboarding/discover", "onboarding/Discover", "", "src/pages/onboarding/StepDiscover.tsx"],
-  ["wizard", "/onboarding/payment", "onboarding/Payment", "", "src/pages/payment/PaymentSetup.tsx (context=onboarding)"],
-  ["wizard", "/onboarding/complete", "onboarding/Complete", "", "routes.tsx stub: celebration, CTA go to feed"],
-  ["wizard", "/onboarding/kyc", "kyc/KycHandoff", "layer2", "src/pages/onboarding/StepKYCHandoff.tsx"],
-  ["wizard", "/onboarding/kyc/id-type", "kyc/KycIdType", "layer2", "src/pages/onboarding/kyc/KYCIdType.tsx"],
-  ["wizard", "/onboarding/kyc/document", "kyc/KycDocument", "layer2", "src/pages/onboarding/kyc/KYCDocumentCapture.tsx"],
-  ["wizard", "/onboarding/kyc/selfie", "kyc/KycSelfie", "layer2", "src/pages/onboarding/kyc/KYCSelfie.tsx"],
-  ["wizard", "/onboarding/kyc/review", "kyc/KycReview", "layer2", "src/pages/onboarding/kyc/KYCReview.tsx"],
-  ["wizard", "/onboarding/kyc/pending", "kyc/KycPending", "layer2", "src/pages/onboarding/StepKYCPending.tsx"],
-  ["wizard", "/investor/certification", "invest/InvestorCertification", "layer2", "src/pages/investor/InvestorCertification.tsx"],
-  ["fan", "/kyc/pending", "kyc/KycOutcomePending", "layer2", "src/pages/kyc/KYCOutcomePending.tsx + KYCOutcomeShell.tsx"],
-  ["fan", "/kyc/approved", "kyc/KycOutcomeApproved", "layer2", "src/pages/kyc/KYCOutcomeApproved.tsx"],
-  ["fan", "/kyc/rejected", "kyc/KycOutcomeRejected", "layer2", "src/pages/kyc/KYCOutcomeRejected.tsx"],
-  ["fan", "/home", "fan/HomeFeed", "", "routes.tsx stub AC: activity cards post/drop/event/poll, stories rail, tabs For You/Following/Trending"],
-  ["fan", "/backed", "fan/BackedAndPerks", "", "FanZuP MerchBag.tsx perk vault + backing history (new)"],
-  ["fan", "/tickets", "fan/Tickets", "", "FanZuP TicketMarketplace.tsx"],
-  ["fan", "/merch", "fan/Merch", "", "FanZuP MerchBag.tsx (store part)"],
-  ["fan", "/backstage", "fan/Backstage", "", "FanZuP BackstagePassGallery.tsx"],
-  ["fan", "/profile", "fan/Profile", "", "routes.tsx stub AC + FanZuP FanLoyaltyBadges.tsx (engagement badges) + All-Access card"],
-  ["fan", "/settings", "settings/Settings", "", "routes.tsx stub AC: notifications, privacy, connected accounts, danger zone"],
-  ["fan", "/settings/payments", "settings/Payments", "", "src/pages/payment/PaymentSetup.tsx (context=settings) + FanZuP BankingSystem.tsx"],
-  ["fan", "/settings/tax", "settings/TaxDocuments", "", "FanZuP TaxCenter.tsx"],
-  ["fan", "/live", "streaming/LiveSessions", "", "src/pages/streaming/FanPurchaseStream.tsx"],
-  ["fan", "/live/access", "streaming/AccessCode", "", "src/pages/streaming/AccessCodeEntry.tsx"],
-  ["fan", "/live/:id", "streaming/LiveView", "", "src/pages/streaming/LiveStreamView.tsx"],
-  ["fan", "/pools", "invest/PoolsExplore", "layer2", "(new) Layer 2 discovery, PRD 02 §8 rules"],
-  ["fan", "/pools/:id", "invest/PoolDetail", "layer2", "src/pages/campaign/CampaignDetailPage.tsx (investment variant)"],
-  ["fan", "/invest/:id/documents", "invest/DocumentReview", "layer2", "src/pages/investment/DocumentReview.tsx"],
-  ["fan", "/invest/:id/confirmation", "invest/InvestmentConfirmation", "layer2", "src/pages/investment/InvestmentConfirmation.tsx"],
-  ["fan", "/portfolio", "invest/Portfolio", "layer2", "FanZuP FanApp.tsx dashboard (rebuilt per CONSOLIDATION.md)"],
-  ["fan", "/portfolio/:poolId", "invest/HoldingDetail", "layer2", "(new) holding + LockupNotice + soft-transfer (postBeta) per Mechanism 07"],
-  ["fan", "/portfolio/:poolId/transfer", "invest/SoftTransfer", "postBeta", "Draft SecondaryMarket.tsx — rebuilt as P1 soft transfer"],
-  ["fan", "/governance", "invest/HolderVotes", "postBeta", "FanZuP GovernancePortal.tsx — rebuilt as SPV holder communications/votes"],
-  ["wizard", "/artist-onboarding/basic", "artist/BasicInfo", "", "src/pages/artist-onboarding/ArtistBasicInfo.tsx"],
-  ["wizard", "/artist-onboarding/media", "artist/MediaUploads", "", "src/pages/artist-onboarding/ArtistMediaUploads.tsx"],
-  ["wizard", "/artist-onboarding/social", "artist/SocialLinks", "", "src/pages/artist-onboarding/ArtistSocialLinks.tsx"],
-  ["wizard", "/artist-onboarding/streaming", "artist/StreamingLinks", "", "src/pages/artist-onboarding/ArtistStreamingLinks.tsx"],
-  ["wizard", "/artist-onboarding/review", "artist/Review", "", "src/pages/artist-onboarding/ArtistReview.tsx"],
-  ["wizard", "/artist-onboarding/verify", "artist/KycIntro", "", "src/pages/artist-onboarding/ArtistKYCIntro.tsx + ArtistKYCHandoff.tsx"],
-  ["wizard", "/artist-onboarding/verify/id-type", "artist/KycIdType", "", "src/pages/artist-onboarding/kyc/ArtistKYCIdType.tsx"],
-  ["wizard", "/artist-onboarding/verify/document", "artist/KycDocument", "", "src/pages/artist-onboarding/kyc/ArtistKYCDocumentCapture.tsx"],
-  ["wizard", "/artist-onboarding/verify/selfie", "artist/KycSelfie", "", "src/pages/artist-onboarding/kyc/ArtistKYCSelfie.tsx"],
-  ["wizard", "/artist-onboarding/verify/review", "artist/KycReview", "", "src/pages/artist-onboarding/kyc/ArtistKYCReview.tsx"],
-  ["wizard", "/artist-onboarding/verify/pending", "artist/KycPending", "", "src/pages/artist-onboarding/ArtistKYCPending.tsx"],
-  ["wizard", "/artist-onboarding/verify/approved", "artist/KycApproved", "", "src/pages/artist-onboarding/ArtistKYCApproved.tsx"],
-  ["wizard", "/artist-onboarding/verify/rejected", "artist/KycRejected", "", "src/pages/artist-onboarding/ArtistKYCRejected.tsx"],
-  ["wizard", "/artist-onboarding/starter-unlocked", "artist/StarterUnlocked", "", "src/pages/artist-onboarding/Tier1Unlock.tsx"],
-  ["wizard", "/artist-onboarding/complete", "artist/Complete", "", "src/pages/artist-onboarding/ArtistComplete.tsx"],
-  ["wizard", "/tier/rising", "artist/RisingIntro", "layer2", "src/pages/artist-tier2/Tier2Intro.tsx"],
-  ["wizard", "/tier/rising/business", "artist/RisingBusiness", "layer2", "src/pages/artist-tier2/Tier2Business.tsx"],
-  ["wizard", "/tier/rising/streaming", "artist/RisingStreaming", "layer2", "src/pages/artist-tier2/Tier2Streaming.tsx"],
-  ["wizard", "/tier/rising/social", "artist/RisingSocial", "layer2", "src/pages/artist-tier2/Tier2Social.tsx"],
-  ["wizard", "/tier/rising/complete", "artist/RisingComplete", "layer2", "src/pages/artist-tier2/Tier2Complete.tsx"],
-  ["creator", "/creator", "creator/Dashboard", "", "src/pages/creator-dashboard/CreatorDashboardLanding.tsx"],
-  ["creator", "/creator/campaigns", "creator/Campaigns", "", "(new) list of creator's campaigns + CTA new"],
-  ["creator", "/creator/campaigns/:id", "creator/CampaignLive", "", "src/pages/campaign/CampaignLive.tsx"],
-  ["creator", "/creator/revenue", "creator/Revenue", "", "src/pages/creator-dashboard/RevenueAnalytics.tsx"],
-  ["creator", "/creator/content", "creator/Content", "", "src/pages/creator-dashboard/ContentManagement.tsx"],
-  ["creator", "/creator/content/upload", "creator/Upload", "", "src/pages/creator-dashboard/UploadContent.tsx"],
-  ["creator", "/creator/events", "creator/Events", "", "src/pages/creator-dashboard/EventManagement.tsx"],
-  ["creator", "/creator/events/new", "creator/CreateEvent", "", "src/pages/creator-dashboard/CreateEvent.tsx"],
-  ["creator", "/creator/streaming", "creator/StreamDashboard", "", "src/pages/streaming/ArtistStreamDashboard.tsx"],
-  ["creator", "/creator/payouts", "creator/Payouts", "", "FanZuP BankingSystem.tsx (creator payout account) — escrow partner holds funds"],
-  ["creator", "/creator/tax", "creator/TaxDocuments", "", "FanZuP TaxCenter.tsx (1099-NEC for artists)"],
-  ["creator", "/creator/revenue-sources", "creator/RevenueSources", "layer2", "FanZuP IntegrationsPanel.tsx — PRD 01b connection states"],
-  ["wizard", "/creator/campaigns/new/basics", "campaign/Basics", "", "src/pages/campaign/CampaignBasics.tsx"],
-  ["wizard", "/creator/campaigns/new/details", "campaign/Details", "", "src/pages/campaign/CampaignDetails.tsx"],
-  ["wizard", "/creator/campaigns/new/perks", "campaign/Perks", "", "src/pages/campaign/CampaignPerks.tsx"],
-  ["wizard", "/creator/campaigns/new/preview", "campaign/Preview", "", "src/pages/campaign/CampaignPreview.tsx"],
-  ["wizard", "/creator/campaigns/new/submitted", "campaign/Submitted", "", "src/pages/campaign/CampaignSuccess.tsx"],
-  ["admin", "/admin", "admin/Queues", "", "(new) queue index"],
-  ["admin", "/admin/review/under-review", "admin/ReviewUnderReview", "", "src/pages/compliance/ReviewUnderReview.tsx"],
-  ["admin", "/admin/review/revisions", "admin/ReviewRevisions", "", "src/pages/compliance/ReviewRevisions.tsx"],
-  ["admin", "/admin/review/approved", "admin/ReviewApproved", "", "src/pages/compliance/ReviewApproved.tsx"],
-  ["admin", "/admin/kyc", "admin/IdentityQueue", "", "(new) KYC/AML queue stub per PRD 01 FR-ADMIN"],
-  ["bare", "/ds", "ds/DesignSystem", "", "src/pages/ComponentShowcase.tsx + DesignSystemDocs.tsx + IconLibrary.tsx + LayoutGrid.tsx"]
+[
+"public",
+"/",
+"public/Landing",
+"",
+"src/pages/LandingPage.tsx"
+],
+[
+"public",
+"/explore",
+"discover/Explore",
+"",
+"src/pages/marketplace/MarketplaceExplore.tsx + MarketplaceHomepage.tsx + CreatorCardShowcase.tsx + NonContentStatesShowcase.tsx + search/SearchOverlay.tsx"
+],
+[
+"public",
+"/campaigns/:id",
+"campaigns/CampaignDetail",
+"",
+"src/pages/campaign/CampaignDetailPage.tsx"
+],
+[
+"public",
+"/artist/:id",
+"discover/ArtistProfile",
+"",
+"src/pages/profile/PublicCreatorProfile.tsx"
+],
+[
+"public",
+"/for-artists",
+"public/ForArtists",
+"",
+"(new) artist value prop + tier table from PRD 01 \u00a76.3"
+],
+[
+"public",
+"/fees",
+"public/Fees",
+"",
+"FanZuP PlatformFeeTransparency.tsx \u2014 numbers from docs/brand/fees.html (TBD)"
+],
+[
+"public",
+"/trust",
+"public/Trust",
+"",
+"(new) escrow/refund + how money moves, from Mechanism 05 \u00a72"
+],
+[
+"public",
+"/legal/:doc",
+"public/Legal",
+"",
+"(new) terms/privacy shell \u2014 documents pending counsel"
+],
+[
+"public",
+"/support",
+"public/Support",
+"",
+"(new) help & contact"
+],
+[
+"auth",
+"/signup",
+"auth/SignUp",
+"",
+"src/pages/SignUpFlows.tsx"
+],
+[
+"auth",
+"/login",
+"auth/LogIn",
+"",
+"src/pages/LoginAndPasswordFlow.tsx"
+],
+[
+"auth",
+"/reset-password",
+"auth/ResetPassword",
+"",
+"src/pages/LoginAndPasswordFlow.tsx"
+],
+[
+"auth",
+"/verify-email",
+"auth/VerifyEmail",
+"",
+"src/pages/EmailVerification.tsx"
+],
+[
+"auth",
+"/auth/error",
+"auth/AuthError",
+"",
+"src/pages/AuthErrorStates.tsx"
+],
+[
+"wizard",
+"/onboarding/account",
+"onboarding/Account",
+"",
+"routes.tsx stub AC notes: email+password, DOB age gate, terms consent"
+],
+[
+"wizard",
+"/onboarding/path",
+"onboarding/PathChoice",
+"",
+"src/pages/onboarding/StepPathChoice.tsx"
+],
+[
+"wizard",
+"/onboarding/profile",
+"onboarding/Profile",
+"",
+"src/pages/onboarding/StepProfile.tsx"
+],
+[
+"wizard",
+"/onboarding/discover",
+"onboarding/Discover",
+"",
+"src/pages/onboarding/StepDiscover.tsx"
+],
+[
+"wizard",
+"/onboarding/payment",
+"onboarding/Payment",
+"",
+"src/pages/payment/PaymentSetup.tsx (context=onboarding)"
+],
+[
+"wizard",
+"/onboarding/complete",
+"onboarding/Complete",
+"",
+"routes.tsx stub: celebration, CTA go to feed"
+],
+[
+"wizard",
+"/onboarding/kyc",
+"kyc/KycHandoff",
+"layer2",
+"src/pages/onboarding/StepKYCHandoff.tsx"
+],
+[
+"wizard",
+"/onboarding/kyc/id-type",
+"kyc/KycIdType",
+"layer2",
+"src/pages/onboarding/kyc/KYCIdType.tsx"
+],
+[
+"wizard",
+"/onboarding/kyc/document",
+"kyc/KycDocument",
+"layer2",
+"src/pages/onboarding/kyc/KYCDocumentCapture.tsx"
+],
+[
+"wizard",
+"/onboarding/kyc/selfie",
+"kyc/KycSelfie",
+"layer2",
+"src/pages/onboarding/kyc/KYCSelfie.tsx"
+],
+[
+"wizard",
+"/onboarding/kyc/review",
+"kyc/KycReview",
+"layer2",
+"src/pages/onboarding/kyc/KYCReview.tsx"
+],
+[
+"wizard",
+"/onboarding/kyc/pending",
+"kyc/KycPending",
+"layer2",
+"src/pages/onboarding/StepKYCPending.tsx"
+],
+[
+"wizard",
+"/investor/certification",
+"invest/InvestorCertification",
+"layer2",
+"src/pages/investor/InvestorCertification.tsx"
+],
+[
+"fan",
+"/kyc/pending",
+"kyc/KycOutcomePending",
+"layer2",
+"src/pages/kyc/KYCOutcomePending.tsx + KYCOutcomeShell.tsx"
+],
+[
+"fan",
+"/kyc/approved",
+"kyc/KycOutcomeApproved",
+"layer2",
+"src/pages/kyc/KYCOutcomeApproved.tsx"
+],
+[
+"fan",
+"/kyc/rejected",
+"kyc/KycOutcomeRejected",
+"layer2",
+"src/pages/kyc/KYCOutcomeRejected.tsx"
+],
+[
+"fan",
+"/home",
+"fan/HomeFeed",
+"",
+"routes.tsx stub AC: activity cards post/drop/event/poll, stories rail, tabs For You/Following/Trending"
+],
+[
+"fan",
+"/backed",
+"fan/BackedAndPerks",
+"",
+"FanZuP MerchBag.tsx perk vault + backing history (new)"
+],
+[
+"fan",
+"/tickets",
+"fan/Tickets",
+"",
+"FanZuP TicketMarketplace.tsx"
+],
+[
+"fan",
+"/merch",
+"fan/Merch",
+"",
+"FanZuP MerchBag.tsx (store part)"
+],
+[
+"fan",
+"/backstage",
+"fan/Backstage",
+"",
+"FanZuP BackstagePassGallery.tsx"
+],
+[
+"fan",
+"/profile",
+"fan/Profile",
+"",
+"routes.tsx stub AC + FanZuP FanLoyaltyBadges.tsx (engagement badges) + All-Access card"
+],
+[
+"fan",
+"/settings",
+"settings/Settings",
+"",
+"routes.tsx stub AC: notifications, privacy, connected accounts, danger zone"
+],
+[
+"fan",
+"/settings/payments",
+"settings/Payments",
+"",
+"src/pages/payment/PaymentSetup.tsx (context=settings) + FanZuP BankingSystem.tsx"
+],
+[
+"fan",
+"/settings/tax",
+"settings/TaxDocuments",
+"",
+"FanZuP TaxCenter.tsx"
+],
+[
+"fan",
+"/live",
+"streaming/LiveSessions",
+"",
+"src/pages/streaming/FanPurchaseStream.tsx"
+],
+[
+"fan",
+"/live/access",
+"streaming/AccessCode",
+"",
+"src/pages/streaming/AccessCodeEntry.tsx"
+],
+[
+"fan",
+"/live/:id",
+"streaming/LiveView",
+"",
+"src/pages/streaming/LiveStreamView.tsx"
+],
+[
+"fan",
+"/pools",
+"invest/PoolsExplore",
+"layer2",
+"(new) Layer 2 discovery, PRD 02 \u00a78 rules"
+],
+[
+"fan",
+"/pools/:id",
+"invest/PoolDetail",
+"layer2",
+"src/pages/campaign/CampaignDetailPage.tsx (investment variant)"
+],
+[
+"fan",
+"/invest/:id/documents",
+"invest/DocumentReview",
+"layer2",
+"src/pages/investment/DocumentReview.tsx"
+],
+[
+"fan",
+"/invest/:id/confirmation",
+"invest/InvestmentConfirmation",
+"layer2",
+"src/pages/investment/InvestmentConfirmation.tsx"
+],
+[
+"fan",
+"/portfolio",
+"invest/Portfolio",
+"layer2",
+"FanZuP FanApp.tsx dashboard (rebuilt per CONSOLIDATION.md)"
+],
+[
+"fan",
+"/portfolio/:poolId",
+"invest/HoldingDetail",
+"layer2",
+"(new) holding + LockupNotice + soft-transfer (postBeta) per Mechanism 07"
+],
+[
+"fan",
+"/portfolio/:poolId/transfer",
+"invest/SoftTransfer",
+"postBeta",
+"Draft SecondaryMarket.tsx \u2014 rebuilt as P1 soft transfer"
+],
+[
+"fan",
+"/governance",
+"invest/HolderVotes",
+"postBeta",
+"FanZuP GovernancePortal.tsx \u2014 rebuilt as SPV holder communications/votes"
+],
+[
+"wizard",
+"/artist-onboarding/basic",
+"artist/BasicInfo",
+"",
+"src/pages/artist-onboarding/ArtistBasicInfo.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/media",
+"artist/MediaUploads",
+"",
+"src/pages/artist-onboarding/ArtistMediaUploads.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/social",
+"artist/SocialLinks",
+"",
+"src/pages/artist-onboarding/ArtistSocialLinks.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/streaming",
+"artist/StreamingLinks",
+"",
+"src/pages/artist-onboarding/ArtistStreamingLinks.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/review",
+"artist/Review",
+"",
+"src/pages/artist-onboarding/ArtistReview.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/verify",
+"artist/KycIntro",
+"",
+"src/pages/artist-onboarding/ArtistKYCIntro.tsx + ArtistKYCHandoff.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/verify/id-type",
+"artist/KycIdType",
+"",
+"src/pages/artist-onboarding/kyc/ArtistKYCIdType.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/verify/document",
+"artist/KycDocument",
+"",
+"src/pages/artist-onboarding/kyc/ArtistKYCDocumentCapture.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/verify/selfie",
+"artist/KycSelfie",
+"",
+"src/pages/artist-onboarding/kyc/ArtistKYCSelfie.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/verify/review",
+"artist/KycReview",
+"",
+"src/pages/artist-onboarding/kyc/ArtistKYCReview.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/verify/pending",
+"artist/KycPending",
+"",
+"src/pages/artist-onboarding/ArtistKYCPending.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/verify/approved",
+"artist/KycApproved",
+"",
+"src/pages/artist-onboarding/ArtistKYCApproved.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/verify/rejected",
+"artist/KycRejected",
+"",
+"src/pages/artist-onboarding/ArtistKYCRejected.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/starter-unlocked",
+"artist/StarterUnlocked",
+"",
+"src/pages/artist-onboarding/Tier1Unlock.tsx"
+],
+[
+"wizard",
+"/artist-onboarding/complete",
+"artist/Complete",
+"",
+"src/pages/artist-onboarding/ArtistComplete.tsx"
+],
+[
+"wizard",
+"/tier/rising",
+"artist/RisingIntro",
+"layer2",
+"src/pages/artist-tier2/Tier2Intro.tsx"
+],
+[
+"wizard",
+"/tier/rising/business",
+"artist/RisingBusiness",
+"layer2",
+"src/pages/artist-tier2/Tier2Business.tsx"
+],
+[
+"wizard",
+"/tier/rising/streaming",
+"artist/RisingStreaming",
+"layer2",
+"src/pages/artist-tier2/Tier2Streaming.tsx"
+],
+[
+"wizard",
+"/tier/rising/social",
+"artist/RisingSocial",
+"layer2",
+"src/pages/artist-tier2/Tier2Social.tsx"
+],
+[
+"wizard",
+"/tier/rising/complete",
+"artist/RisingComplete",
+"layer2",
+"src/pages/artist-tier2/Tier2Complete.tsx"
+],
+[
+"creator",
+"/creator",
+"creator/Dashboard",
+"",
+"src/pages/creator-dashboard/CreatorDashboardLanding.tsx"
+],
+[
+"creator",
+"/creator/campaigns",
+"creator/Campaigns",
+"",
+"(new) list of creator's campaigns + CTA new"
+],
+[
+"creator",
+"/creator/campaigns/:id",
+"creator/CampaignLive",
+"",
+"src/pages/campaign/CampaignLive.tsx"
+],
+[
+"creator",
+"/creator/revenue",
+"creator/Revenue",
+"",
+"src/pages/creator-dashboard/RevenueAnalytics.tsx"
+],
+[
+"creator",
+"/creator/content",
+"creator/Content",
+"",
+"src/pages/creator-dashboard/ContentManagement.tsx"
+],
+[
+"creator",
+"/creator/content/upload",
+"creator/Upload",
+"",
+"src/pages/creator-dashboard/UploadContent.tsx"
+],
+[
+"creator",
+"/creator/events",
+"creator/Events",
+"",
+"src/pages/creator-dashboard/EventManagement.tsx"
+],
+[
+"creator",
+"/creator/events/new",
+"creator/CreateEvent",
+"",
+"src/pages/creator-dashboard/CreateEvent.tsx"
+],
+[
+"creator",
+"/creator/streaming",
+"creator/StreamDashboard",
+"",
+"src/pages/streaming/ArtistStreamDashboard.tsx"
+],
+[
+"creator",
+"/creator/payouts",
+"creator/Payouts",
+"",
+"FanZuP BankingSystem.tsx (creator payout account) \u2014 escrow partner holds funds"
+],
+[
+"creator",
+"/creator/tax",
+"creator/TaxDocuments",
+"",
+"FanZuP TaxCenter.tsx (1099-NEC for artists)"
+],
+[
+"creator",
+"/creator/revenue-sources",
+"creator/RevenueSources",
+"layer2",
+"FanZuP IntegrationsPanel.tsx \u2014 PRD 01b connection states"
+],
+[
+"wizard",
+"/creator/campaigns/new/basics",
+"campaign/Basics",
+"",
+"src/pages/campaign/CampaignBasics.tsx"
+],
+[
+"wizard",
+"/creator/campaigns/new/details",
+"campaign/Details",
+"",
+"src/pages/campaign/CampaignDetails.tsx"
+],
+[
+"wizard",
+"/creator/campaigns/new/perks",
+"campaign/Perks",
+"",
+"src/pages/campaign/CampaignPerks.tsx"
+],
+[
+"wizard",
+"/creator/campaigns/new/preview",
+"campaign/Preview",
+"",
+"src/pages/campaign/CampaignPreview.tsx"
+],
+[
+"wizard",
+"/creator/campaigns/new/submitted",
+"campaign/Submitted",
+"",
+"src/pages/campaign/CampaignSuccess.tsx"
+],
+[
+"admin",
+"/admin",
+"admin/Queues",
+"",
+"(new) queue index"
+],
+[
+"admin",
+"/admin/review/under-review",
+"admin/ReviewUnderReview",
+"",
+"src/pages/compliance/ReviewUnderReview.tsx"
+],
+[
+"admin",
+"/admin/review/revisions",
+"admin/ReviewRevisions",
+"",
+"src/pages/compliance/ReviewRevisions.tsx"
+],
+[
+"admin",
+"/admin/review/approved",
+"admin/ReviewApproved",
+"",
+"src/pages/compliance/ReviewApproved.tsx"
+],
+[
+"admin",
+"/admin/kyc",
+"admin/IdentityQueue",
+"",
+"(new) KYC/AML queue stub per PRD 01 FR-ADMIN"
+],
+[
+"bare",
+"/ds",
+"ds/DesignSystem",
+"",
+"src/pages/ComponentShowcase.tsx + DesignSystemDocs.tsx + IconLibrary.tsx + LayoutGrid.tsx"
+]
 ]
