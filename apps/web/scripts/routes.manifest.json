@@ -25,7 +25,7 @@
 "/checkout/:slug",
 "fan/Checkout",
 "",
-"(new) M1 checkout — FR-BCK-001/002, FR-PAY-001/006"
+"(new) M1 checkout \u2014 FR-BCK-001/002, FR-PAY-001/006"
 ],
 [
 "public",
@@ -316,6 +316,13 @@
 ],
 [
 "fan",
+"/pools/:id/form-c",
+"invest/FormC",
+"layer2",
+"(new) CR-002 mock Form C generated from the Pool data"
+],
+[
+"fan",
 "/invest/:id/documents",
 "invest/DocumentReview",
 "layer2",
@@ -581,6 +588,27 @@
 "FanZuP IntegrationsPanel.tsx \u2014 PRD 01b connection states"
 ],
 [
+"creator",
+"/creator/pools",
+"creator/Pools",
+"layer2",
+"(new) CR-002 album royalty Pools list"
+],
+[
+"creator",
+"/creator/pools/new",
+"creator/PoolNew",
+"layer2",
+"FanZuP CreatorApp create-pool modal steps 2\u20133, rebuilt (CR-002)"
+],
+[
+"creator",
+"/creator/pools/:id",
+"creator/PoolManage",
+"layer2",
+"(new) CR-002 Pool status, launch, milestones, royalty statements"
+],
+[
 "wizard",
 "/creator/campaigns/new/basics",
 "campaign/Basics",
@@ -649,6 +677,27 @@
 "admin/IdentityQueue",
 "",
 "(new) KYC/AML queue stub per PRD 01 FR-ADMIN"
+],
+[
+"admin",
+"/admin/pools",
+"admin/Pools",
+"layer2",
+"(new) CR-002 Layer 2 staff worklist + Pools"
+],
+[
+"admin",
+"/admin/pools/:id",
+"admin/Pool",
+"layer2",
+"(new) CR-002 Pool money view, Form C review, Waterfall"
+],
+[
+"admin",
+"/admin/investors",
+"admin/Investors",
+"layer2",
+"(new) CR-002 investor KYC manual review"
 ],
 [
 "bare",

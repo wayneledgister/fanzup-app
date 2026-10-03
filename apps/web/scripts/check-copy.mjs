@@ -52,5 +52,18 @@ if (fs.existsSync(TEMPLATE_FILE)) {
     for (const [re, name] of TEMPLATE_BANNED) if (re.test(text)) { bad++; console.log(`api/src/notify.ts:${i + 1}  [${name}]  ${line.trim().slice(0, 110)}`); }
   });
 }
+// Layer 2 notices and the mock Form C (CR-002, D-4): Layer 2 wording is allowed ("invest", "Units"), the Brand §7.4
+// banned list still applies, and payouts must never be promised.
+const L2_FILES = ["l2/notices.ts", "l2/formc.ts"].map((f) => path.resolve(root, "..", "..", "api", "src", f));
+const L2_BANNED = [...BANNED, [/\bguarantee(d|s)?\b(?!d? returns)/i, "guarantee (Layer 2: payouts are potential)"], [/\bwill (receive|earn|get) (a )?(payout|return|distribution)/i, "promised payout"]];
+for (const file of L2_FILES) {
+  if (!fs.existsSync(file)) continue;
+  fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+    const text = (line.match(/"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g) ?? []).join(" ");
+    for (const [re, name] of L2_BANNED) if (re.test(text)) { bad++; console.log(`api/src/${path.relative(path.resolve(root, "..", "..", "api", "src"), file)}:${i + 1}  [${name}]  ${line.trim().slice(0, 110)}`); }
+  });
+}
+
 if (bad) { console.error(`\n${bad} copy violation(s).`); process.exit(1); }
 console.log("copy check: clean");

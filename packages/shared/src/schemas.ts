@@ -36,6 +36,8 @@ export const PublicConfig = z.object({
   provider: z.enum(["sandbox", "stripe-test"]),
   testMode: z.boolean(),
   stripePublishableKey: z.string().nullable(),
+  /** Server-side flags (FR-PLT-001). Optional so older API builds still parse. */
+  flags: z.object({ layer2: z.boolean() }).optional(),
 });
 export type PublicConfig = z.infer<typeof PublicConfig>;
 

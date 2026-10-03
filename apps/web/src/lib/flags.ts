@@ -8,6 +8,7 @@
  * For design review, `?flags=layer2,postBeta` in the URL turns them on for the browser session.
  */
 import { useSyncExternalStore } from "react";
+import { useConfig } from "./config";
 
 export type Flag = "layer2" | "postBeta";
 const ALL: Flag[] = ["layer2", "postBeta"];
@@ -52,7 +53,17 @@ export function setFlag(flag: Flag, value: boolean) {
   listeners.forEach((l) => l());
 }
 
+/**
+ * A flag is on when the browser override/env says so, or — for `layer2` — when the API says the server-side flag is
+ * on (FR-PLT-001: the server is the gate for data; the client override only reveals mock-only screens).
+ */
 export function useFlag(flag: Flag): boolean {
+  const cfg = useConfig();
+  const client = useClientFlag(flag);
+  return client || (flag === "layer2" && !!cfg?.flags?.layer2);
+}
+
+function useClientFlag(flag: Flag): boolean {
   return useSyncExternalStore(
     (cb) => {
       listeners.add(cb);

@@ -1,7 +1,8 @@
 /** Helpers for the golden journey: API calls as artist/staff, Mailpit, TOTP. No secrets: local/CI seed accounts only. */
 import { createClient } from "@supabase/supabase-js";
 import { authenticator } from "otplib";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 
@@ -38,12 +39,29 @@ export async function seedSignIn(email: string, credential = SEED_PASSWORD) { //
   return data.session.access_token;
 }
 
+/** TOTP secrets enrolled during this test run, shared across spec files (a verified factor's secret can't be read back). */
+const totpCache = (email: string) => join(tmpdir(), `fanzup-e2e-totp-${email.replace(/[^a-z0-9]/gi, "_")}.json`);
+
 /** Staff session at aal2: enrol a TOTP factor (first run) and verify a code — the real Supabase MFA flow. */
 export async function staffToken(email: string) {
   const sb = client();
   const { error } = await sb.auth.signInWithPassword({ email, password: SEED_PASSWORD });
   if (error) throw new Error(`staff sign-in failed: ${error.message}`);
   const { data: existing } = await sb.auth.mfa.listFactors();
+  const known = existing?.totp.find((f) => f.status === "verified");
+  if (known && existsSync(totpCache(email))) {
+    const { factorId, secret } = JSON.parse(readFileSync(totpCache(email), "utf8"));
+    if (factorId === known.id) {
+      // A code can't be reused within its 30-second step; wait for the next one if needed.
+      const v = await sb.auth.mfa.challengeAndVerify({ factorId, code: authenticator.generate(secret) });
+      if (v.error) {
+        await new Promise((r) => setTimeout(r, authenticator.timeRemaining() * 1000 + 500));
+        const v2 = await sb.auth.mfa.challengeAndVerify({ factorId, code: authenticator.generate(secret) });
+        if (v2.error) throw new Error(`TOTP verify failed: ${v2.error.message}`);
+      }
+      return (await sb.auth.getSession()).data.session!.access_token;
+    }
+  }
   for (const f of existing?.all ?? []) if (f.status !== "verified") await sb.auth.mfa.unenroll({ factorId: f.id });
   if (existing?.totp.some((f) => f.status === "verified")) throw new Error("the staff seed user already has a verified TOTP factor from an earlier run — reset the local database (CI starts fresh)");
   const enrolled = await sb.auth.mfa.enroll({ factorType: "totp", friendlyName: `e2e-${Date.now()}` });
@@ -51,6 +69,7 @@ export async function staffToken(email: string) {
   const secret = enrolled.data.totp.secret;
   const v = await sb.auth.mfa.challengeAndVerify({ factorId: enrolled.data.id, code: authenticator.generate(secret) });
   if (v.error) throw new Error(`TOTP verify failed: ${v.error.message}`);
+  writeFileSync(totpCache(email), JSON.stringify({ factorId: enrolled.data.id, secret }));
   const { data } = await sb.auth.getSession();
   return data.session!.access_token;
 }
