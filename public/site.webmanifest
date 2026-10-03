@@ -1,0 +1,26 @@
+{
+  "name": "FanZuP",
+  "short_name": "FanZuP",
+  "description": "Fund the culture. Own the future.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    },
+    {
+      "src": "/maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "theme_color": "#0B0B0D",
+  "background_color": "#0B0B0D",
+  "display": "standalone"
+}

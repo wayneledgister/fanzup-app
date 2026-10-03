@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>FanzUp — Fee Structure</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0B1220;--surface:#161F2E;--surface2:#1C2636;--sb-bg:#080E1A;--sb-border:rgba(255,255,255,.07);--border:rgba(255,255,255,.08);--text:#E8EDF5;--tm:#7A8FA8;--tf:#4A5F75;--blue:#3B82F6;--blue-bg:rgba(59,130,246,.1);--green:#22C55E;--green-bg:rgba(34,197,94,.1);--purple:#A855F7;--purple-bg:rgba(168,85,247,.1);--amber:#F59E0B;--amber-bg:rgba(245,158,11,.1);--red:#EF4444;--red-bg:rgba(239,68,68,.1);--cyan:#06B6D4;--cyan-bg:rgba(6,182,212,.1);--orange:#F97316;--orange-bg:rgba(249,115,22,.1);--rose:#F43F5E;--rose-bg:rgba(244,63,94,.1);--t1:#6B7280;--t2:#3B82F6;--t3:#A855F7;--t4:#F59E0B;--r:12px;--rs:8px;--rx:6px}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh}
+.sidebar{width:252px;min-height:100vh;background:var(--sb-bg);border-right:1px solid var(--sb-border);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;overflow-y:auto}
+.sb-logo{padding:22px 18px 16px;border-bottom:1px solid var(--sb-border)}.sb-logo h1{font-size:17px;font-weight:800;color:#fff;margin-bottom:2px}.sb-logo span{font-size:10px;color:var(--tf);text-transform:uppercase;letter-spacing:1.2px;font-weight:600}
+.sb-sec{padding:14px 10px 4px}.sb-lbl{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:1.3px;color:var(--tf);padding:0 8px 7px}
+.sb-link{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;text-decoration:none;color:var(--tm);font-size:12.5px;font-weight:500;transition:background .12s,color .12s;margin-bottom:1px}
+.sb-link:hover{background:rgba(255,255,255,.06);color:#fff}.sb-link.active{background:rgba(255,255,255,.1);color:#fff}.si{font-size:13px;flex-shrink:0}
+.sb-link.t1:hover,.sb-link.t1.active{color:var(--t1);background:rgba(107,114,128,.12)}.sb-link.t2:hover,.sb-link.t2.active{color:var(--t2);background:var(--blue-bg)}.sb-link.t3:hover,.sb-link.t3.active{color:var(--t3);background:var(--purple-bg)}.sb-link.t4:hover,.sb-link.t4.active{color:var(--t4);background:var(--amber-bg)}.sb-link.lf:hover,.sb-link.lf.active{color:var(--green);background:var(--green-bg)}.sb-link.lr:hover,.sb-link.lr.active{color:var(--red);background:var(--red-bg)}.sb-link.lc:hover,.sb-link.lc.active{color:var(--cyan);background:var(--cyan-bg)}.sb-link.lo:hover,.sb-link.lo.active{color:var(--orange);background:var(--orange-bg)}.sb-link.lbk{font-size:11.5px;color:var(--tf)}.sb-link.lbk:hover{color:var(--tm);background:rgba(255,255,255,.04)}.sb-link.las:hover,.sb-link.las.active{color:var(--purple);background:var(--purple-bg)}.sb-link.lap:hover,.sb-link.lap.active{color:var(--amber);background:var(--amber-bg)}.sb-link.lch:hover,.sb-link.lch.active{color:var(--rose);background:var(--rose-bg)}
+.sb-foot{margin-top:auto;padding:14px 18px;border-top:1px solid var(--sb-border);font-size:10px;color:var(--tf);line-height:1.8}
+.main{margin-left:252px;flex:1;display:flex;flex-direction:column}
+.topbar{background:rgba(11,18,32,.95);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:0 36px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.bc{font-size:12.5px;color:var(--tm);display:flex;align-items:center;gap:6px}.bc a{color:var(--blue);text-decoration:none;font-weight:500}.bc a:hover{text-decoration:underline}.tb-meta{font-size:11px;color:var(--tf)}
+.content{padding:40px 40px 80px}
+.page-hero{background:linear-gradient(135deg,#081920 0%,#0C2232 100%);border:1px solid rgba(6,182,212,.2);border-left:4px solid var(--cyan);border-radius:var(--r);padding:32px 36px;margin-bottom:32px;display:flex;align-items:center;gap:20px}
+.ph-icon{font-size:48px}.ph-pill{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;background:rgba(6,182,212,.15);color:var(--cyan);border:1px solid rgba(6,182,212,.3);padding:3px 10px;border-radius:20px;display:inline-block;margin-bottom:8px}
+.ph-h{font-size:22px;font-weight:800;color:#fff;margin-bottom:6px}.ph-p{font-size:13px;color:var(--tm);line-height:1.65;max-width:580px;margin-bottom:10px}
+.badge-row{display:flex;gap:6px;flex-wrap:wrap}.badge{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.8);font-size:10px;font-weight:600;padding:3px 10px;border-radius:20px;text-transform:uppercase;letter-spacing:.5px}
+/* Fee cards */
+.fee-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:28px}
+.fc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:22px;display:flex;flex-direction:column;gap:10px}
+.fc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.fi{font-size:20px}
+.fc-rate{font-size:20px;font-weight:800;color:#fff;text-align:right;line-height:1}
+.fc-rate .unit{font-size:11px;font-weight:500;color:var(--tf);display:block;margin-top:2px}
+.fc h4{font-size:13.5px;font-weight:700;color:#fff;line-height:1.3}
+.fc p{font-size:11.5px;color:var(--tm);line-height:1.6;flex:1}
+.fc .tbd{font-size:20px;font-weight:800;color:var(--amber);text-align:right;line-height:1}
+.fc .tbd .unit{font-size:11px;font-weight:500;color:var(--tf);display:block;margin-top:2px}
+.fc .known{font-size:16px;font-weight:800;color:var(--cyan);text-align:right;line-height:1}
+/* Benchmark table */
+.bm-table{width:100%;border-collapse:collapse;font-size:12px;margin:14px 0 24px}
+.bm-table th{text-align:left;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--tf);padding:8px 12px;border-bottom:1px solid var(--border)}
+.bm-table td{padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.04);color:var(--tm);vertical-align:top}
+.bm-table tr:last-child td{border-bottom:none}.bm-table td:first-child{color:var(--text);font-weight:600}
+.bm-table .hl{color:var(--cyan);font-weight:700}
+/* Callout */
+.callout{border-radius:var(--r);padding:16px 18px;margin:24px 0;border:1px solid;display:flex;gap:12px;align-items:flex-start}
+.ci{font-size:17px;flex-shrink:0;margin-top:1px}.cb strong{font-size:13px;font-weight:700;display:block;margin-bottom:4px}.cb p,.cb ul{font-size:12px;line-height:1.65}
+.callout.warn{background:var(--amber-bg);border-color:rgba(245,158,11,.2);color:#FCD34D}.callout.warn strong{color:#FDE68A}
+.callout.info{background:var(--blue-bg);border-color:rgba(59,130,246,.2);color:#93C5FD}.callout.info strong{color:#BFDBFE}
+.callout.danger{background:var(--red-bg);border-color:rgba(239,68,68,.2);color:#FCA5A5}.callout.danger strong{color:#FECACA}
+/* Next steps */
+.ns-card{background:var(--surface);border:1px solid rgba(6,182,212,.2);border-radius:var(--r);padding:22px}
+.ns-h{font-size:14px;font-weight:700;color:#fff;margin-bottom:14px}
+.ns-items{display:flex;flex-direction:column;gap:8px}
+.ns-item{display:flex;gap:10px;align-items:flex-start}
+.ns-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:3px 8px;border-radius:4px;flex-shrink:0;margin-top:1px}
+.ns-tag.prod{background:var(--blue-bg);color:#93C5FD;border:1px solid rgba(59,130,246,.2)}
+.ns-tag.legal{background:var(--red-bg);color:#FCA5A5;border:1px solid rgba(239,68,68,.2)}
+.ns-tag.fin{background:var(--green-bg);color:#86EFAC;border:1px solid rgba(34,197,94,.2)}
+.ns-text{font-size:12px;color:var(--tm);line-height:1.6}
+.pnav{display:flex;justify-content:space-between;align-items:center;padding:24px 0;border-top:1px solid var(--border);margin-top:16px}
+.nb{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;text-decoration:none;padding:9px 16px;border-radius:var(--rs);border:1px solid var(--border);color:var(--tm);transition:all .12s}
+.nb:hover{border-color:rgba(255,255,255,.15);color:#fff;background:var(--surface2)}.nb.pri{background:var(--cyan);border-color:var(--cyan);color:#081920}.nb.pri:hover{background:#0891B2;border-color:#0891B2}
+.sec-eye{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.4px;color:var(--cyan);margin-bottom:8px}
+.sec-h2{font-size:20px;font-weight:800;color:#fff;margin-bottom:8px}.sec-sub{font-size:13px;color:var(--tm);line-height:1.7;max-width:700px;margin-bottom:20px}
+.sec-tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--tf);margin:28px 0 12px;display:flex;align-items:center;gap:8px}.sec-tag::after{content:'';flex:1;height:1px;background:var(--border)}
+</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sb-logo"><h1>FanzUp</h1><span>Products &amp; Regulatory</span></div>
+  <div class="sb-sec"><div class="sb-lbl">Overview</div><a href="index.html" class="sb-link"><span class="si">🏠</span>Home</a></div>
+  <div class="sb-sec"><div class="sb-lbl">Creator Products</div>
+    <a href="creator-tier1.html" class="sb-link t1"><span class="si">🟢</span>Tier 1 — Starter</a>
+    <a href="creator-tier2.html" class="sb-link t2"><span class="si">🔵</span>Tier 2 — Rising</a>
+    <a href="creator-tier3.html" class="sb-link t3"><span class="si">🟣</span>Tier 3 — Established</a>
+    <a href="creator-tier4.html" class="sb-link t4"><span class="si">🟡</span>Tier 4 — Pro</a></div>
+  <div class="sb-sec"><div class="sb-lbl">Fan Products</div><a href="fan.html" class="sb-link lf"><span class="si">🎧</span>Fan Catalog</a></div>
+  <div class="sb-sec"><div class="sb-lbl">Social Impact</div><a href="charity.html" class="sb-link lch"><span class="si">❤️</span>Creator Giving</a></div>
+  <div class="sb-sec"><div class="sb-lbl">Compliance</div><a href="regulatory.html" class="sb-link lr"><span class="si">⚖️</span>Regulatory Framework</a></div>
+  <div class="sb-sec"><div class="sb-lbl">Platform</div><a href="fees.html" class="sb-link lc active"><span class="si">💰</span>Fee Structure</a><a href="roadmap.html" class="sb-link lo"><span class="si">🗺️</span>Product Roadmap</a></div>
+  <div class="sb-sec"><div class="sb-lbl">Strategic</div>
+    <a href="ats-roadmap.html" class="sb-link las"><span class="si">📈</span>ATS Registration</a>
+    <a href="reg-a-plus.html" class="sb-link lap"><span class="si">🚀</span>Reg A+ / Artist IPO</a></div>
+  <div class="sb-sec"><div class="sb-lbl">Navigate</div><a href="../diagrams/" class="sb-link lbk"><span class="si">←</span>Journey Maps</a></div>
+  <div class="sb-foot">FanzUp © 2026<br>Internal · Confidential<br>v2.0 — May 2026</div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <div class="bc"><a href="index.html">FanzUp Products</a><span style="color:#333">/</span><span>Fee Structure</span></div>
+    <div class="tb-meta">Page 7 of 8 &nbsp;·&nbsp; May 2026</div>
+  </div>
+  <div class="content">
+
+    <div class="page-hero">
+      <div class="ph-icon">💰</div>
+      <div>
+        <div class="ph-pill">Platform Economics</div>
+        <div class="ph-h">Fee Structure</div>
+        <div class="ph-p">FanzUp's revenue comes from platform fees on investment campaigns, subscription revenue shares, tip processing, merch commission, and affiliate referral fees. Most fees are still TBD pending product team, legal, and finance alignment. The one known fee is payment processing pass-through.</div>
+        <div class="badge-row">
+          <span class="badge">6 Fee Categories</span><span class="badge">Most Rates TBD</span><span class="badge">Reg CF Disclosure Required</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout danger">
+      <span class="ci">⚖️</span>
+      <div class="cb"><strong>Reg CF Disclosure Requirement: All Fees Must Be in the Form C</strong>
+        <p>Under Rule 203(b)(1)(v) of Regulation Crowdfunding, all compensation paid to or charged by the intermediary (FanzUp and its broker-dealer partner) must be disclosed in the Form C. Platform fees, broker-dealer intermediary fees, and any other compensation must be clearly and accurately stated before any campaign goes live. Undisclosed fees are a material regulatory violation.</p></div>
+    </div>
+
+    <div class="sec-eye">Fee Categories</div>
+    <div class="sec-h2">Platform Revenue Structure</div>
+    <div class="sec-sub">All rates marked TBD require product team decision and legal confirmation before going into any Form C or marketing material. The payment processing pass-through is the only externally-determined rate.</div>
+
+    <div class="fee-grid">
+
+      <div class="fc">
+        <div class="fc-top"><span class="fi">🏦</span><div><div class="tbd">TBD<span class="unit">% of raise</span></div></div></div>
+        <h4>Campaign Platform Fee</h4>
+        <p>Charged as a percentage of the total successfully funded campaign amount. Applies only to campaigns that reach their funding target — not to failed or partially-funded campaigns. This is FanzUp's primary revenue from investment products.</p>
+        <ul style="list-style:none;font-size:11px;color:var(--tf);display:flex;flex-direction:column;gap:3px;padding:0">
+          <li>→ Applied to funds released from escrow at campaign close</li>
+          <li>→ Must be disclosed in Form C before campaign launch</li>
+          <li>→ Industry range: Republic and Wefunder charge 5–8% on funds raised</li>
+          <li>→ Broker-dealer also charges its own intermediary fee (separate line item)</li>
+        </ul>
+      </div>
+
+      <div class="fc">
+        <div class="fc-top"><span class="fi">🔔</span><div><div class="tbd">TBD<span class="unit">% of revenue</span></div></div></div>
+        <h4>Subscription Revenue Share</h4>
+        <p>FanzUp retains a percentage of all subscription revenue collected on behalf of artists. Applies to all tiers. Artist receives the remainder net of payment processing.</p>
+        <ul style="list-style:none;font-size:11px;color:var(--tf);display:flex;flex-direction:column;gap:3px;padding:0">
+          <li>→ Applied monthly to all active subscription payments</li>
+          <li>→ Comparable platforms: Patreon 5–12%, Substack 10%</li>
+          <li>→ Lower rate may be appropriate to incentivize supply-side growth early</li>
+          <li>→ Not subject to Form C disclosure (not an investment product)</li>
+        </ul>
+      </div>
+
+      <div class="fc">
+        <div class="fc-top"><span class="fi">☕</span><div><div class="tbd">TBD<span class="unit">% of tip</span></div></div></div>
+        <h4>Tip / Buy-a-Coffee Processing Fee</h4>
+        <p>A processing fee applied to tip and donation transactions. Covers platform operating costs beyond the pass-through payment processing fee. May be covered entirely by the payment processing pass-through at low tip amounts.</p>
+        <ul style="list-style:none;font-size:11px;color:var(--tf);display:flex;flex-direction:column;gap:3px;padding:0">
+          <li>→ Comparable: Ko-fi takes 0% (free), Buy Me a Coffee takes 5%</li>
+          <li>→ Consider waiving entirely at T1 to reduce friction for new artist revenue</li>
+          <li>→ Not subject to Form C disclosure</li>
+        </ul>
+      </div>
+
+      <div class="fc">
+        <div class="fc-top"><span class="fi">👕</span><div><div class="tbd">TBD<span class="unit">% commission</span></div></div></div>
+        <h4>Merch Commission</h4>
+        <p>Commission on native FanzUp merch listings only. Link-out to external Shopify or third-party stores is commission-free — FanzUp earns revenue only on sales processed through the FanzUp native checkout.</p>
+        <ul style="list-style:none;font-size:11px;color:var(--tf);display:flex;flex-direction:column;gap:3px;padding:0">
+          <li>→ Printful fulfillment costs passed through at cost; FanzUp adds platform commission on top</li>
+          <li>→ Link-outs to Shopify and external stores: no commission collected</li>
+          <li>→ Not subject to Form C disclosure (not an investment product)</li>
+        </ul>
+      </div>
+
+      <div class="fc">
+        <div class="fc-top"><span class="fi">💳</span><div><div class="known">~3.2%<span class="unit">pass-through</span></div></div></div>
+        <h4>Payment Processing Pass-Through</h4>
+        <p>Stripe processing fees passed through to artists at cost — not a FanzUp revenue item. Applies to all payment transactions: subscriptions, tips, merch, ticket sales, and investment transfers.</p>
+        <ul style="list-style:none;font-size:11px;color:var(--tf);display:flex;flex-direction:column;gap:3px;padding:0">
+          <li>→ Stripe standard rate: 2.9% + $0.30 per transaction</li>
+          <li>→ International cards: additional 1.5% (if US-only platform, may be rare)</li>
+          <li>→ Apple Pay / Google Pay: same rates as cards via Stripe</li>
+          <li>→ FanzUp may negotiate volume-discounted rates with Stripe as platform scales</li>
+        </ul>
+      </div>
+
+      <div class="fc">
+        <div class="fc-top"><span class="fi">🤝</span><div><div class="tbd">TBD<span class="unit">referral rate</span></div></div></div>
+        <h4>Affiliate Referral Fee</h4>
+        <p>Fees paid out to affiliate partners (managers, agents, marketing agencies) who refer successful artists or investing fans to FanzUp. This is a cost to FanzUp, not revenue from artists or fans — but must be disclosed in Form C if referral arrangements are in place for a campaign.</p>
+        <ul style="list-style:none;font-size:11px;color:var(--tf);display:flex;flex-direction:column;gap:3px;padding:0">
+          <li>→ Affiliate earns fee on successful artist onboarding OR on fan investment conversion</li>
+          <li>→ Different rates per affiliate tier may apply (standard vs. premium partner)</li>
+          <li>→ Must be disclosed in Form C per Rule 203(b)(1)(v) — referral compensation is material</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <div class="sec-tag">Competitive Benchmarks</div>
+    <div class="sec-h2" style="font-size:16px;margin-bottom:12px">Industry Fee Comparison</div>
+    <table class="bm-table">
+      <thead>
+        <tr><th>Platform</th><th>Campaign Fee</th><th>Subscription Fee</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="hl">FanzUp (target)</td><td>TBD</td><td>TBD</td><td>Music-specific; Reg CF campaigns; multi-product</td></tr>
+        <tr><td>Republic</td><td>5–8%</td><td>N/A</td><td>Reg CF + Reg A+; tech/startup focus; creator campaigns</td></tr>
+        <tr><td>Wefunder</td><td>7.5%</td><td>N/A</td><td>Reg CF leader; startup focus; broad category</td></tr>
+        <tr><td>Patreon</td><td>N/A</td><td>5–12%</td><td>Subscription only; no securities; no Reg CF</td></tr>
+        <tr><td>Bandcamp</td><td>N/A</td><td>15% first 200/yr; 10% after</td><td>Music sales + subscription; no investment products</td></tr>
+        <tr><td>Ko-fi</td><td>N/A</td><td>0% (free) / 0% (Gold flat fee)</td><td>Tips and commissions; no investment; artist-friendly</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <span class="ci">💡</span>
+      <div class="cb"><strong>Pricing Strategy Consideration</strong>
+        <p>FanzUp occupies a unique position: the only platform combining subscription content (Patreon-like) with SEC Reg CF investment campaigns (Republic-like). This justifies a premium fee on the investment side (Reg CF compliance is expensive) but a competitive or below-market fee on subscriptions and tips to win supply-side market share from Patreon and Bandcamp. The exact rate structure should be modeled by finance across multiple growth scenarios before the product team commits to any rates that must be disclosed in Form C.</p></div>
+    </div>
+
+    <div class="callout info">
+      <span class="ci">💡</span>
+      <div class="cb"><strong>Broker-Dealer Partner Fees</strong>
+        <p>FanzUp's FINRA-registered broker-dealer partner charges its own intermediary fees for each campaign — separate from the FanzUp platform fee. These fees are negotiated as part of the broker-dealer partnership agreement and must also be disclosed in each campaign's Form C. The total cost to the artist for running a Reg CF campaign will be FanzUp platform fee + broker-dealer fee + payment processing. Finance must model artist net proceeds accordingly.</p></div>
+    </div>
+
+    <div class="ns-card">
+      <div class="ns-h">Next Steps to Finalize Fee Structure</div>
+      <div class="ns-items">
+        <div class="ns-item"><span class="ns-tag prod">Product</span><span class="ns-text">Define campaign platform fee (TBD %) — recommend modeling at 5%, 6%, and 7% scenarios across projected annual campaign volume to evaluate revenue impact</span></div>
+        <div class="ns-item"><span class="ns-tag prod">Product</span><span class="ns-text">Define subscription revenue share (TBD %) — recommend starting at 8% with a first-year promotional rate of 5% to accelerate onboarding</span></div>
+        <div class="ns-item"><span class="ns-tag legal">Legal</span><span class="ns-text">Confirm all fee disclosures are Form C-ready: specific percentages, calculation methodology, and who pays what must be legally reviewable before any campaign can go live</span></div>
+        <div class="ns-item"><span class="ns-tag legal">Legal</span><span class="ns-text">Confirm broker-dealer partner's fee structure and ensure all intermediary fees are captured for Form C disclosure obligations</span></div>
+        <div class="ns-item"><span class="ns-tag fin">Finance</span><span class="ns-text">Model net proceeds to artist across all fee combinations (platform fee + broker-dealer fee + payment processing) to ensure artist economics are compelling vs. self-raising or alternative platforms</span></div>
+        <div class="ns-item"><span class="ns-tag fin">Finance</span><span class="ns-text">Evaluate whether a tiered campaign fee structure (lower % for larger raises) would incentivize higher-value T4 campaigns</span></div>
+      </div>
+    </div>
+
+    <div class="pnav">
+      <a href="regulatory.html" class="nb">← Regulatory Framework</a>
+      <a href="roadmap.html" class="nb pri">Product Roadmap →</a>
+    </div>
+
+  </div>
+</main>
+</body>
+</html>

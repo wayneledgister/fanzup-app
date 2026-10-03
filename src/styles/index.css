@@ -1,0 +1,173 @@
+/*
+ * FanZuP — Brand v2.0 tokens (docs/brand/BRAND_GUIDELINES.md §3–§4, DESIGN_SYSTEM.md v2.0).
+ * Dark-first. Never hard-code hex in components — use these utilities:
+ *   bg-canvas  bg-surface  bg-surface-2  border-line  text-fg  text-muted
+ *   bg-gold / text-gold / ring-gold  (+ gold-deep, gold-champagne)
+ *   text-success | warning | error | info,  accent-cyan | teal | mint | navy
+ *   font-display (Space Grotesk) · font-sans (Inter) · font-mono (JetBrains Mono)
+ */
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  /* Foundation */
+  --color-canvas: #0b0b0d;
+  --color-surface: #17181c;
+  --color-surface-2: #212329;
+  --color-line: #2a2c33;
+  --color-muted: #8e929b;
+  --color-fg: #f5f5f7;
+
+  /* Brand gold */
+  --color-gold-deep: #b8932f;
+  --color-gold: #d4af37;
+  --color-gold-champagne: #f0d98a;
+  --color-on-gold: #0b0b0d;
+
+  /* Accent / data */
+  --color-accent-cyan: #00d4ff;
+  --color-accent-teal: #00888b;
+  --color-accent-mint: #16c784;
+  --color-accent-navy: #102a43;
+
+  /* Semantic */
+  --color-success: #00c853;
+  --color-warning: #ffb300;
+  --color-error: #e33035;
+  --color-info: #00d4ff;
+
+  /* Type */
+  --font-display: "Space Grotesk Variable", "Space Grotesk", "SF Pro Display", system-ui, sans-serif;
+  --font-sans: "Inter Variable", "Inter", "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+
+  /* Radius scale 6 / 8 / 12 / 16 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Dark-mode shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -1px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -2px rgb(0 0 0 / 0.3);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 10px 10px -5px rgb(0 0 0 / 0.4);
+  --shadow-gold: 0 0 0 1px rgb(212 175 55 / 0.35), 0 8px 24px -8px rgb(212 175 55 / 0.25);
+}
+
+/* shadcn/ui variable bridge — keeps src/components/ui on brand */
+:root {
+  --background: #0b0b0d;
+  --foreground: #f5f5f7;
+  --card: #17181c;
+  --card-foreground: #f5f5f7;
+  --popover: #17181c;
+  --popover-foreground: #f5f5f7;
+  --primary: #d4af37;
+  --primary-foreground: #0b0b0d;
+  --secondary: #212329;
+  --secondary-foreground: #f5f5f7;
+  --muted-bg: #212329;
+  --muted-foreground: #8e929b;
+  --accent: #212329;
+  --accent-foreground: #f5f5f7;
+  --destructive: #e33035;
+  --destructive-foreground: #ffffff;
+  --border: #2a2c33;
+  --input: #2a2c33;
+  --input-background: #212329;
+  --switch-background: #2a2c33;
+  --ring: #d4af37;
+  --chart-1: #d4af37;
+  --chart-2: #00d4ff;
+  --chart-3: #00888b;
+  --chart-4: #16c784;
+  --chart-5: #8e929b;
+  --radius: 8px;
+  --gold-gradient: linear-gradient(135deg, #b8932f 0%, #d4af37 50%, #f0d98a 100%);
+  --photo-scrim: linear-gradient(180deg, rgb(11 11 13 / 0) 0%, rgb(11 11 13 / 0.85) 100%);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
+@layer base {
+  * {
+    @apply border-line;
+  }
+  html {
+    font-size: 16px;
+  }
+  body {
+    @apply bg-canvas text-fg font-sans antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display text-fg;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-gold);
+    color: var(--color-on-gold);
+  }
+}
+
+@layer utilities {
+  /* Money & metrics: always mono with tabular figures (Brand §4.3) */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .eyebrow {
+    @apply font-sans text-xs font-medium uppercase text-muted;
+    letter-spacing: 0.08em;
+  }
+  .bg-gold-gradient {
+    background-image: var(--gold-gradient);
+  }
+  .text-gold-gradient {
+    background-image: var(--gold-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .bg-scrim {
+    background-image: var(--photo-scrim);
+  }
+}
