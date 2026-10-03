@@ -55,8 +55,45 @@ M1 proves money correctness in CI but not that a fan finishes a full-account che
 ### Decisions the founder must make
 None at G2. (E1 cards A/B/C remain open from E1; their defaults hold.)
 
+## Pass 2 · 2026-10-03 · Verdict: APPROVE WITH CONDITIONS
+Re-examined blocker 1, conditions 1–22, and the sections the revision touched (`02-design.md` §3.5, §4, §5, §7, §9, §10, §11, §12).
+
+| Pass-1 item | Status | Evidence |
+|---|---|---|
+| Blocker 1 payouts dead-letter on Stripe | **Resolved** | §5 "Provider error classes": `wait_funds` retries every 15 min without counting attempts, becomes a recon break after 7 days; test card named in §5 and §12.1 |
+| C1 payout amount asserted | Resolved | §3.5 `record_tranche_released(…, amount, …)` |
+| C2 counters in recon | Resolved | §7 "Public counters" |
+| C3 ordering / confirmations by metadata | Resolved | §5 webhook handling; §10 table row |
+| C4 campaign-level released share | Resolved | §3.5 `fan_backings` |
+| C5 dashboard-created users | Resolved | §12.2 |
+| C6 hosted 503 after merge | Resolved | §12.1 (and to repeat in the PR) |
+| C7 no Stripe recon claim before exit test 8 | Carried (reporting) | M1 report |
+| C8 E1-C default on staff refunds | Resolved | §3.5 `record_refund_confirmed` |
+| C9 thin artist API, no staff UI | Carried (plan) | `03-tasks.md` |
+| C10 e2e separate job, not required until stable | Carried (plan, ADR-006) | `03-tasks.md`, CI |
+| C11 contracts in shared zod | Resolved (design) / carried (build) | §4 preamble; task in 03 |
+| C12 failure categories | Resolved | §4.3 |
+| C13 cross-device verification | Resolved | §11 |
+| C14 cursor format | Resolved | §4 preamble |
+| C15 `NODE_ENV=production` = deployed | Resolved | §9 |
+| C16 webhook account rule | Resolved | §5 |
+| C17 redirect `/**` patterns | Resolved (design) / carried (config) | §12.2; `supabase/config.toml` task |
+| C18 bounded `POST /events` | Resolved | §4.2 |
+| C19 escrow copy outside M1 | Carried to M2 | §11 |
+| C20 daily dead-letter check | Resolved | §12.4 |
+| C21 recon 10:00 ET schedule | Carried to M2 | §7 |
+| C22 hosted stays unadvertised | Resolved | §12.5 |
+
+New findings from the revision: none. No seat changed position; the pass-1 dissent stands.
+
+**Conditions carried forward** (tracked):
+1. C7 — the M1 report states plainly that Stripe reconciliation is shown only after exit test 8. → report
+2. C9, C10, C11, C17 — build-time items. → `03-tasks.md`
+3. C19, C21, design gaps G-1/G-2/G-3, G1 carry-overs (N1, N3, N4, N5, N7, N10, N14, N11–N17; G1 conditions 1, 2, 4, 6, 10, 12). → M2 scope / `specs/backlog.md`
+
 ## User decision
-_Pending — Wayne (the council recommends approval after pass 2)._
+**Council: APPROVE WITH CONDITIONS (pass 2).** No founder decision was needed, so per Wayne's standing instruction for this run (2026-10-03: "if the verdict is APPROVE or REVISE with only document fixes, apply them and continue") the work proceeds to plan + implement. **Wayne's own sign-off on G2 is pending** and is requested in the M1 report.
 
 ## Changelog
 - 2026-10-03: pass 1 recorded (REVISE, document fixes only). Revising `02-design.md` next; pass 2 re-checks blocker 1 and the conditions.
+- 2026-10-03: design revised; pass 2 recorded (APPROVE WITH CONDITIONS). Proceeding to `sdd-plan-implement`.

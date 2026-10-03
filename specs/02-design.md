@@ -1,5 +1,5 @@
 # FanZuP v2 — Technical Design · Milestone M1 (walking skeleton)
-**Tier:** Enterprise · **Scope:** M1 only (G1 card G1-C) · **Status:** Draft for gate G2 · **Date:** 2026-10-03
+**Tier:** Enterprise · **Scope:** M1 only (G1 card G1-C) · **Status:** G2 pass 2 (revised after pass 1) · **Date:** 2026-10-03
 **Inputs:** `00-brief.md`; `01-requirements.md` §Milestone M1 scope (binding) and the FR/NFR text it cites; G1 record and pass-2 notes; E1 record; README money rules; ADR-001, ADR-002; council D1; CR-001.
 **ADRs added by this design:** [ADR-003](../docs/adr/ADR-003-payment-provider-boundary.md) payment-provider boundary · [ADR-004](../docs/adr/ADR-004-full-account-auth.md) full-account auth and staff second factor · [ADR-005](../docs/adr/ADR-005-correlation-ids.md) correlation ids · [ADR-006](../docs/adr/ADR-006-e2e-harness.md) end-to-end harness.
 
@@ -83,18 +83,18 @@ Insert is `on conflict do nothing`; the HTTP 200 is returned only after the row 
 - `perks.claimed` now counts **held + captured** units. `create_backing_hold(...)` does `update perks set claimed = claimed + q where id = … and (quantity_limit is null or claimed + q <= quantity_limit)`; zero rows → `perk_sold_out`. The row lock makes the last-unit race serialise; the check constraint is the backstop.
 - `backings.hold_expires_at = now() + POLICY.checkout.holdMinutes`. `release_backing_hold(backing, reason)` sets `canceled`, returns the units, audits. Called by the worker when the hold expires or the campaign deadline passes, after the provider confirms the payment attempt is cancelled.
 - Unconfirmed-checkout cap: `create_backing_hold` refuses when the user already has `POLICY.checkout.maxUnconfirmedPerUser` unexpired `pending_payment` backings (FR-TAX-004 slice).
-- `api_idempotency` gains `resource_id uuid` and `state text ('in_progress','done')` for claim-first idempotency (§4.3).
+- `api_idempotency` gains `resource_id uuid` and `state text ('in_progress','done')` for claim-first idempotency (§4.4).
 
 ### 3.5 Money functions (new or replaced; all `security definer`, `search_path = ''`, execute granted to `service_role` only)
 | Function | Does |
 |---|---|
 | `apply_payment_captured(backing, payment_ref, amount, currency, fee, idem) → text` | If the backing is `pending_payment`, the campaign is `live`, `now() < ends_at`, and amount/currency match: post `backing.captured` (as today), mark `held`, add to `raised_minor`, add to `backers_count` **only if this backer has no other held/released backing on the campaign** (FR-PAY-009), queue `notify.backing_receipt`, record `backing_confirmed` funnel event → `'applied'`. Otherwise post `backing.captured_unapplied` (escrow_cash + fee clearing vs backer_liability, no counters), mark `refund_pending`, queue `backing.refund` with the reason, open a recon break when the amount differs → `'refund:<reason>'`. Idempotent on `idem`. |
-| `record_refund_confirmed(backing, refund_ref, amount, idem)` | Replaces `record_backing_refunded` for every refund path. Requires the backing `held` or `refund_pending` and `amount = backings.amount_minor` (else raises; caller opens a break). Posts `backing.refunded` exactly as today (FanZuP absorbs the processing fee — E1-C default). If the backing was `held` on a **live** campaign (staff refund) it also takes the amount off `raised_minor` and recounts distinct backers; perk units return unless the backing was already `canceled`. Closes a failed campaign to `refunded` when nothing `held` or `refund_pending` remains. |
+| `record_refund_confirmed(backing, refund_ref, amount, idem)` | Replaces `record_backing_refunded` for every refund path. Requires the backing `held` or `refund_pending` and `amount = backings.amount_minor` (else raises; caller opens a break). Posts `backing.refunded` exactly as today: FanZuP absorbs the non-refundable processing fee on **every** refund in M1, including staff refunds — the E1-C default, revisited when card C is decided (G2 condition 8). If the backing was `held` on a **live** campaign (staff refund) it also takes the amount off `raised_minor` and recounts distinct backers; perk units return unless the backing was already `canceled`. Closes a failed campaign to `refunded` when nothing `held` or `refund_pending` remains. |
 | `request_backing_refund(backing, reason)` | Staff refund (FR-DSP-001 M1 slice): backing `held` on a `live` or `failed` campaign → `refund_pending`, queue `backing.refund`. Funded-campaign refunds (from artist payable/holdback) are M2. |
 | `settle_campaign` | Unchanged logic; refunds it queues now flow through `outbound_ops`. |
 | `verify_tranche(tranche, reviewer)` | Adds reviewer ≠ owner, `evidence_submitted` required for tranche ≥ 2, queues `tranche.release`. |
-| `record_tranche_released` | Unchanged; called only after the payout op is confirmed. |
-| `fan_backings(user) → setof record` | FR-BCK-005 / FR-PAY-009 fan view; money state derived from the ledger: `pending` (no capture), `held` (captured, campaign live), `refunding` (refund_pending), `refunded` (a `backing.refunded` transaction exists), `with_artist` (campaign funded; shows released share = Σ tranche releases ÷ artist net), `released` (campaign released). |
+| `record_tranche_released(tranche, payout_ref, amount, idem)` | Replaced: takes the payout op's amount and raises unless it equals `tranche_release_amount()` (G2 condition 1); called only after the payout op is confirmed. |
+| `fan_backings(user) → setof record` | FR-BCK-005 / FR-PAY-009 fan view; money state derived from the ledger: `pending` (no capture), `held` (captured, campaign live), `refunding` (refund_pending), `refunded` (a `backing.refunded` transaction exists), `with_artist` (campaign funded; shows the **campaign-level** released share = Σ tranche releases ÷ artist net — not a per-backing figure, G2 condition 4), `released` (campaign released). |
 
 ### 3.6 Staff and operations tables (FR-ID-007, FR-PAY-007, FR-NTF-001, FR-ANL-001, FR-PRV-001)
 - `platform_settings(key pk, value jsonb, updated_at, updated_by)`: `single_operator_mode = true` at migration; `recon_override_until`.
@@ -117,7 +117,7 @@ Insert is `on conflict do nothing`; the HTTP 200 is returned only after the row 
 `checkout.holdMinutes 15`, `checkout.maxUnconfirmedPerUser 3`, `refunds.autoInitiateMinutes 60`, `refunds.secondApprovalAboveMinor 50000`, `approvals.secondVerifierAboveMinor 500000`, `singleOperator.{delayAboveMinor 100000, delayHours 24, dailyLimits {refundsMinor 500000, verifications 3}}`, `outbound.maxAttempts 8`, `recon.{materialityMinor 100, maxBreakAgeBusinessDays 1}`, `rateLimits` (recorded; enforcement M2), `legal.{termsVersion, privacyVersion}`. Each carries its Appendix A basis.
 
 ## 4. API contracts
-Base path `/api/v1`. JSON. Errors are `{ "error": <code>, "message": <human sentence>, "correlationId": <id> }`. Every response carries `x-correlation-id`. Money fields are integer cents (`…Minor`). Validation is zod at the edge; business-rule violations from SQL map to `409 rule_violation` with the SQL message only when it is one of ours (P0001 with a known prefix), otherwise `500 internal`.
+Base path `/api/v1`. JSON. **The request and response shapes below are defined once as zod schemas in `packages/shared/src/schemas.ts`** and imported by both apps (G2 condition 11); this table is the readable index. Cursors are opaque base64url of `{endsAt|settledAt, id}` (G2 condition 14). Errors are `{ "error": <code>, "message": <human sentence>, "correlationId": <id> }`. Every response carries `x-correlation-id`. Money fields are integer cents (`…Minor`). Validation is zod at the edge; business-rule violations from SQL map to `409 rule_violation` with the SQL message only when it is one of ours (P0001 with a known prefix), otherwise `500 internal`.
 
 ### 4.1 Auth levels
 | Level | Check (server-side, ADR-004) |
@@ -134,7 +134,7 @@ Base path `/api/v1`. JSON. Errors are `{ "error": <code>, "message": <human sent
 | `GET /config` | public | — | `{ provider: "sandbox"\|"stripe-test", testMode: true, stripePublishableKey: string\|null, legal: {termsVersion, privacyVersion} }` | — |
 | `GET /campaigns?type=&tab=live\|funded&cursor=` | public | — | `{ campaigns: CampaignCard[], nextCursor }`, ≤ 24 per page, order `ends_at asc, created_at desc` (live) or `settled_at desc` (funded); never by money | 400 |
 | `GET /campaigns/:slug` | public | — | `{ campaign: CampaignCard & {story, risks, startsAt}, perks: [{id,title,description,kind,priceMinor,remaining,fulfillBy}], tranches: [{seq,pct,milestone,status,targetDate,verifiedAt,releasedAt}] }` | 404 |
-| `POST /events` | public | `{ name: "perk_selected"\|"checkout_started", campaignId, perkId?, anonId, source? }` | 202 | 400 |
+| `POST /events` | public | `{ name: "perk_selected"\|"checkout_started", campaignId, perkId?, anonId (uuid), source? (≤ 40 chars, `[a-z0-9_-]`) }`; body ≤ 1 KB; the campaign must exist and be public (G2 condition 18) | 202 | 400, 404 |
 | `GET /me` | user | — | `{ id, email, emailVerified, displayName, isStaff, isArtist, needsAcceptance: string[] }` | 401 |
 | `POST /me/acceptances` | user | `{ documents: [{kind, version}] }` | 201 (IP, UA recorded) | 400, 409 version not current |
 | `POST /backings` | verified; header `Idempotency-Key` (8–200 chars) | `{ campaignId, perkId, quantity, source? }` | 201 `{ backingId, amountMinor, holdExpiresAt, clientSecret, provider }` | 400, 401, 403 `email_unverified`/`self_backing`/`acceptance_required`, 404, 409 `campaign_closed`/`perk_sold_out`/`too_many_open_checkouts`/`in_progress`, 422 `idempotency_key_reused`, 502 `provider_unavailable` (retry with the same key) |
@@ -164,7 +164,16 @@ Base path `/api/v1`. JSON. Errors are `{ "error": <code>, "message": <human sent
 | `POST /dev/sandbox/tick?now=` | same | — | `{ settled, processed }` | — |
 | `GET /health` | public | — | `{ ok, provider, testMode, worker: { lastBeatAt, ageSeconds } }` | 503 when the DB is unreachable |
 
-### 4.3 Backing creation sequence (FR-PAY-001, FR-PAY-006, claim-first)
+### 4.3 Checkout failure categories (FR-BCK-001; G2 condition 12)
+| Provider signal | Category shown | Next step shown |
+|---|---|---|
+| Stripe `card_declined`, `insufficient_funds`, `incorrect_cvc`, sandbox `decline` | declined | try another card |
+| `expired_card` | expired | use a card that hasn't expired |
+| `authentication_required`, 3-D Secure failed or abandoned | authentication failed | try again and complete your bank's check |
+| network error, timeout, API 502 | network | check your connection and try again — nothing was charged |
+| hold expired (`409` on confirm) | expired checkout | start again from the campaign page |
+
+### 4.4 Backing creation sequence (FR-PAY-001, FR-PAY-006, claim-first)
 1. Verify token, require verified email; hash `{user, body}`.
 2. **Claim** `api_idempotency(key = backings:<user>:<key>)` with `insert … on conflict do nothing returning`. If it already exists: different hash → 422; `state='done'` → replay the stored response; `in_progress` with no `resource_id` → 409 `in_progress`; `in_progress` with `resource_id` → resume at step 4 with that backing.
 3. In one transaction: `create_backing_hold(...)` (campaign live and before deadline, not self-backing, current terms accepted, open-checkout cap, stock reserved, backing `pending_payment` with `correlation_id`, `hold_expires_at`, `source`); write `resource_id`. Commit — no lock is held past this point.
@@ -185,7 +194,7 @@ Base path `/api/v1`. JSON. Errors are `{ "error": <code>, "message": <human sent
 | Payout | `transfers.create({destination: acct, amount, transfer_group, metadata.outbound_op_id})`, idempotency key `release:<tranche>`; retry looks up `transfers.list({transfer_group})` by metadata | emits `transfer.created` |
 | Balance list (recon) | `balanceTransactions.list` (+ expand source for metadata) | derived from its own stored events |
 
-**Webhook handling.** Verify the signature against the raw body; reject `livemode = true` (FR-PAY-008) and any `account` other than the configured platform account; insert into `provider_events`; return 200; then try processing once inline, best-effort. The worker processes anything `received` or retryable `failed`, oldest first, `for update skip locked`, bounded attempts (`outbound.maxAttempts`) then `dead` + alert log line. Processing runs under the correlation id of the backing or outbound op the event belongs to. Events with no matching backing/op become `unmatched` and appear in the staff unmatched queue (FR-PAY-003 bullet 3) and as recon breaks.
+**Webhook handling.** Verify the signature against the raw body; reject `livemode = true` (FR-PAY-008); platform events must carry no `account`; an event carrying a connected `account` is stored as `ignored` unless that account is one of our artists' `payout_account_ref` (G2 condition 16); insert into `provider_events`; return 200; then try processing once inline, best-effort. The worker processes anything `received` or retryable `failed`, oldest first, `for update skip locked`, bounded attempts (`outbound.maxAttempts`) then `dead` + alert log line. Processing runs under the correlation id of the backing or outbound op the event belongs to. There is no per-object ordering guarantee (G2 condition 3): a refund or transfer confirmation applies by its `outbound_op_id` metadata whatever state the op is in (the webhook can beat our own commit of `sent`); a `payment.succeeded` whose backing isn't visible yet is retried for 10 minutes before it becomes `unmatched`. Events with no matching backing/op after that become `unmatched` and appear in the staff unmatched queue (FR-PAY-003 bullet 3) and as recon breaks.
 
 **Outbound state machine (FR-PAY-004).**
 ```
@@ -195,6 +204,14 @@ initiated ──provider call ok──► sent ──confirmation event──►
     └── error → attempts++ / backoff ──(attempts ≥ outbound.maxAttempts)──► dead ──staff replay (reason, aal2)──► initiated
 amount reported by provider ≠ op amount → failed + recon break (never "fixed" in place)
 ```
+**Provider error classes** (G2 blocker 1). Every adapter error is classified before the op is updated:
+| Class | Examples | Effect |
+|---|---|---|
+| `retry` | network error, timeout, 429, 5xx | `attempts += 1`, exponential backoff (15 s × 2ⁿ, max 1 h); `dead` at `outbound.maxAttempts` |
+| `wait_funds` | Stripe `balance_insufficient` on a transfer | **no attempt counted**; retried every 15 min; op shows `waiting for available balance` in the staff queue; after 7 days it is raised as a recon break |
+| `permanent` | invalid destination account, charge already fully refunded by someone else, amount mismatch | `failed` + recon break; never retried automatically; staff replay with a reason after fixing the cause |
+In Stripe test mode, use test card `4000 0000 0000 0077` so charges land in the available balance immediately (runbook, §12).
+
 Payouts are confirmed by the synchronous transfer response (Stripe transfers don't settle asynchronously in test mode); the `transfer.created` event is stored and deduplicated. Payouts are skipped (left `initiated`, retried later) while reconciliation pauses releases; refunds never pause.
 
 ## 6. Worker and jobs (NFR-OPS-05/06)
@@ -214,7 +231,9 @@ No database lock is held across a provider call: each outbound step is "commit `
 - **Provider balance per campaign** = Σ over balance transactions attributed to the campaign (metadata / `transfer_group`): charges `amount − fee`, refunds `−amount`, transfers `−amount`, fee adjustments `±`.
 - **Matching:** every provider transaction must match a ledger transaction by `external_ref` (payment, refund, payout refs) and every ledger transaction with an `external_ref` must match a provider transaction. Misses become `unmatched_provider_txn` / `unmatched_ledger_txn` breaks.
 - **Run output:** per-campaign diff, total diff, breaks opened/updated/auto-resolved (a break absent from a later run resolves as `cleared_by_run`). Stored in `recon_runs`/`recon_breaks`; exposed at `/staff/recon/latest`.
+- **Schedule:** M1 runs when the last completed run is older than 24 h, plus on demand; FR-PAY-007's "by 10:00 ET next business day" schedule lands at M2 (G2 condition 21).
 - **Pause rule:** any open break with `|amount| > recon.materialityMinor` or older than `recon.maxBreakAgeBusinessDays` pauses payouts (refunds continue) until resolved or an override action executes (reason + aal2 + FR-ID-007 delay).
+- **Public counters** (G2 condition 2): each run also checks every campaign's `raised_minor` against Σ captured-and-not-refunded amounts in the ledger and `backers_count` against distinct backers with a held/released backing; a mismatch opens a `counter_mismatch` break (no payout pause — it isn't money).
 - **Fee corrections:** a provider fee change after capture is posted as a correcting transaction (`fee.adjusted`), never an edit. (Stripe test mode rarely changes fees; the path exists and is unit-tested.)
 
 ## 8. Correlation ids (NFR-OPS-04, exit test 4; ADR-005)
@@ -230,7 +249,7 @@ No database lock is held across a provider call: each outbound step is "commit `
 
 **Single-operator mode (FR-ID-007, card G1-A).** Every privileged action (review, verify, refund, replay of events or ops, recon override, weekly sign-off) requires `aal2`, a typed reason (≥ 10 chars) and is written to `privileged_actions` + audit. Money actions above `singleOperator.delayAboveMinor` are `scheduled` for `delayHours` and cancellable; daily limits (refund total, verification count) are counted over scheduled + executed actions in the UTC day. The weekly review lists all actions in the week; sign-off is itself recorded. Break-glass suspension is M2 (FR-CMP-007). N3 (change management for one maintainer) is handled in the plan: required CI checks on PRs, a recorded agent review in each PR, and Wayne as the only merger; a second human reviewer is due at P0b.
 
-**Fail closed (NFR-SEC-04, FR-PAY-008).** `DEPLOY_ENV` (`local` | `ci` | `staging` | `production`; inferred as deployed when `VERCEL_ENV` or `RENDER` is set). Deployed + `sandbox` provider → refuse to start (the misconfigured app returns 503 naming the variable). Any Stripe key not starting `sk_test_`/`rk_test_` → refuse. Dev routes register only when `sandbox` and not deployed. Webhook rejects live events. *Consequence:* the hosted deployment needs `ESCROW_PROVIDER=stripe-test` and test keys before `/api` works (§12).
+**Fail closed (NFR-SEC-04, FR-PAY-008).** `DEPLOY_ENV` (`local` | `ci` | `staging` | `production`; treated as deployed when `DEPLOY_ENV` is staging/production **or** `VERCEL_ENV`, `RENDER` is set **or** `NODE_ENV=production` — G2 condition 15). Deployed + `sandbox` provider → refuse to start (the misconfigured app returns 503 naming the variable). Any Stripe key not starting `sk_test_`/`rk_test_` → refuse. Dev routes register only when `sandbox` and not deployed. Webhook rejects live events. *Consequence:* the hosted deployment needs `ESCROW_PROVIDER=stripe-test` and test keys before `/api` works (§12).
 
 **Input validation.** zod on every body/query; slugs, URLs (evidence links must be `https:`), lengths; Idempotency-Key bounds; correlation-id pattern. User text is stored as plain text and rendered by React as text (no `dangerouslySetInnerHTML` on M1 paths).
 
@@ -259,7 +278,7 @@ No database lock is held across a provider call: each outbound step is "commit `
 | Failure | Blast radius | Behaviour |
 |---|---|---|
 | Stripe API down | New checkouts, refunds, payouts | Checkout 502 with "nothing was charged, try again" (same key resumes); outbound ops back off then dead-letter; nothing posts to the ledger without a provider result |
-| Webhook delivery delayed/out of order | Captures and refund confirmations late | Stored events processed in received order per object; late capture after deadline → auto-refund; refund confirmation before op marked `sent` is still applied (op looked up by metadata) |
+| Webhook delivery delayed/out of order | Captures and refund confirmations late | Stored events processed oldest first; confirmations apply by op metadata in any order; late capture after deadline → auto-refund; refund confirmation before op marked `sent` is still applied (op looked up by metadata) |
 | Worker down | Settlement, refunds, releases, holds, recon stall | Heartbeat age on `/health`; external monitor (setup step) pages; everything resumes idempotently |
 | One campaign's settlement throws | That campaign only | Per-campaign transaction; error logged with id; others proceed |
 | Recon break | Payouts for everyone (by design) | Refunds continue; staff resolves or overrides with delay |
@@ -271,18 +290,19 @@ No database lock is held across a provider call: each outbound step is "commit `
 |---|---|
 | `/explore` | Reads `GET /campaigns` (live tab + funded tab, type filter, paging); loading/empty/error states; cards link to `/campaigns/:slug` |
 | `/campaigns/:slug` | Reads `GET /campaigns/:slug`; renders only present fields (FR-CMP-003); perk selection; `ref` captured from the URL; "Back" → guard (§ below); FR-PLT-006 notice; FAQ reworded (charge at backing; no "escrow") |
-| `/signup`, `/login`, `/verify-email`, `/reset-password` | Real Supabase Auth; `next` (same-origin path only) carries campaign + perk; sign-up collects display name, email, password, 18+ and terms checkboxes; verify page completes the session from the link and forwards to `next` |
+| `/signup`, `/login`, `/verify-email`, `/reset-password` | Real Supabase Auth; `next` (same-origin path only) carries campaign + perk; sign-up collects display name, email, password, 18+ and terms checkboxes; verify page completes the session from the link and forwards to `next`. Cross-device (G2 condition 13): opening the link on another device verifies the email and signs that device in, forwarding it to the same checkout; the first device keeps asking the fan to sign in or to continue after verification (its page polls `GET /me` and offers "I've verified — continue") |
 | `/checkout/:slug?perk=&qty=` **(new route, fan shell)** | Guard: signed out → `/signup?next=…`; unverified → `/verify-email?next=…`. Shows perk, delivery date, quantity, total, when the card is charged, the refund promise and the test-mode notice; re-acceptance checkbox when `needsAcceptance`; creates the backing (one Idempotency-Key per checkout attempt, kept in `sessionStorage` so a reload resumes); pays with the Payment Element (Stripe) or the labelled sandbox card form; polls `GET /backings/:id` until `held`, then shows the confirmation (deadline in local time, what happens either way, share prompt) |
 | `/backed` | Reads `GET /me/backings`; shows campaign status, money state, released share, refund amount/date/reference, perk status "Not yet shipped", next event |
 | Shared | `src/lib/supabase.ts`, `src/lib/session.tsx` (session context), `src/lib/api.ts` (typed client, correlation id per call), `TestModeNotice` in `components/brand/compliance.tsx`; `EscrowNotice` copy changed to the FR-PLT-006 promise |
 
-Every other route keeps its mock data until M2. `pnpm lint:copy` runs on the web app and now also scans the API's email templates.
+Every other route keeps its mock data until M2. **Remaining "escrow" copy outside the M1 paths** (Trust, Fees, For Artists, Landing, creator wizard/payouts, settings payments; found with `grep -ril escrow apps/web/src/pages`) is tracked to M2 with FR-PLT-002 route pruning (G2 condition 19). `pnpm lint:copy` runs on the web app and now also scans the API's email templates.
 
 ## 12. Setup steps that need Wayne (no secrets in the repo)
-1. **Stripe (test mode):** add `STRIPE_SECRET_KEY` (`sk_test_…`, ideally a restricted key), `STRIPE_WEBHOOK_SECRET`, `STRIPE_ACCOUNT_ID` and `VITE_STRIPE_PUBLISHABLE_KEY` (`pk_test_…`) to Vercel/Render; set `ESCROW_PROVIDER=stripe-test`; enable Connect (Express) in test mode; point a webhook at `/api/v1/webhooks/stripe` for `payment_intent.*`, `charge.refunded`, `refund.updated`, `transfer.created`. Optional: the same values as GitHub Actions secrets to turn on the Stripe test-mode CI job.
-2. **Supabase Auth (hosted):** confirm email confirmations on; add the site and `/verify-email` redirect URLs; enable TOTP MFA; enrol your own staff account in MFA; grant yourself staff with one SQL insert (never via seed).
+1. **Stripe (test mode):** add `STRIPE_SECRET_KEY` (`sk_test_…`, ideally a restricted key), `STRIPE_WEBHOOK_SECRET`, `STRIPE_ACCOUNT_ID` and `VITE_STRIPE_PUBLISHABLE_KEY` (`pk_test_…`) to Vercel/Render; set `ESCROW_PROVIDER=stripe-test`; enable Connect (Express) in test mode; point a webhook at `/api/v1/webhooks/stripe` for `payment_intent.*`, `charge.refunded`, `refund.updated`, `transfer.created`. Optional: the same values as GitHub Actions secrets to turn on the Stripe test-mode CI job. Pay with test card `4000 0000 0000 0077` so funds are available for transfers immediately. **Expect hosted `/api` to answer 503 "misconfigured" (fail closed, FR-PAY-008) from the moment M1 merges until these are set** (G2 condition 6).
+2. **Supabase Auth (hosted):** confirm email confirmations on; add redirect URL patterns `https://<site>/**` (G2 condition 17; local and CI patterns are in `supabase/config.toml`); enable TOTP MFA. **Create your own account through the app's sign-up page** — the new-user trigger refuses accounts without the 18+ attestation, so "Add user" in the Supabase dashboard fails by design (G2 condition 5). Then enrol TOTP and grant yourself staff with one SQL insert (never via seed).
 3. **Error tracking and email delivery:** choose Sentry (or similar) and an email provider (Postmark/Resend); M1 logs both.
-4. **Uptime check:** an external monitor on `/api/health` that alerts when `worker.ageSeconds > 600`.
+4. **Uptime check:** an external monitor on `/api/health` that alerts when `worker.ageSeconds > 600`. Until alerting exists, check `GET /api/v1/staff/queue?type=dead_letters` and `/api/health` once a day (G2 condition 20).
+5. **Keep the hosted environment unadvertised** (test users only) until M2 replaces the placeholder Terms/Privacy with a real privacy notice (G1 N5; G2 condition 22).
 
 ## 13. Requirements coverage (M1)
 | Requirement | Component(s) |
@@ -292,7 +312,7 @@ Every other route keeps its mock data until M2. `pnpm lint:copy` runs on the web
 | FR-PAY-003 | `apply_payment_captured` (late/mismatch → refund + break), unmatched queue, `notify.refund_started` with reason |
 | FR-PAY-004 | `outbound_ops` state machine, provider `find*`, dead-letter queue, staff replay |
 | FR-PAY-005 | `tranche_evidence`, `verify_tranche`, `tranche.release` outbox, payout op, `record_tranche_released` |
-| FR-PAY-006 | claim-first `api_idempotency`, §4.3, parallel-request test |
+| FR-PAY-006 | claim-first `api_idempotency`, §4.4, parallel-request test |
 | FR-PAY-007 | §7 recon job, `recon_runs/breaks`, payout pause, override action |
 | FR-PAY-008 | env fail-closed rules, live-key refusal, webhook livemode check |
 | FR-PAY-009 (fan) | `fan_backings()`, distinct-backer counting |
@@ -342,3 +362,4 @@ Every other route keeps its mock data until M2. `pnpm lint:copy` runs on the web
 
 ## Change log
 - 2026-10-03: first draft for G2 (M1 only).
+- 2026-10-03: revised after G2 pass 1: provider error classes and `wait_funds` (blocker 1); conditions 1–8, 11–22 applied in place; 9–10 recorded in ADR-006 and the plan.
