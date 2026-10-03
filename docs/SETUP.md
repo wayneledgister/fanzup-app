@@ -42,7 +42,7 @@ pnpm exec supabase status
 ```
 Keep the `status` output open; you need its URLs and keys in A4.
 
-**✅ Check:** open **Studio** at http://127.0.0.1:54323 → Table Editor. You should see four live campaigns in `campaigns` and ten rows in `perks`.
+**✅ Check:** open **Studio** at http://127.0.0.1:55323 → Table Editor. You should see four live campaigns in `campaigns` and ten rows in `perks`.
 
 The seed creates these test users. Every password is `FanzupDev123`.
 
@@ -69,7 +69,7 @@ If authenticated calls return 401, your local Supabase signs tokens with the leg
 ### A5. Walk the whole money flow locally (sandbox escrow, no real payments)
 ```bash
 ANON=<"anon key" from supabase status>
-TOKEN=$(curl -s "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
+TOKEN=$(curl -s "http://127.0.0.1:55321/auth/v1/token?grant_type=password" \
   -H "apikey: $ANON" -H "content-type: application/json" \
   -d '{"email":"fan@fanzup.test","password":"FanzupDev123"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).access_token')
 
@@ -91,7 +91,7 @@ curl -s -X POST "localhost:8787/api/v1/dev/sandbox/tick?now=2027-03-01T00:00:00Z
 ### A6. Run the tests
 The tests need a Postgres server they can create and drop scratch databases on. Local Supabase works:
 ```bash
-TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres pnpm test
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres pnpm test
 ```
 **✅ Check:** 26 tests pass. They cover:
 - the ledger always balancing
