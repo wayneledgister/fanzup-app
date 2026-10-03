@@ -7,6 +7,11 @@ on:
     branches: [main]
     paths: ["supabase/migrations/**"]
   workflow_dispatch:
+    inputs:
+      include_seed:
+        description: "Staging only: also load supabase/seed.sql (demo artists + test users). Never used for production."
+        type: boolean
+        default: false
 
 # Off until Supabase + GitHub environments are set up (docs/SETUP.md Part E):
 # set the repository variable DB_DEPLOY_ENABLED = true to turn it on.
@@ -23,9 +28,11 @@ jobs:
       - uses: supabase/setup-cli@v1
         with: { version: latest }
       - run: supabase link --project-ref ${{ vars.SUPABASE_PROJECT_REF }}
-      - run: supabase db push
+      - run: supabase db push ${{ inputs.include_seed && '--include-seed' || '' }}
 
   production:
+    # Off until a separate production project exists: set repository variable PROD_DEPLOY_ENABLED = true.
+    if: vars.PROD_DEPLOY_ENABLED == 'true'
     needs: staging
     runs-on: ubuntu-latest
     environment: production

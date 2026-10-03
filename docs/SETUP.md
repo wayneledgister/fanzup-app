@@ -189,7 +189,7 @@ When you add production, make a second pair of services (or a second Blueprint) 
      - **secret** `SUPABASE_ACCESS_TOKEN`: create at supabase.com/dashboard/account/tokens
      - **secret** `SUPABASE_DB_PASSWORD`: that project's password
      - **variable** `SUPABASE_PROJECT_REF`: that project's ref
-2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this.
+2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema (and, on staging, the demo data) without a local clone, go to **Actions → Deploy database migrations → Run workflow** and tick *include_seed*.
 3. **Branches → add rule for `main`:** require a pull request and the status checks **"Web · typecheck, copy rules, build"** and **"API · migrations, ledger, RLS, flow tests"**. These check names appear after the first CI run.
 4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, the **Deploy database migrations** workflow runs on staging, then waits for your approval before production.
 
