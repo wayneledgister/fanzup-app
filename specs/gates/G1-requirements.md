@@ -75,5 +75,51 @@ Cards E1-A, E1-B, E1-C (in `E1-enterprise-readiness.md`) remain open. G1 adds:
 ## User decision
 _Pending — Wayne._
 
+---
+
+## Pass 2 · 2026-10-03
+Re-examined only the pass-1 blockers and conditions plus what the revision touched (commit `7e5709a`). Detail: `.G1-pass2.md`.
+
+| Pass-1 blocker | Status | Evidence |
+|---|---|---|
+| 1 P0 mixes two milestones | **Resolved** | P0a/P0b defined; every FR/NFR re-tagged; brief §Milestones M1–M4 |
+| 2 Controls assume two people | **Partly resolved** | FR-ID-007 single-operator mode covers runtime staff actions. Still open: code-change controls need two humans at P0a (NFR-OPS-07, NFR-SEC-09); recon-pause override, event/dead-letter replay, flag changes and role grants sit outside FR-ID-007; "cancel and refund all" would hit the daily refund limit |
+| 3 Separation of duties softened | **Resolved** | FR-ID-003: actor + factor from the verified session; two-person control on verification, release automatic (FR-PAY-005) |
+| 4 Uploads/exports unsecured | **Resolved** | FR-PLT-005 |
+| 5 Sales tax missing | **Resolved** | FR-TAX-005 + brief Q8 |
+| 6 Silent downgrades | **Resolved** | FR-BCK-003, FR-FUL-003, FR-DSP-003, FR-PRV-002/003, NFR-OPS-10 restored to P0b and labelled |
+| 7 PRD trace | **Still open — founder only** | Doc set not available to this session |
+
+Conditions: 6 resolved (3, 5, 7, 8, 9, 11), 6 partly resolved (1, 2, 4, 6, 10, 12), 0 open.
+
+**New findings from the revision:** 0 blockers, 11 concerns, 6 nits. The ones worth Wayne's attention:
+- **P0a is still nearly the old P0** (38 FRs, 46 NFRs). The split moved the regulated perimeter to P0b but didn't shrink the first beta; the walking-skeleton scope lives only in a seat note. (N1, N6)
+- **Funnel contradiction:** FR-ID-001 verifies email before the first backing; FR-BCK-002 verifies it from the receipt. (N2)
+- **Placeholder legal documents for real people's data** at M2; Terms and Privacy need counsel versions before real users, not just before live money. (N5)
+- **Charge timing** (charge at backing vs at success) is a P0a design fork filed as a P0b question. (N8)
+- **What test-money beta participants are promised** is undefined (do artists owe perks? persistent "test mode" notice?). (N9)
+- **Conversion target** can't be measured on test cards; funnel events have no P0a criteria. (N10)
+- **Account-security emails and artist MFA** sit at P0b while shipping addresses can be P0a. (N14)
+
+**Verdict (pass 2): REVISE** — narrow. No new blockers. Blocker 2's residue and the concerns above are about half a day of document edits. Blocker 7 needs Wayne.
+
+### Skeptic's strongest reason not to proceed (pass 2)
+The split relabelled the work rather than shrinking it: the first beta still carries almost everything, while the cheapest learning — does a fan from an Instagram link actually finish checkout? — can't happen until the whole stack is built. And the PRDs, which outrank this spec, still haven't been read; the revision even added product decisions (light-account checkout, discovery order, attribution window, charge timing) that they may already settle.
+
+### Council's path to approval
+1. Apply the pass-2 edits (N2–N10, N14, blocker 2 residue).
+2. Either complete the PRD trace, **or** accept card G1-C below.
+
+**Card G1-C — Approve only the walking skeleton now?**
+- **Decision:** whether to sign off a narrow slice so building can start while the PRD trace and the bigger spec catch up.
+- **Why it matters now:** the full P0a set is ~9–14 months of evenings; the skeleton is 6–8 weeks and answers the most important unknowns (money correctness on a real processor, where fans drop off).
+- **Options:**
+  1. **Approve M1 only, with the PRD trace waived for M1 (default).** The skeleton requirement list moves from the seat note into the spec as its own milestone scope; the PRD trace gates M2 (real users). Design (G2) starts for M1 only.
+  2. **Wait for the PRD trace,** then approve all of P0a. Cleanest; building waits until the doc set is attached and traced.
+  3. **Approve all of P0a now without the trace.** Fastest on paper; risks building against a spec the PRDs contradict.
+- **Default:** option 1. All six seats accept it with conditions; the Skeptic notes it's the only option that tests the checkout with people before the funnel is frozen.
+- **Who decides:** you.
+
 ## Changelog
-- 2026-10-03: pass 1 recorded; summary sent. Founder away; revising blockers 1–6 and conditions in place (blocker 7 needs the doc set).
+- 2026-10-03: pass 1 recorded; summary sent. Founder away; revised blockers 1–6 and conditions in place (blocker 7 needs the doc set).
+- 2026-10-03: pass 2 recorded (REVISE, narrow). Stopped here for Wayne: remaining work needs his decisions (G1-A/B/C, E1-A/B/C, policy defaults) and the doc set.
