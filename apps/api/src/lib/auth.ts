@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
+import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 import type { FastifyRequest } from "fastify";
 import type { Env } from "../env";
 import type { Claims } from "../db";
@@ -20,9 +20,16 @@ export function createVerifier(env: Env) {
   return async function verify(token: string): Promise<Claims> {
     let payload: JWTPayload;
     try {
-      payload = secret
-        ? (await jwtVerify(token, secret, { audience: "authenticated" })).payload
-        : (await jwtVerify(token, jwks!, { audience: "authenticated" })).payload;
+      // Newer Supabase projects sign with asymmetric keys (JWKS); older ones with the shared HS256 secret.
+      // Pick by the token's own algorithm so either kind of project works with the same config.
+      const { alg } = decodeProtectedHeader(token);
+      if (alg === "HS256") {
+        if (!secret) throw new Error("HS256 token but no SUPABASE_JWT_SECRET");
+        payload = (await jwtVerify(token, secret, { audience: "authenticated" })).payload;
+      } else {
+        if (!jwks) throw new Error("asymmetric token but no SUPABASE_URL");
+        payload = (await jwtVerify(token, jwks, { audience: "authenticated" })).payload;
+      }
     } catch {
       throw new HttpError(401, "invalid_token", "Your session has expired. Sign in again.");
     }

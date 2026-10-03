@@ -149,6 +149,14 @@ describe("routing and scheduled work", () => {
   });
 });
 
+describe("Supabase ↔ Vercel integration env names", () => {
+  it("uses POSTGRES_URL when DATABASE_URL is absent and strips non-Postgres params", () => {
+    const env = loadEnv({ POSTGRES_URL: "postgres://u:p@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&supa=base-pooler.x", NEXT_PUBLIC_SUPABASE_URL: "https://abc.supabase.co" } as NodeJS.ProcessEnv);
+    expect(env.DATABASE_URL).toBe("postgres://u:p@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require");
+    expect(env.SUPABASE_URL).toBe("https://abc.supabase.co");
+  });
+});
+
 describe("edge cases", () => {
   it("a failed campaign with no backers closes out as refunded", async () => {
     const [v] = await asService(sql, (tx) => tx<{ id: string; ends_at: Date }[]>`select id, ends_at from public.campaigns where slug = 'velvet-circuit-video'`);

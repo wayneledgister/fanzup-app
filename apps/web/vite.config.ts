@@ -6,6 +6,9 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  // Expose only public values: our VITE_* vars plus the two public ones the Supabase ↔ Vercel integration
+  // injects (URL + anon/publishable key). Never widen this to anything that could carry a secret.
+  envPrefix: ["VITE_", "NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY"],
   server: {
     // Local dev mirrors production: the browser calls same-origin /api/*, which Vercel routes to the
     // `api` service. With `pnpm dev:web` alone, Vite forwards /api to the API on :8787.
