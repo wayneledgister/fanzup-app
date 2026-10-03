@@ -3,7 +3,7 @@
  * (FR-BCK-005, FR-PAY-009 fan view), and first-party funnel events (FR-ANL-001; G2 condition 18).
  */
 import type { FastifyPluginAsync } from "fastify";
-import { z } from "zod";
+import { AcceptanceRequest, FunnelEventRequest } from "@fanzup/shared/schemas";
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n } from "../db";
 import { HttpError, requireUser } from "../lib/auth";
@@ -28,7 +28,7 @@ export const meRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   /** Re-acceptance (or first acceptance for accounts created before M1): records IP and user agent. */
   app.post("/me/acceptances", async (req, reply) => {
     const u = await requireUser(req, d.verify);
-    const body = z.object({ documents: z.array(z.object({ kind: z.enum(["terms", "privacy", "adult_attestation"]), version: z.string().max(40) })).min(1).max(3) }).parse(req.body);
+    const body = AcceptanceRequest.parse(req.body);
     for (const doc of body.documents) {
       const current = doc.kind === "terms" ? POLICY.legal.termsVersion : doc.kind === "privacy" ? POLICY.legal.privacyVersion : "v1";
       if (doc.version !== current) throw new HttpError(409, "version_not_current", "Those terms have changed. Reload the page and review the current version.");
@@ -65,13 +65,7 @@ export const meRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
 
   /** Client-side funnel event (only perk_selected / checkout_started; the rest are recorded by the server). */
   app.post("/events", { bodyLimit: 1024 }, async (req, reply) => {
-    const body = z.object({
-      name: z.enum(["perk_selected", "checkout_started"]),
-      campaignId: z.string().uuid(),
-      perkId: z.string().uuid().optional(),
-      anonId: z.string().uuid(),
-      source: z.string().regex(/^[a-z0-9_-]{1,40}$/).optional(),
-    }).parse(req.body);
+    const body = FunnelEventRequest.parse(req.body);
     const [c] = await asService(d.sql, (tx) => tx`select 1 from public.campaigns where id = ${body.campaignId} and public.campaign_is_public(status)`);
     if (!c) throw new HttpError(404, "not_found", "We couldn't find that campaign.");
     await asService(d.sql, (tx) => tx`

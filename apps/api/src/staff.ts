@@ -139,7 +139,7 @@ export async function privileged(
                      ${tx.json({ subject_id: input.subjectId, amount_minor: amount, delayed })})`;
     return rows;
   });
-  if (delayed) return { id: row.id, status: "scheduled", executeAfter: row.execute_after.toISOString() };
+  if (delayed) return { id: row.id, status: "scheduled", executeAfter: row.execute_after.toISOString(), correlationId: row.correlation_id };
   return execute(d, row);
 }
 
@@ -150,7 +150,7 @@ async function execute(d: Pick<Deps, "sql" | "provider">, a: ActionRow) {
       await tx`update public.privileged_actions set status = 'executed', executed_at = now() where id = ${a.id}`;
       await tx`insert into public.audit_events (action, entity, entity_id) values (${"staff." + a.action + ".executed"}, 'privileged_action', ${a.id})`;
     });
-    return { id: a.id, status: "executed", executeAfter: null as string | null };
+    return { id: a.id, status: "executed", executeAfter: null as string | null, correlationId: a.correlation_id };
   } catch (e) {
     const msg = redact(String((e as { detail?: string; message?: string }).detail ?? (e as Error).message ?? e));
     await asService(d.sql, (tx) => tx`update public.privileged_actions set status = 'failed', error = ${msg} where id = ${a.id}`);

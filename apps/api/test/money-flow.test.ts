@@ -248,3 +248,24 @@ describe("ledger invariants", () => {
     await expect(k.sql`truncate public.audit_events`).rejects.toThrow(/append-only/);
   });
 });
+
+describe("FR-CMP-008 discovery", () => {
+  it("pages live campaigns ending soonest first with an opaque cursor, filters by type, and lists funded ones separately", async () => {
+    const all = (await k.app.inject({ method: "GET", url: "/api/v1/campaigns" })).json();
+    const ends = all.campaigns.map((c: { endsAt: string }) => Date.parse(c.endsAt));
+    expect(ends).toEqual([...ends].sort((a, b) => a - b));
+    expect(all.campaigns.every((c: { status: string }) => c.status === "live")).toBe(true);
+    const shows = (await k.app.inject({ method: "GET", url: "/api/v1/campaigns?type=Show" })).json().campaigns;
+    expect(shows.every((c: { type: string }) => c.type === "Show")).toBe(true);
+    const funded = (await k.app.inject({ method: "GET", url: "/api/v1/campaigns?tab=funded" })).json().campaigns;
+    expect(funded.map((c: { slug: string }) => c.slug)).toContain("nova-live-band-tour");
+    expect((await k.app.inject({ method: "GET", url: "/api/v1/campaigns?cursor=garbage" })).statusCode).toBe(400);
+    expect((await k.app.inject({ method: "GET", url: "/api/v1/campaigns?type=Yield" })).statusCode).toBe(400);
+  });
+  it("the campaign page carries the artist's own story and milestone dates", async () => {
+    const r = (await k.app.inject({ method: "GET", url: "/api/v1/campaigns/nova-live-band-tour" })).json();
+    expect(r.tranches.map((t: { seq: number; status: string }) => [t.seq, t.status])).toEqual([[1, "released"], [2, "released"]]);
+    expect(r.tranches[1].releasedAt).toBeTruthy();
+    expect(r.campaign).toHaveProperty("story");
+  });
+});

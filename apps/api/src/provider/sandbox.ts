@@ -12,6 +12,13 @@ import { asService, n } from "../db";
 import { ingestEvent } from "../inbox";
 import { ProviderError, type BalanceTxn, type NormalizedEvent, type PaymentProvider, type ProviderErrorClass } from "./types";
 
+/**
+ * FanZuP's own money sitting in the processor account (not attributed to any campaign). It covers the processing
+ * fees FanZuP absorbs on refunds (E1 card C default), which otherwise leave the platform balance short of what
+ * artists are owed. On Stripe, Wayne must keep an equivalent float in the platform balance (design §12.1).
+ */
+export const SANDBOX_PLATFORM_FLOAT_MINOR = 10_000_00;
+
 type Row = { type: string; object_ref: string | null; payload: { amountMinor?: number; feeMinor?: number; paymentRef?: string; metadata?: Record<string, string> } };
 
 export class SandboxProvider implements PaymentProvider {
@@ -121,7 +128,7 @@ export class SandboxProvider implements PaymentProvider {
     const existing = await this.findTransfer({ campaignId: input.campaignId, opId: input.opId });
     if (existing) return existing;
     if (!input.destination.startsWith("sbx_acct_")) throw new ProviderError("permanent", "invalid_destination", "Unknown payout account");
-    const available = (await this.listBalanceTransactions()).reduce((s, t) => s + t.netMinor, 0);
+    const available = SANDBOX_PLATFORM_FLOAT_MINOR + (await this.listBalanceTransactions()).reduce((s, t) => s + t.netMinor, 0);
     if (available < input.amountMinor) throw new ProviderError("wait_funds", "balance_insufficient", "Not enough available balance");
     const transferRef = `sbx_tr_${input.opId}`;
     await this.emit({
