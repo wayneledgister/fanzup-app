@@ -42,6 +42,14 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     return reply.status(500).send({ error: "internal", message: "Something went wrong on our side." });
   });
 
+  // Opening the API's own port in a browser (localhost:8787/) lands here; the website is on :5173.
+  app.get("/", async () => ({
+    ok: true,
+    service: "fanzup-api",
+    message: `This is the API. Routes live under ${API_PREFIX}; the website runs separately (pnpm dev:web, http://localhost:5173).`,
+    health: `${API_PREFIX}/health`,
+  }));
+
   app.get(`${API_PREFIX}/health`, async () => {
     await deps.sql`select 1`;
     return { ok: true, escrow: deps.escrow.name };
