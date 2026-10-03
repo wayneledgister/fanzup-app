@@ -115,9 +115,26 @@ Legend — **Keep**: port from Fan Profile Setup, reskin. **Build**: placeholder
 ### Dropped outright (FanZuP)
 Supernova executive lounge, cosmic profile, stakeholder chat / network chat overlay, investor alerts toasts, localized guide alerts, QuickStart player, media net, mobile prototype/site (responsive build replaces it), official purpose, smart-contract visualizer/audits, Supabase demo backend.
 
-## Open questions
+## Open questions (decisions for Wayne)
 
-1. **Governance:** keep as gated SPV-holder votes, or remove from scope? (No PRD covers it.)
-2. **Fan engagement tiers:** docs define creator tiers only. OK to use engagement badges (not dollar tiers) for fans?
-3. **Fees:** confirm `products/fees.html` is current before the fee page ships.
-4. **Stats on landing page:** need verified live figures or remove (Brand §10).
+1. **Governance:** kept as gated (`postBeta`) "Holder communications & votes" for SPV-structured Pools only. Keep, or drop from scope? No PRD covers it.
+2. **Fan engagement:** badges count engagement (backed campaigns, subscriber streaks, shows attended), not dollars. The All-Access card is a profile artifact, not a payment card. OK?
+3. **Fees:** platform fee rates show "Being finalized" per `products/fees.html`; only Stripe 2.9% + $0.30 is shown. Who absorbs card processing on fan checkout: artist (current copy, per fees.html) or fan?
+4. **Landing stats:** removed until verified live figures exist (Brand §10).
+5. **Established / Pro criteria:** docs only give caps; UI says "criteria published before this tier opens". The creator dashboard's "Path to Established" uses placeholder targets.
+6. **Fan Reg CF tax form:** layer2 tax section labels 1099-MISC; confirm against Mechanism 04 (C-corp issuer → 1099-DIV?).
+
+## Placeholder values to confirm (invented for the prototype)
+
+| Where | Value |
+|---|---|
+| Campaign wizard | Campaign length 7–60 days; goal-guidance formula; perk price ranges; review SLA "usually within 2 business days" |
+| Campaign live / dashboard | 40/35/25% milestone release split |
+| Admin queues | SLA targets 2 / 1 / 3 / 1 business days |
+| Fan app | $6 flat merch shipping; 6-ticket order limit; $500 tip cap per stream; 48-hour stream replay; 14-day account-deletion grace |
+| Artist profile | $5/month subscription price |
+| Investor | Demo fan's $5,000 Reg CF limit (illustrative, not a regulatory figure) |
+| Support | support@fanzup.example address |
+
+## Not yet wired (prototype only)
+Uploads, phone/OTP, ID capture, EIN checks, payment processor, streaming connections, video player, document downloads, and all persistence are simulated with in-memory demo data (`src/lib/mock.ts` + per-area `data.ts`). Terms and Privacy pages say "being finalized with counsel" rather than showing placeholder legal text.
