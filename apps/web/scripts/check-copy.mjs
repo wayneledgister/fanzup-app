@@ -33,5 +33,24 @@ function walk(d) {
   }
 }
 walk(root);
+
+// Transactional email templates (apps/api/src/notify.ts) — FR-NTF-001, FR-PLT-006: Layer 1 never says invest,
+// returns or ownership, and no message says "escrow" or names a custodian while none exists.
+const TEMPLATE_FILE = path.resolve(root, "..", "..", "api", "src", "notify.ts");
+const TEMPLATE_BANNED = [
+  ...BANNED,
+  [/\bescrow\b/i, "escrow (FR-PLT-006: no custodian yet)"],
+  [/\binvest(ment|ing|or|s)?\b/i, "invest (Layer 1)"],
+  [/\breturns?\b(?!\s*(policy|label))/i, "returns (Layer 1)"],
+  [/\bownership\b/i, "ownership (Layer 1)"],
+];
+if (fs.existsSync(TEMPLATE_FILE)) {
+  fs.readFileSync(TEMPLATE_FILE, "utf8").split("\n").forEach((line, i) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+    // Only user-facing text: string and template literals on the line.
+    const text = (line.match(/"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g) ?? []).join(" ");
+    for (const [re, name] of TEMPLATE_BANNED) if (re.test(text)) { bad++; console.log(`api/src/notify.ts:${i + 1}  [${name}]  ${line.trim().slice(0, 110)}`); }
+  });
+}
 if (bad) { console.error(`\n${bad} copy violation(s).`); process.exit(1); }
 console.log("copy check: clean");

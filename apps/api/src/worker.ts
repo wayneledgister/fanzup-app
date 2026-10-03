@@ -6,13 +6,15 @@
 import { loadEnv } from "./env";
 import { createDb } from "./db";
 import { createProvider } from "./provider";
-import { logOnlyNotify } from "./notify";
 import { runWorkerTick } from "./jobs";
+import { jobDeps } from "./app";
+import { createVerifier } from "./lib/auth";
 import { log, redact } from "./log";
 
 const env = loadEnv();
 const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
 const provider = createProvider(env, sql);
+const deps = jobDeps({ env, sql, provider, verify: createVerifier(env) });
 let stopping = false;
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { stopping = true; });
@@ -20,7 +22,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { stoppi
 log("info", "worker.start", { provider: provider.name, intervalMs: env.WORKER_INTERVAL_MS });
 while (!stopping) {
   try {
-    const r = await runWorkerTick({ sql, provider, notify: logOnlyNotify });
+    const r = await runWorkerTick(deps);
     if (r.settled.length || r.processed || r.ops || r.events || r.holdsReleased || r.recon) log("info", "worker.tick", r);
   } catch (e) {
     log("error", "worker.error", { error: redact(String((e as Error).stack ?? e)) });

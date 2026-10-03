@@ -10,6 +10,8 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 | shared + API (baseline before M1) | `pnpm test`, local Postgres 16 | 29/29 green | 2026-10-03 |
 | shared (PR-B) | `pnpm --filter @fanzup/shared test` | 7/7 green | 2026-10-03 |
 | API (PR-B) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 61/61 green | 2026-10-03 |
+| CI PR-A #6, PR-B #7 | GitHub Actions (Postgres 17) | web ✅ api ✅ | 2026-10-03 |
+| API (PR-C) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 81/81 green | 2026-10-03 |
 
 ## Not run here
 - Anything needing Docker (Supabase CLI stack, e2e) — runs only in CI.
@@ -28,3 +30,15 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - Deviation D-001: design §3 split migrations as 0300 money / 0400 staff+recon; built recon tables and tranche evidence in 0300 (they belong to the money path in PR-B) and identity/staff in 0400. Spec impact: design §3 table updated.
 - Deviation D-002: `payment.failed` events don't mark the backing failed (Stripe lets the fan retry the same payment; the hold expiry cleans up). Design §5 didn't specify; no requirement impact.
 - Deviation D-003: the sandbox's "available balance" for transfers is platform-wide, like Stripe's. No requirement impact.
+
+## 2026-10-03 · PR-C identity, staff, artist
+- CI on PR-A (#6) and PR-B (#7): ✅ both jobs green (GitHub Actions, Postgres 17)
+- T-011 ✅ identity: attestation trigger, consents, verified-email gate, `/me`, re-acceptance with IP/UA — `identity-staff` tests, run here
+- T-012 ✅ staff `aal2`, privileged actions, single-operator delay/limits/cancel, weekly review + sign-off — run here
+- T-013 ✅ staff endpoints: review, verify, refund, replay (event/op), recon run/latest/override, queue, trace — run here
+- T-014 ✅ artist API: profile, payout onboarding (sandbox), draft CRUD, perks, tranches, submit, publish, evidence; cross-artist isolation — run here. Stripe Connect onboarding against Stripe: **not run** (no keys)
+- T-015 ✅ notifications: 6 templates (5 M1 messages + "refund started" for auto/staff refunds), versioned, log transport, test-mode footer; `lint:copy` now scans API templates — run here
+- T-016 ✅ funnel events: account_created (trigger), checkout_started + backing_confirmed (backing trigger), perk_selected (`POST /events`, bounded) — run here
+- T-017 ✅ column allowlists (artists, profiles) + no client access to any new internal table + clients can't call workflow functions — `rls` tests, run here
+- Deviation D-004: FR-ID-004 (M1) — the artist's identity status becomes `verified` when the provider reports the payout account ready (Stripe Connect performs KYC in its hosted onboarding; the sandbox connects at once). Design §4.2 implied it; now explicit. Spec impact: none (FR-ID-004 already says identity and payout setup run through the provider's hosted flow).
+- Deviation D-005: `checkout_started` is recorded server-side when the backing hold is created; the web app only sends `perk_selected` (Pragmatist G2 nit). Spec impact: none.
