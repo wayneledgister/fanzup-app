@@ -9,3 +9,8 @@ dist
 !.env.example
 supabase/.temp
 supabase/.branches
+
+# local test/demo artifacts
+test-results/
+playwright-report/
+.data/
