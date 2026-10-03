@@ -12,9 +12,13 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 | API (PR-B) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 61/61 green | 2026-10-03 |
 | CI PR-A #6, PR-B #7 | GitHub Actions (Postgres 17) | web ✅ api ✅ | 2026-10-03 |
 | API (PR-C) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 81/81 green | 2026-10-03 |
+| API (PR-D) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 83/83 green | 2026-10-03 |
+| E2E golden journey | Playwright, local harness (GoTrue from source + mail sink + gateway), fresh DB | 1/1 green ×3 | 2026-10-03 |
+| E2E golden journey | CI job `e2e` (Supabase CLI 2.119.0 stack) | green | 2026-10-03 |
 
 ## Not run here
-- Anything needing Docker (Supabase CLI stack, e2e) — runs only in CI.
+- `supabase start` (no Docker here) — runs only in CI; locally the e2e ran against GoTrue built from source.
+- Anything against Stripe's real test API (no keys): adapter calls, Connect onboarding, Payment Element.
 
 ## 2026-10-03 · PR-B money path
 - T-001 ✅ policy keys (Appendix A) — shared tests 7/7, run here
@@ -44,7 +48,7 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - Deviation D-005: `checkout_started` is recorded server-side when the backing hold is created; the web app only sends `perk_selected` (Pragmatist G2 nit). Spec impact: none.
 
 ## 2026-10-03 · PR-D web + e2e
-- CI on PR-C (#8): see PR checks.
+- CI on PR-C (#8): web ✅ api ✅. GitGuardian flagged a test line (a public seed user's UUID next to `Bearer`) — a false positive; the literal was replaced by a named constant in an amended commit and PR-D restacked.
 - T-018 ✅ M1 contracts as zod schemas in `packages/shared/src/schemas.ts`, used by the API (requests) and the web client (types) — typecheck, run here
 - T-019 ✅ Supabase Auth in the web app: sign-up (name, email, password, 18+, terms), verify-email (link → back to `next`; resend; cross-device "continue"), log in (+ TOTP step for staff), reset password, session context, guards — run here in the local e2e harness against GoTrue built from source
 - T-020 ✅ Explore and campaign page on the API (live/funded tabs, type filter, paging; artist's own story/risks/milestones only; local-time deadline; test-mode notice; refund-promise copy without "escrow") — run here (e2e + screenshots at Pixel 7 width)
@@ -57,3 +61,10 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - Deviation D-007: added `GET /artist/campaigns/:id` (milestone ids are needed to submit evidence). Design §4.2 updated.
 - Deviation D-008: `/checkout/:slug` lives in the public shell (a signed-out fan arriving from a link sees the same chrome as the campaign page); guarded inside the page. Design §11 updated.
 - Not run here: `supabase start` itself (no Docker) — runs only in CI.
+
+## M1 close · truth summary (2026-10-03)
+- **Built and verified here or in CI:** T-001…T-023 (23 tasks). API 83 tests + shared 7 on local Postgres 16 and CI Postgres 17; golden journey green locally (GoTrue harness) and in CI (Supabase CLI stack).
+- **Written, not run:** Stripe adapter against Stripe's real test API (contract-tested on recorded payload shapes only); Stripe Connect onboarding; the Payment Element path in the browser. All wait on Stripe test keys (T-000 E6) and exit test 8 (manual).
+- **Not started (by design, M2+):** everything listed under "Not in M1" in `01-requirements.md`.
+- Exit tests: 1 ✅ 2 ✅ 3 ✅ (ledger ↔ **sandbox** provider; ledger ↔ Stripe test balance only after exit test 8) 4 ✅ 5 ✅ 6 ✅ 7 ✅ 8 ⏳ Wayne.
+- G4 (milestone review) not convened in this run; requested from Wayne with G2/G3 sign-off.
