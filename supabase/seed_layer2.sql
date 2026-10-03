@@ -27,7 +27,7 @@ select '00000000-0000-0000-0000-000000000000', u.id, 'authenticated', 'authentic
     ('5a1e0000-0000-4000-8000-00000000d4d4'::uuid, 'dev@fanzup.test', 'Dev Malhotra'),
     ('5a1e0000-0000-4000-8000-00000000e5e5'::uuid, 'eli@fanzup.test', 'Eli Santos')) as u(id, email, name);
 insert into auth.identities (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
-select id::text, id, id::text, jsonb_build_object('sub', id::text, 'email', email), 'email', now(), now(), now()
+select id, id, id::text, jsonb_build_object('sub', id::text, 'email', email), 'email', now(), now(), now()
   from auth.users where email in ('ava@fanzup.test', 'ben@fanzup.test', 'cleo@fanzup.test', 'dev@fanzup.test', 'eli@fanzup.test');
 
 -- Investor profiles (provider party/account refs match the fixture). Income/net worth are fictional demo attestations.
