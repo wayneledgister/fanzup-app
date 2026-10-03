@@ -1,4 +1,5 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadEnv, type Env } from "./env";
 import { createDb } from "./db";
 import { createEscrow, createStripe } from "./escrow";
@@ -27,35 +28,52 @@ function misconfiguredApp(error: unknown) {
   return app;
 }
 
-/**
- * No top-level await: Vercel's launcher may load this file with require(), and Node refuses
- * require() of an ES module that uses top-level await (ERR_REQUIRE_ASYNC_MODULE).
- */
-async function main() {
-  let env: Env | null = null;
-  let app;
+/** Build the app once per process. Never rejects: bad config yields the 503 app instead. */
+async function createApp(): Promise<{ app: FastifyInstance; env: Env | null }> {
   try {
-    env = loadEnv();
+    const env = loadEnv();
     const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
     const stripe = createStripe(env);
-    const ready = await buildApp({ env, sql, stripe, escrow: createEscrow(env, stripe), verify: createVerifier(env) });
-    app = ready;
-    for (const sig of ["SIGINT", "SIGTERM"] as const) {
-      process.on(sig, async () => {
-        await ready.close();
-        await sql.end({ timeout: 5 });
-        process.exit(0);
-      });
-    }
+    const app = await buildApp({ env, sql, stripe, escrow: createEscrow(env, stripe), verify: createVerifier(env) });
+    app.addHook("onClose", async () => {
+      await sql.end({ timeout: 5 });
+    });
+    return { app, env };
   } catch (e) {
-    app = misconfiguredApp(e);
+    return { app: misconfiguredApp(e), env: null };
   }
-  await app.listen({ port: env?.PORT ?? Number(process.env.PORT ?? 8787), host: "0.0.0.0" });
 }
 
-main().catch((e) => {
-  console.error("api.start_failed", e);
-  process.exit(1);
-});
+const ready = createApp();
+
+/**
+ * Vercel: the function runtime imports this module and calls the default export with Node's
+ * (req, res). We hand the request to Fastify's server instead of listening on a port, which
+ * avoids depending on how the runtime intercepts listen(). No top-level await, so the module
+ * also loads under require().
+ */
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
+  const { app } = await ready;
+  await app.ready();
+  app.server.emit("request", req, res);
+}
+
+// Everywhere else (local dev, Render, tests via `node dist/server.js`): listen on a port.
+if (!process.env.VERCEL) {
+  ready
+    .then(async ({ app, env }) => {
+      for (const sig of ["SIGINT", "SIGTERM"] as const) {
+        process.on(sig, async () => {
+          await app.close();
+          process.exit(0);
+        });
+      }
+      await app.listen({ port: env?.PORT ?? Number(process.env.PORT ?? 8787), host: "0.0.0.0" });
+    })
+    .catch((e) => {
+      console.error("api.start_failed", e);
+      process.exit(1);
+    });
+}
 
 export { API_PREFIX };
