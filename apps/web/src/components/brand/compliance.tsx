@@ -4,25 +4,46 @@
  * Sources: Brand §7.3–§7.4, PRD 01 §6.5 / §11, Mechanism 05 §2, Mechanism 07 §1.
  * Copy is product guidance pending counsel review — not legal advice.
  */
-import { Lock, ShieldCheck, TriangleAlert, Hourglass } from "lucide-react";
+import { FlaskConical, Lock, ShieldCheck, TriangleAlert, Hourglass } from "lucide-react";
 import { Link } from "react-router";
 import type { ReactNode } from "react";
 import { Callout } from "./primitives";
 import { formatDate, parseDate } from "@/lib/format";
+import { useConfig } from "@/lib/config";
 
-/** Layer 1 reward campaigns ("Fund My Show", Mechanism 05). */
+/**
+ * Layer 1 reward campaigns ("Fund My Show", Mechanism 05): the refund promise.
+ * FR-PLT-006: while no custodian is live (E1 card B), no screen names one or says "escrow"; the promise is
+ * stated as "if the goal isn't met by the deadline, every backer is refunded in full". (The component keeps its
+ * old name so every page picks up the new wording.)
+ */
 export function EscrowNotice({ compact = false }: { compact?: boolean }) {
   return (
-    <Callout tone="gold" icon={<ShieldCheck />} title="Held in escrow until the goal is met">
+    <Callout tone="gold" icon={<ShieldCheck />} title="Refunded in full if the goal isn't met">
       {compact ? (
-        "If the goal isn't reached by the deadline, every backer is refunded automatically."
+        "If the goal isn't reached by the deadline, every backer is refunded in full automatically."
       ) : (
         <>
-          Your money is held by our escrow partner — not by FanZuP and not by the artist — until the campaign reaches its goal. If it
-          isn't met by the deadline, every backer is refunded automatically. Backing gets you the perks listed; it is not an investment
-          and doesn't include any share of the artist's earnings.
+          Your card is charged when you back. If the campaign doesn't reach its goal by the deadline, every backer is refunded in full,
+          automatically. If it does, the artist receives the money in stages. Backing gets you the perks listed; it is not an investment and
+          doesn't include any share of the artist's earnings.
         </>
       )}
+    </Callout>
+  );
+}
+
+/**
+ * FR-PLT-006: persistent test-money notice on every money surface while the payment provider is in test mode.
+ */
+export function TestModeNotice({ className }: { className?: string }) {
+  const cfg = useConfig();
+  // Shown until the API confirms live mode — which FR-PAY-008 refuses in M1 — so it never flickers off wrongly.
+  if (cfg && !cfg.testMode) return null;
+  return (
+    <Callout tone="warning" icon={<FlaskConical />} title="Test mode — no real money moves" className={className}>
+      FanZuP is in a test-money beta. Pay with a test card (for example <span className="num">4242 4242 4242 4242</span>). Artists don't owe
+      perks for test backings; anything they send is a bonus.
     </Callout>
   );
 }

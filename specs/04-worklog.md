@@ -42,3 +42,18 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - T-017 ✅ column allowlists (artists, profiles) + no client access to any new internal table + clients can't call workflow functions — `rls` tests, run here
 - Deviation D-004: FR-ID-004 (M1) — the artist's identity status becomes `verified` when the provider reports the payout account ready (Stripe Connect performs KYC in its hosted onboarding; the sandbox connects at once). Design §4.2 implied it; now explicit. Spec impact: none (FR-ID-004 already says identity and payout setup run through the provider's hosted flow).
 - Deviation D-005: `checkout_started` is recorded server-side when the backing hold is created; the web app only sends `perk_selected` (Pragmatist G2 nit). Spec impact: none.
+
+## 2026-10-03 · PR-D web + e2e
+- CI on PR-C (#8): see PR checks.
+- T-018 ✅ M1 contracts as zod schemas in `packages/shared/src/schemas.ts`, used by the API (requests) and the web client (types) — typecheck, run here
+- T-019 ✅ Supabase Auth in the web app: sign-up (name, email, password, 18+, terms), verify-email (link → back to `next`; resend; cross-device "continue"), log in (+ TOTP step for staff), reset password, session context, guards — run here in the local e2e harness against GoTrue built from source
+- T-020 ✅ Explore and campaign page on the API (live/funded tabs, type filter, paging; artist's own story/risks/milestones only; local-time deadline; test-mode notice; refund-promise copy without "escrow") — run here (e2e + screenshots at Pixel 7 width)
+- T-021 ✅ checkout route (hold countdown, quantity, total, charge timing, re-acceptance, Stripe Payment Element / sandbox card form, failure categories, confirmation) and My backings on the API — run here (e2e)
+- T-022 ✅ Playwright golden journey — **passes locally** 3× from a fresh database (GoTrue + mail sink + gateway harness mirroring the Supabase CLI stack)
+- T-023 🟡 CI `e2e` job (Supabase CLI local stack) written; first CI result pending on PR-D
+- Bug found by e2e and fixed: `Intl.DateTimeFormat` rejects `dateStyle` + `timeZoneName` → campaign page crashed; new `formatInstant()`.
+- Bug found by screenshots and fixed: My backings refund line overflowed at phone width.
+- Deviation D-006 (operational finding): FanZuP absorbs the processing fee on refunds (E1-C default), so the processor balance runs short of what artists are owed unless FanZuP keeps a float there; the sandbox now models a platform float, and design §12.1 tells Wayne to keep one on Stripe. Spec impact: none (setup step added).
+- Deviation D-007: added `GET /artist/campaigns/:id` (milestone ids are needed to submit evidence). Design §4.2 updated.
+- Deviation D-008: `/checkout/:slug` lives in the public shell (a signed-out fan arriving from a link sees the same chrome as the campaign page); guarded inside the page. Design §11 updated.
+- Not run here: `supabase start` itself (no Docker) — runs only in CI.

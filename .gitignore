@@ -9,3 +9,5 @@ dist
 !.env.example
 supabase/.temp
 supabase/.branches
+playwright-report
+test-results

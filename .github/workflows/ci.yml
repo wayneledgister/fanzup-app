@@ -47,3 +47,58 @@ jobs:
       - run: pnpm --filter @fanzup/api typecheck
       - run: pnpm --filter @fanzup/api test
       - run: pnpm --filter @fanzup/api build
+
+  e2e:
+    # M1 golden journey (NFR-QA-02; ADR-006): real Supabase Auth (local stack) + API + worker + web, Playwright.
+    # Separate from the fast jobs on purpose (G2 condition 10); make it a required check once it has been stable.
+    name: E2E · golden journey (Supabase local stack, Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - uses: supabase/setup-cli@v3
+        with: { version: 2.119.0 }
+      - name: Start Supabase (db, auth, gateway, mail only) — applies migrations + seed.sql (local seed, never hosted)
+        run: supabase start -x studio,imgproxy,storage-api,edge-runtime,logflare,vector,realtime,postgres-meta,supavisor,postgrest
+      - name: Export local stack settings
+        run: |
+          supabase status -o env | sed -E 's/^([A-Z_]+)=/SB_\1=/' | tr -d '"' >> "$GITHUB_ENV"
+      - run: pnpm --filter @fanzup/api build
+      - name: Build web against the local stack
+        run: pnpm --filter @fanzup/web build
+        env:
+          VITE_SUPABASE_URL: ${{ env.SB_API_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ env.SB_ANON_KEY }}
+      - name: Start API, worker and web preview
+        run: |
+          export DATABASE_URL="$SB_DB_URL" SUPABASE_URL="$SB_API_URL" SUPABASE_JWT_SECRET="$SB_JWT_SECRET" ESCROW_PROVIDER=sandbox DEPLOY_ENV=ci NODE_ENV=development
+          (cd apps/api && PORT=8787 CORS_ORIGINS=http://localhost:4173 nohup node dist/server.js > ../../api.log 2>&1 &)
+          (cd apps/api && WORKER_INTERVAL_MS=1000 nohup node dist/worker.js > ../../worker.log 2>&1 &)
+          (cd apps/web && nohup pnpm exec vite preview --port 4173 --strictPort > ../../web.log 2>&1 &)
+          for i in $(seq 1 60); do curl -fsS http://localhost:4173/api/health && break; sleep 2; done
+          curl -fsS http://localhost:4173/api/health
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Golden journey
+        run: pnpm exec playwright test -c e2e/playwright.config.ts
+        env:
+          WEB_URL: http://localhost:4173
+          SUPABASE_URL: ${{ env.SB_API_URL }}
+          SUPABASE_ANON_KEY: ${{ env.SB_ANON_KEY }}
+          MAILPIT_URL: http://127.0.0.1:55324
+      - name: Keep logs and the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            api.log
+            worker.log
+            web.log
+            e2e/playwright-report
+            e2e/test-results
+            test-results
+          retention-days: 7

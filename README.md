@@ -25,6 +25,7 @@ pnpm dev:api                     # http://localhost:8787/api  (or `npx vercel de
 pnpm --filter @fanzup/api worker # settlement + outbox worker
 pnpm test                        # needs TEST_DATABASE_URL (see SETUP.md A6)
 pnpm typecheck && pnpm lint:copy
+pnpm e2e                         # golden journey; needs the local stack running (see .github/workflows/ci.yml job e2e)
 ```
 
 ## Money-path rules (enforced in the database, tested in CI)
