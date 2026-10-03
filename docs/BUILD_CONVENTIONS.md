@@ -1,5 +1,7 @@
 # Build conventions — FanZuP app
 
+> **Monorepo note (2026-10-03):** the web app now lives in `apps/web/`. Paths below like `src/…`, `scripts/…` are relative to `apps/web/`. Run commands from the repo root with `pnpm --filter @fanzup/web <script>`.
+
 Read this, `docs/CONSOLIDATION.md`, and `docs/brand/BRAND_GUIDELINES.md` §3–§8 before building a page. `src/pages/public/Landing.tsx` is the reference implementation: match its quality bar.
 
 ## Stack

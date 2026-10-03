@@ -1,0 +1,227 @@
+# FanZuP backend setup: what you do by hand
+
+Everything that can be done in code is already in the repo. These are the steps that need **your accounts, passwords or approvals**, in order. Each part ends with a check, so you know it worked before moving on.
+
+**Time:**
+- Part A (local): about 30 minutes
+- Parts B–F (hosted): about 1–2 hours
+- Part G (escrow partner): weeks, and it runs alongside everything else
+
+**Layout:**
+```
+apps/web          React app (Vercel)
+apps/api          API + worker (Render)
+packages/shared   rules shared by web and API (tiers, policy, money, schemas)
+supabase/         migrations, seed, config  (Supabase)
+```
+The reasons for one repo are in [`docs/adr/ADR-001-monorepo.md`](adr/ADR-001-monorepo.md).
+
+---
+
+## Part A: Run everything on your Mac
+
+### A1. Install the tools (once)
+1. Install **Docker Desktop** (docker.com) and start it. The local Supabase stack runs in Docker.
+2. Install **Node 22**: `brew install node@22`, or use nvm.
+3. Enable pnpm: `corepack enable`.
+4. Install the **Stripe CLI**: `brew install stripe/stripe-cli/stripe`. It's only needed for step A5.
+
+The Supabase CLI is already a dev dependency of the repo, so you don't install it separately.
+
+### A2. Get the code and dependencies
+```bash
+git clone https://github.com/wayneledgister/fanzup-app && cd fanzup-app
+pnpm install
+```
+
+### A3. Start the local database
+```bash
+pnpm db:start      # first run downloads images: ~5 min
+pnpm db:reset      # applies supabase/migrations/* and supabase/seed.sql
+pnpm exec supabase status
+```
+Keep the `status` output open; you need its URLs and keys in A4.
+
+**✅ Check:** open **Studio** at http://127.0.0.1:54323 → Table Editor. You should see four live campaigns in `campaigns` and ten rows in `perks`.
+
+The seed creates these test users. Every password is `FanzupDev123`.
+
+| Email | Who |
+|---|---|
+| `fan@fanzup.test` | Jordan Pierce (fan) |
+| `nova@fanzup.test` | Nova Reyes (artist) |
+| `sol@fanzup.test` | Sol Amara (artist) |
+| `velvet@fanzup.test` | Velvet Circuit (artist) |
+| `lowends@fanzup.test` | The Low Ends (artist) |
+| `reviewer@fanzup.test` | Compliance reviewer (staff) |
+
+### A4. Run the API
+```bash
+cp apps/api/.env.example apps/api/.env
+pnpm dev:api        # http://localhost:8787
+```
+The defaults in `.env` already point at local Supabase.
+
+**✅ Check:** `curl localhost:8787/health` returns `{"ok":true,"escrow":"sandbox"}`.
+
+If authenticated calls return 401, your local Supabase signs tokens with the legacy shared secret. Copy `JWT_SECRET` from `pnpm exec supabase status -o env` into `SUPABASE_JWT_SECRET` in `apps/api/.env`, then restart the API.
+
+### A5. Walk the whole money flow locally (sandbox escrow, no real payments)
+```bash
+ANON=<"anon key" from supabase status>
+TOKEN=$(curl -s "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
+  -H "apikey: $ANON" -H "content-type: application/json" \
+  -d '{"email":"fan@fanzup.test","password":"FanzupDev123"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).access_token')
+
+# Back Sol Amara's show: General admission, $30
+curl -s localhost:8787/v1/backings -H "authorization: Bearer $TOKEN" -H "idempotency-key: demo-0001" \
+  -H "content-type: application/json" \
+  -d '{"campaignId":"dbe19d49-d0c5-54da-b4bf-0ff0c03d5e27","perkId":"3835231c-7f19-5da7-88f7-02e8a3f255b6","quantity":1}'
+# → {"backingId":"…"}  then pretend the processor confirmed it:
+curl -s -X POST localhost:8787/v1/dev/sandbox/confirm-payment/<backingId>
+
+# Jump past the deadline: the goal isn't met, so the campaign fails and the backer is refunded in full
+curl -s -X POST "localhost:8787/v1/dev/sandbox/tick?now=2027-03-01T00:00:00Z"
+```
+**✅ Check:** in Studio, look at `campaigns`, `backings` and the `ledger_balances` view:
+- the campaign is `refunded`
+- the backing is `refunded`
+- every per-campaign ledger account is `0`
+
+### A6. Run the tests
+The tests need a Postgres server they can create and drop scratch databases on. Local Supabase works:
+```bash
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres pnpm test
+```
+**✅ Check:** 26 tests pass. They cover:
+- the ledger always balancing
+- funded and failed flows
+- idempotency
+- RLS
+- shared rules matching the database
+
+---
+
+## Part B: Create the hosted Supabase projects
+
+### B1. Create two projects
+1. Go to supabase.com → **New project**. Create **`fanzup-staging`** and **`fanzup-prod`**.
+2. **Region: East US (North Virginia).** This sits next to the API host, and FanZuP LLC is a Virginia entity.
+3. Generate a strong **database password** for each project and save it in your password manager. You'll need it in B3 and E2.
+4. From each project's URL, `supabase.com/dashboard/project/<ref>`, note the **project ref**.
+
+### B2. Auth settings (both projects): Dashboard → Authentication
+1. **URL Configuration:**
+   - Site URL = your web URL. Use the Vercel URL from Part F for now; switch to your domain later.
+   - Add the same URL to **Redirect URLs**.
+2. **Sign In / Providers → Email:**
+   - **Confirm email:** on
+   - **Secure password change:** on
+   - Minimum password length **10**, requiring lowercase, uppercase and digits
+3. **Multi-Factor:** enable **TOTP (App Authenticator)**. PRD 01 requires MFA.
+4. **Emails → SMTP:** before real users, set up a custom SMTP sender such as Postmark or Resend. Supabase's built-in sender is rate-limited and meant for testing only.
+
+### B3. Push the schema
+```bash
+pnpm exec supabase login                          # opens the browser once
+pnpm exec supabase link --project-ref <staging-ref>   # asks for the DB password
+pnpm exec supabase db push                        # applies supabase/migrations
+```
+- **Staging only:** to load the test users and campaigns, run `pnpm exec supabase db push --include-seed`.
+- **Production:** never load the seed. Its users have a published password.
+- Do **not** push to prod by hand. After Part E, GitHub does it with your approval.
+
+### B4. Make yourself a reviewer
+In **SQL Editor** on staging, after signing up through the app or Auth → Add user:
+```sql
+insert into public.staff (user_id, role)
+select id, 'admin' from auth.users where email = 'wayne.ledg@gmail.com';
+```
+
+### B5. Check one Supabase-specific detail
+The API switches database roles to apply RLS. Run this in **SQL Editor**:
+```sql
+select pg_has_role('postgres','service_role','member') as svc,
+       pg_has_role('postgres','authenticated','member') as authd,
+       pg_has_role('postgres','anon','member') as anon;
+```
+**✅ Check:** all three are `true`, which is the Supabase default. If any is false, run `grant anon, authenticated, service_role to postgres;` and send me the result.
+
+---
+
+## Part C: Stripe test mode (development payments only)
+
+> **Stripe is not your escrow.** Stripe's own docs say it doesn't provide escrow services. Mechanism 05's moat is a third-party escrow / FBO partner (Part G). Stripe is wired in **test mode only**, so checkout, webhooks and refunds can be built and tested end to end. The API refuses to start the Stripe adapter with a live key.
+
+1. Create a Stripe account and stay in **Test mode**. Don't activate live payments.
+2. Copy the **Developers → API keys → Secret key** (`sk_test_…`) into `STRIPE_SECRET_KEY`.
+3. **Local:** run `stripe listen --forward-to localhost:8787/v1/webhooks/stripe` and put the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`. Set `ESCROW_PROVIDER=stripe-dev`.
+4. **Hosted, after Part D:**
+   - Go to Developers → **Webhooks** → Add endpoint `https://<your-render-api>/v1/webhooks/stripe`.
+   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed` and `charge.refunded`.
+   - Put its signing secret in Render as `STRIPE_WEBHOOK_SECRET`.
+
+---
+
+## Part D: Host the API and worker on Render
+1. Go to render.com → sign in with GitHub → **New → Blueprint** and pick `wayneledgister/fanzup-app`. Render reads `render.yaml` and proposes `fanzup-api` (web service) and `fanzup-worker`.
+2. Fill in the values marked "sync: false" for **staging**:
+
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | Supabase → **Connect** (top of the dashboard) → **Session pooler** connection string, port 5432, with your password. Render connects over IPv4, and Supabase's shared pooler is the IPv4 route; don't use the direct connection. |
+   | `SUPABASE_URL` | `https://<staging-ref>.supabase.co` |
+   | `STRIPE_SECRET_KEY` | your `sk_test_…` key |
+   | `STRIPE_WEBHOOK_SECRET` | from step C4 |
+   | `CORS_ORIGINS` | your Vercel URL from Part F (comma-separate several) |
+
+3. In each service → **Settings → Build & Deploy**, set **Auto-Deploy** to **"After CI checks pass"**. This way a red CI run never ships.
+4. **✅ Check:** `https://<fanzup-api>.onrender.com/health` returns `{"ok":true,…}`, and the worker logs show `worker.start`.
+
+When you add production, make a second pair of services (or a second Blueprint) that point at `fanzup-prod`.
+
+---
+
+## Part E: GitHub settings (repo → Settings)
+1. **Environments:** create **`staging`** and **`production`**.
+   - On `production`, tick **Required reviewers** and add yourself. Every prod migration then waits for your click.
+   - In each environment add:
+     - **secret** `SUPABASE_ACCESS_TOKEN`: create at supabase.com/dashboard/account/tokens
+     - **secret** `SUPABASE_DB_PASSWORD`: that project's password
+     - **variable** `SUPABASE_PROJECT_REF`: that project's ref
+2. **Branches → add rule for `main`:** require a pull request and the status checks **"Web · typecheck, copy rules, build"** and **"API · migrations, ledger, RLS, flow tests"**. These check names appear after the first CI run.
+3. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, the **Deploy database migrations** workflow runs on staging, then waits for your approval before production.
+
+---
+
+## Part F: Host the web app on Vercel
+1. Go to vercel.com → **Add New → Project** → import `wayneledgister/fanzup-app`.
+2. Set **Root Directory** to `apps/web`. The build settings come from `apps/web/vercel.json`.
+3. Environment variables (Preview = staging, Production = prod):
+   - `VITE_API_URL` = the Render API URL
+   - `VITE_SUPABASE_URL` = `https://<ref>.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY` = Supabase → Connect / API Keys → **publishable (anon)** key. It's safe in a browser because RLS protects the data. **Never** put the secret/service key here.
+4. **✅ Check:** every pull request gets a preview link, and production deploys from `main`.
+
+---
+
+## Part G: Escrow partner (start now; it's the long pole)
+PRD 01 §14 says partner paperwork takes 6–12 months. Escrow is the trust promise in Mechanism 05. Questions to ask:
+- **North Capital (TransactAPI, has a sandbox):**
+  - Will you escrow **reward-based, non-securities** campaigns, or only Reg CF and Reg A offerings?
+  - Do you support target-or-refund with **milestone (tranche) releases**?
+  - How do I get sandbox access?
+- **Bank FBO (Column, Increase or Treasury Prime, with Modern Treasury on top):**
+  - Can you open a **ring-fenced FBO account** per platform with sub-ledgering per campaign?
+  - What are the underwriting timeline and the money-transmission posture?
+
+When a partner is chosen, I add one file, `apps/api/src/escrow/<partner>.ts`, implementing the `EscrowProvider` interface. Nothing else in the codebase changes.
+
+---
+
+## Decision I made that you should confirm
+**Processing fees on refunds.** When a campaign fails, every backer gets the **full** amount back, which is the escrow promise in Brand §7.3. Card processors don't return their fee on refunds, so **FanZuP absorbs it**. In the ledger, that cost lands in `platform_absorbed_fees`.
+
+The alternative is refunding backers net of fees, which breaks "refunded automatically" in spirit. The other alternative, only authorizing cards and capturing at the deadline, doesn't work for campaigns longer than about a week, because standard card authorizations expire.
+
+Tell me if you want it changed. It's one function, `record_backing_refunded`.

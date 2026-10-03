@@ -1,0 +1,31 @@
+{
+  "name": "@fanzup/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "worker": "tsx --env-file-if-exists=.env src/worker.ts",
+    "build": "tsup",
+    "start": "node dist/server.js",
+    "start:worker": "node dist/worker.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fanzup/shared": "workspace:*",
+    "@fastify/cors": "^11.0.0",
+    "fastify": "^5.4.0",
+    "jose": "^6.0.0",
+    "postgres": "^3.4.7",
+    "stripe": "^18.3.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.0"
+  }
+}

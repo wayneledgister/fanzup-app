@@ -2,30 +2,37 @@
 
 Direct-to-fan funding for independent artists. *Fund the culture. Own the future.*
 
-This app consolidates three Figma Make prototypes into one routed React app built to the FanZuP Brand v2.0 guidelines and PRDs 01–03. See:
+| Path | What | Hosted on |
+|---|---|---|
+| `apps/web` | React app (Brand v2.0, 93 routes) | Vercel |
+| `apps/api` | Fastify API + worker: backings, escrow orchestration, settlement, refunds, milestone releases | Render |
+| `packages/shared` | Rules shared by web and API: creator tiers (PRD 01 §6.3), policy defaults, money, campaign state machine, request schemas | — |
+| `supabase/` | Postgres schema: double-entry ledger, RLS, money functions, seed | Supabase |
 
-- `docs/CONSOLIDATION.md` — what came from which mockup, and what changed to match the docs
-- `docs/BUILD_CONVENTIONS.md` — how pages are built (tokens, components, copy rules)
-- `docs/brand/` — brand guidelines and design-system tokens (copied from the FanzUp doc set)
+**Start here:**
+- **[docs/SETUP.md](docs/SETUP.md):** step-by-step setup, including everything that needs your accounts.
+- [docs/adr/ADR-001-monorepo.md](docs/adr/ADR-001-monorepo.md): why this is one repo.
+- [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md): how the Figma mockups became this app.
+- [docs/council/](docs/council/): decision records.
+- [specs/](specs/): change requests and backlog.
 
-## Run
-
+## Everyday commands
 ```bash
 pnpm install
-pnpm dev          # http://localhost:5173
-pnpm build
-pnpm lint:copy    # regulated-language guard (Brand §7.4)
+pnpm db:start && pnpm db:reset   # local Supabase (Docker) with migrations + seed
+pnpm dev:web                     # http://localhost:5173
+pnpm dev:api                     # http://localhost:8787
+pnpm --filter @fanzup/api worker # settlement + outbox worker
+pnpm test                        # needs TEST_DATABASE_URL (see SETUP.md A6)
+pnpm typecheck && pnpm lint:copy
 ```
 
+## Money-path rules (enforced in the database, tested in CI)
+- FanZuP never holds cash. A third-party escrow partner does; the ledger mirrors it (Mechanism 05).
+- Amounts are integer cents. The ledger is double-entry, append-only, and every transaction balances.
+- Every money operation is idempotent. Retries can't double-charge or double-pay.
+- Clients can't write money fields or call money functions. RLS and column grants stop them; only the API's service role can.
+- Funding is target-or-refund. Failed campaigns refund backers in full.
+
 ## Feature flags
-
-| Flag | What it gates | Default |
-|---|---|---|
-| `layer2` | Reg CF investing: investor KYC, Pools, holdings, investment flow | off |
-| `postBeta` | Soft transfers (Mechanism 07 P1), holder votes | off |
-
-Set `VITE_FLAG_LAYER2=true` / `VITE_FLAG_POSTBETA=true`, or append `?flags=layer2,postBeta` to any URL for review. In dev, a **Flags** toggle sits bottom-right in the app shell.
-
-## Routes
-
-Routes are generated from `scripts/routes.manifest.json` → `node scripts/gen-routes.mjs` → `src/app/routes.tsx`.
+`layer2` (Reg CF investing) and `postBeta` (soft transfers, holder votes) are off by default. Set `VITE_FLAG_LAYER2=true` or `VITE_FLAG_POSTBETA=true`, or append `?flags=layer2,postBeta` to a URL for review.

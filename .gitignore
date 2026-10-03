@@ -3,3 +3,9 @@ dist
 .DS_Store
 *.local
 .vite
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+supabase/.temp
+supabase/.branches
