@@ -63,6 +63,49 @@ export const POLICY = {
   staff: { idleTimeoutMinutes: 15 },
   /** FR-PRV-001. Placeholder documents until counsel-approved versions (P0b). */
   legal: { termsVersion: "2026-10-03-beta", privacyVersion: "2026-10-03-beta" },
+
+  // ── Layer 2 (CR-002, demo on mock rails). Mirrored in platform_settings by migration 20261005000200 (sync test). ──
+  /**
+   * Reg CF investor limits — REGULATORY figures, 17 CFR 227.100(a)(2) as amended (inflation adjustment effective
+   * 2022-09-20). Verified 2026-10-03 against the SEC's "Regulation Crowdfunding inflation adjustments" notice
+   * (sec.gov/files/inflation-adjustments-infographic.pdf). Re-verify before any live use: the SEC adjusts these at
+   * least every five years.
+   *  (i)  income OR net worth below thresholdMinor → greater of floorMinor or lowBps of the greater of income/net worth
+   *       (no explicit cap in (i) — implemented literally; counsel item L2-Q-limit)
+   *  (ii) income AND net worth at/above thresholdMinor → highBps of the greater, capped at thresholdMinor
+   *  Accredited investors: no limit (227.100(a)(2) applies to non-accredited only since the 2021 amendments).
+   */
+  regCf: {
+    floorMinor: 2_500_00,
+    thresholdMinor: 124_000_00,
+    lowBps: 500,
+    highBps: 1_000,
+    verifiedOn: "2026-10-03",
+    /** Issuer cap per 12 months (227.100(a)(1)); the creator's tier cap (tiers.ts) is lower and applies first. */
+    issuerCapMinor: 5_000_000_00,
+  },
+  l2: {
+    /** Policy default: an unfunded Unit reservation holds the investor's limit and the Units this long. */
+    reserveMinutes: 30,
+    /** Policy default: at the deadline, wait this long for fund moves already in flight before settling. */
+    settleGraceMinutes: 10,
+    /** Reg CF: investors may cancel until 48 hours before the offering deadline (227.304). */
+    cancelCutoffHours: 48,
+    /** Rule 501 / 227.501: Units can't be resold for 12 months from issue (Mechanism 07 P0). */
+    lockupMonths: 12,
+    /** Policy defaults for the creator wizard (FR-L2-CR-003). */
+    defaults: { returnCapBps: 15_000, maturityMonths: 60, distribution: "quarterly" as const, fansBps: 3_000, platformBps: 500 },
+    deadlineDays: { min: 14, max: 60 },
+    /** Royalty periods follow the distribution schedule; a period's cash is due this long after it ends (01b §5). */
+    periodMonths: 3,
+    settlementDueDays: 45,
+    /** Policy default: at-risk longer than this → DEFAULT (01b §5). */
+    cureDays: 30,
+    /** Demo state deny-list (state blue-sky review is L2-Q8). Empty = all US states eligible in the demo. */
+    blockedStates: [] as readonly string[],
+    /** Version of the risk acknowledgment text shown before purchase (InvestmentRiskDisclosure). */
+    riskAckVersion: "2026-10-03-demo",
+  },
 } as const;
 
 /** Processing deducted from an artist's proceeds for one charge. */
