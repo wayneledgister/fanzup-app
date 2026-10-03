@@ -27,6 +27,14 @@ const Env = z.object({
   PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
   NODE_ENV: z.string().default("development"),
   WORKER_INTERVAL_MS: z.coerce.number().int().min(200).default(30_000),
+  /**
+   * Layer 2 Reg CF provider (CR-002, ADR-007). "none" (default) = Layer 2 can't be enabled. "mock" = apps/mock-escrow,
+   * local/CI only — refused in a deployed environment, so Layer 2 can't run in production by construction.
+   */
+  REGCF_PROVIDER: z.enum(["none", "mock"]).default("none"),
+  MOCK_ESCROW_URL: z.string().url().default("http://localhost:8790"),
+  MOCK_ESCROW_API_KEY: z.string().min(8).default("mock_escrow_dev_key"),
+  MOCK_ESCROW_WEBHOOK_SECRET: z.string().min(16).default("mock_escrow_dev_webhook_secret"),
 });
 export type Env = z.infer<typeof Env> & { deployed: boolean };
 
@@ -66,6 +74,9 @@ export function loadEnv(src: NodeJS.ProcessEnv = process.env): Env {
   // (no custody configuration has been approved — E1 card B).
   if (env.deployed && env.ESCROW_PROVIDER === "sandbox") {
     throw new Error("ESCROW_PROVIDER: the sandbox provider can't run in a deployed environment; set ESCROW_PROVIDER=stripe-test with Stripe TEST keys");
+  }
+  if (env.deployed && env.REGCF_PROVIDER === "mock") {
+    throw new Error("REGCF_PROVIDER: the mock escrow provider can't run in a deployed environment (CR-002; Layer 2 stays off in production)");
   }
   if (env.STRIPE_SECRET_KEY && !/^(sk|rk)_test_/.test(env.STRIPE_SECRET_KEY)) {
     throw new Error("STRIPE_SECRET_KEY: only Stripe TEST keys (sk_test_… / rk_test_…) are allowed until custody is approved (FR-PAY-008)");
