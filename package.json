@@ -18,6 +18,6 @@
     "db:types": "supabase gen types typescript --local > packages/shared/src/db.types.ts"
   },
   "devDependencies": {
-    "supabase": "^2.119.0"
+    "supabase": "^2.120.0"
   }
 }
