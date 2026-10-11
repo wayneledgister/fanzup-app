@@ -131,7 +131,7 @@ pnpm exec supabase db push                        # applies supabase/migrations
 - Do **not** push to prod by hand. After Part E, GitHub does it with your approval.
 
 ### B4. Make yourself a reviewer
-Sign up through the app's sign-up page first. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP and, in **SQL Editor**:
+Sign up through the app's sign-up page first. **The real sign-up page only exists once PR #9 (`feat/m1-web-e2e`) is merged and deployed** — before that, `/signup` is the prototype's mock and creates no account; the 18+ trigger arrives with PR #8's migrations. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP and, in **SQL Editor**:
 ```sql
 insert into public.staff (user_id, role)
 select id, 'admin' from auth.users where email = 'wayne.ledg@gmail.com';
@@ -157,7 +157,7 @@ select pg_has_role('postgres','service_role','member') as svc,
 3. **Local:** run `stripe listen --forward-to localhost:8787/api/v1/webhooks/stripe` and put the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`. Set `ESCROW_PROVIDER=stripe-dev`.
 4. **Hosted, after Part D (Vercel):**
    - Go to Developers → **Webhooks** → Add endpoint `https://<your-vercel-domain>/api/v1/webhooks/stripe`.
-   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed` and `charge.refunded`.
+   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed` and `charge.refunded`. **From M1 (PR #7):** replace that list with `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `refund.created`, `refund.updated`, `refund.failed` and `transfer.created` — one platform endpoint; no Connect-events endpoint is needed (design §12.1).
    - Put its signing secret in Vercel as `STRIPE_WEBHOOK_SECRET`.
 
 ---
