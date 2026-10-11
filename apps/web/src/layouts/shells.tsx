@@ -7,6 +7,34 @@ import {
 import { cn } from "@/lib/utils";
 import { useFlag, setFlag, allFlags } from "@/lib/flags";
 import { Button, Logo, Container } from "@/components/brand";
+import { initials, useSession } from "@/lib/session";
+
+/** Header actions for the public shell: log in / join, or the signed-in fan's backings (M1). */
+function AccountActions({ mobile = false, onDone }: { mobile?: boolean; onDone?: () => void }) {
+  const s = useSession();
+  if (s.session) {
+    return (
+      <>
+        <Button asChild variant={mobile ? "secondary" : "ghost"} size={mobile ? undefined : "sm"}>
+          <Link to="/backed" onClick={onDone}>My backings</Link>
+        </Button>
+        <Button variant={mobile ? "secondary" : "ghost"} size={mobile ? undefined : "sm"} onClick={() => { onDone?.(); void s.signOut(); }}>
+          Sign out
+        </Button>
+      </>
+    );
+  }
+  return (
+    <>
+      <Button asChild variant={mobile ? "secondary" : "ghost"} size={mobile ? undefined : "sm"}>
+        <Link to="/login" onClick={onDone}>Log in</Link>
+      </Button>
+      <Button asChild size={mobile ? undefined : "sm"}>
+        <Link to="/signup" onClick={onDone}>{mobile ? "Join" : "Join FanZuP"}</Link>
+      </Button>
+    </>
+  );
+}
 
 type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta"; end?: boolean };
 
@@ -36,12 +64,7 @@ export function PublicShell() {
             ))}
           </nav>
           <div className="hidden items-center gap-2 md:flex">
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/login">Log in</Link>
-            </Button>
-            <Button asChild size="sm">
-              <Link to="/signup">Join FanZuP</Link>
-            </Button>
+            <AccountActions />
           </div>
           <Button variant="ghost" size="icon" className="md:hidden" aria-label={open ? "Close menu" : "Open menu"} onClick={() => setOpen((o) => !o)}>
             {open ? <X /> : <Menu />}
@@ -56,12 +79,7 @@ export function PublicShell() {
                 </Link>
               ))}
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <Button asChild variant="secondary">
-                  <Link to="/login">Log in</Link>
-                </Button>
-                <Button asChild>
-                  <Link to="/signup">Join</Link>
-                </Button>
+                <AccountActions mobile onDone={() => setOpen(false)} />
               </div>
             </div>
           </nav>
@@ -225,6 +243,7 @@ function AppFrame({ items, secondary, mode }: { items: NavItem[]; secondary?: Na
   const modeLabel = { fan: "Fan", creator: "Creator", admin: "Compliance" }[mode];
   const switchTo = mode === "fan" ? { to: "/creator", label: "Switch to creator" } : { to: "/home", label: "Switch to fan" };
   const mobileTabs = items.filter((i) => !i.flag).slice(0, 4);
+  const session = useSession();
   return (
     <div className="flex min-h-dvh">
       <ScrollRestoration />
@@ -276,7 +295,7 @@ function AppFrame({ items, secondary, mode }: { items: NavItem[]; secondary?: Na
               <Bell />
             </Button>
             <Link to={mode === "fan" ? "/profile" : "/creator"} className="ml-1 flex size-9 items-center justify-center rounded-full border border-line bg-surface-2 text-xs font-semibold text-gold" aria-label="Account">
-              {mode === "fan" ? "JP" : "NR"}
+              {session.session ? initials(session.displayName, session.email) : mode === "fan" ? "JP" : "NR"}
             </Link>
           </div>
         </header>

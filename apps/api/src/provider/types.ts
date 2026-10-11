@@ -50,7 +50,12 @@ export class ProviderError extends Error {
 export interface BalanceTxn {
   /** Ref matched against ledger_transactions.external_ref: payment ref (charges), refund id, transfer id. */
   ref: string;
-  type: "charge" | "refund" | "transfer" | "adjustment";
+  /**
+   * `platform_topup`: FanZuP's own float added to the processor balance (Stripe `topup`, sandbox top-up), the only type
+   * recon excludes from the total diff. Everything else Stripe reports (payout, stripe_fee, dispute, fee corrections…)
+   * maps to `adjustment` and stays in the totals; with no ledger posting it is an `unmatched_provider_txn` break (design §7).
+   */
+  type: "charge" | "refund" | "transfer" | "platform_topup" | "adjustment";
   /** Net effect on the platform balance, in cents (charge: amount − fee; refund/transfer: −amount). */
   netMinor: number;
   feeMinor: number;

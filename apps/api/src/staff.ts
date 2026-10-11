@@ -114,6 +114,8 @@ export interface ActionResult {
   id: string;
   status: "scheduled" | "executed";
   executeAfter: string | null;
+  /** The request's correlation id, so an operator can open `GET /staff/trace/:correlationId` (PR #9, exit test 4). */
+  correlationId: string | null;
   /** What the executor returned (e.g. the sign-off row); not part of the HTTP `action` object. */
   result?: unknown;
 }
@@ -183,7 +185,7 @@ export async function privileged(
                      ${tx.json({ subject_id: input.subjectId, amount_minor: amount, delayed })})`;
     return rows;
   });
-  if (delayed) return { id: row.id, status: "scheduled", executeAfter: row.execute_after.toISOString() };
+  if (delayed) return { id: row.id, status: "scheduled", executeAfter: row.execute_after.toISOString(), correlationId: row.correlation_id };
   return execute(d, row);
 }
 
@@ -221,7 +223,7 @@ async function execute(d: Pick<Deps, "sql" | "provider">, a: ActionRow): Promise
     }
     await tx`insert into public.audit_events (action, entity, entity_id) values (${"staff." + a.action + ".executed"}, 'privileged_action', ${a.id})`;
   });
-  return { id: a.id, status: "executed", executeAfter: null, result };
+  return { id: a.id, status: "executed", executeAfter: null, correlationId: a.correlation_id, result };
 }
 
 /**

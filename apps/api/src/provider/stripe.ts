@@ -229,5 +229,8 @@ export function mapBalanceTxn(bt: Stripe.BalanceTransaction): BalanceTxn {
   }
   if (bt.type === "refund" || bt.type === "payment_refund") return { ref: String(s.id ?? bt.id), type: "refund", netMinor: bt.net, feeMinor: bt.fee, campaignId };
   if (bt.type === "transfer") return { ref: String(s.id ?? bt.id), type: "transfer", netMinor: bt.net, feeMinor: bt.fee, campaignId };
+  // A top-up is FanZuP's own float (design §12.1), never a campaign's money.
+  if (bt.type === "topup") return { ref: String(s.id ?? bt.id), type: "platform_topup", netMinor: bt.net, feeMinor: bt.fee, campaignId: null };
+  // payout, stripe_fee, adjustment (disputes, fee corrections), topup_reversal, …: money moving that recon must see.
   return { ref: bt.id, type: "adjustment", netMinor: bt.net, feeMinor: bt.fee, campaignId };
 }

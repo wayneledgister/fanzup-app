@@ -129,6 +129,20 @@ export const artistRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     }
   });
 
+  /** One of the artist's campaigns with its milestones (ids needed to submit evidence). */
+  app.get<{ Params: { id: string } }>("/campaigns/:id", async (req) => {
+    const user = userOf(req);
+    const c = await myCampaign(user, req.params.id);
+    const [row] = await asUser(d.sql, user, (tx) => tx<{ slug: string; title: string; goal_minor: bigint; raised_minor: bigint; ends_at: Date | null }[]>`
+      select slug, title, goal_minor, raised_minor, ends_at from public.campaigns where id = ${c.id}`);
+    const tranches = await asUser(d.sql, user, (tx) => tx<{ id: string; seq: number; pct: number; milestone: string | null; status: string; released_minor: bigint | null }[]>`
+      select id, seq, pct, milestone, status::text, released_minor from public.campaign_tranches where campaign_id = ${c.id} order by seq`);
+    return {
+      id: c.id, slug: row.slug, title: row.title, status: c.status, goalMinor: n(row.goal_minor), raisedMinor: n(row.raised_minor), endsAt: row.ends_at?.toISOString() ?? null,
+      tranches: tranches.map((t) => ({ id: t.id, seq: t.seq, pct: t.pct, milestone: t.milestone, status: t.status, releasedMinor: t.released_minor == null ? null : n(t.released_minor) })),
+    };
+  });
+
   app.patch<{ Params: { id: string } }>("/campaigns/:id", async (req) => {
     const user = userOf(req);
     const c = await myCampaign(user, req.params.id);

@@ -1,17 +1,13 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { BackCampaignRequest } from "@fanzup/shared/schemas";
 import { asUser, n } from "../db";
 import { requireUser, requireVerifiedUser, HttpError } from "../lib/auth";
 import { asService } from "../db";
 import { createBacking } from "../checkout";
 import type { Deps } from "../app";
 
-const BackingBody = z.object({
-  campaignId: z.string().uuid(),
-  perkId: z.string().uuid(),
-  quantity: z.number().int().min(1).max(10).default(1),
-  source: z.string().regex(/^[a-z0-9_-]{1,40}$/).nullish(),
-});
+const BackingBody = BackCampaignRequest;
 
 export const backingRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   /**

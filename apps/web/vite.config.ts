@@ -15,4 +15,8 @@ export default defineConfig({
     // (`vercel dev` at the repo root runs both services and does this routing itself.)
     proxy: { "/api": { target: process.env.API_PROXY_TARGET ?? "http://localhost:8787", changeOrigin: false } },
   },
+  // `vite preview` (used by the e2e job) proxies /api the same way.
+  preview: {
+    proxy: { "/api": { target: process.env.API_PROXY_TARGET ?? "http://localhost:8787", changeOrigin: false } },
+  },
 });

@@ -34,6 +34,16 @@ export const devRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     }
   });
 
+  /**
+   * Platform money into the sandbox balance (a Stripe top-up; design §12.1 float, worklog D-008/D-013). FanZuP absorbs
+   * the processing fee on refunds, so without it the e2e's payouts would wait for funds.
+   */
+  app.post("/sandbox/topup", async (req) => {
+    const body = z.object({ amountMinor: z.number().int().positive().max(10_000_000) }).parse(req.body ?? {});
+    await sandbox.topUp(body.amountMinor);
+    return { ok: true };
+  });
+
   app.post<{ Querystring: { now?: string; recon?: string } }>("/sandbox/tick", async (req) => {
     const now = req.query.now ? new Date(req.query.now) : new Date();
     if (Number.isNaN(now.getTime())) throw new HttpError(400, "invalid_request", "now must be an ISO date");

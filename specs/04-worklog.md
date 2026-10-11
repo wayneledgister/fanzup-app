@@ -35,9 +35,13 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 | typecheck | `pnpm -r typecheck` | clean | 2026-10-11 |
 | API (PR #8 review fixes, after merging main) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 143/143 green (11 files) | 2026-10-11 |
 | shared, typecheck, copy lint (PR #8 review fixes) | `pnpm --filter @fanzup/shared test`, `pnpm -r typecheck`, `pnpm --filter @fanzup/web lint:copy` | 7/7, clean, clean | 2026-10-11 |
+| API (PR #9 review fixes, after merging main) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 151/151 green (13 files) | 2026-10-11 |
+| shared, typecheck, copy lint, web build (PR #9) | `pnpm --filter @fanzup/shared test`, `pnpm -r typecheck`, `lint:copy`, `pnpm --filter @fanzup/web build` | 33/33, clean, clean, built | 2026-10-11 |
+| CI PR #9 at `aa1d310` | GitHub Actions: Web, API (Postgres 17, 13 files), **E2E · golden journey** (Supabase CLI 2.119.0 stack: operator smoke 6/6, Playwright 1 passed first attempt), GitGuardian | all ✅ | 2026-10-11 |
 
 ## Not run here
-- Anything needing Docker (Supabase CLI stack, e2e) — runs only in CI.
+- `supabase start` (no Docker here) — runs only in CI; locally the e2e ran against GoTrue built from source.
+- Anything against Stripe's real test API (no keys): adapter calls, Connect onboarding, Payment Element.
 
 ## 2026-10-03 · PR-B money path
 - T-001 ✅ policy keys (Appendix A) — shared tests 7/7, run here
@@ -121,3 +125,44 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - Deviation D-012: migration `…0400` edited in place (status `executing`, `single_operator_mode()`, staff-owner trigger) rather than a fix-up migration — PR #8 is unmerged and nothing outside local/CI has applied it (same reasoning as D-007).
 - Not done: an action left `executing` by a crashed process is not re-run automatically (by design — it may have moved money); it shows on the `scheduled` queue as "stuck executing" after 15 minutes and is resolved by hand.
 - Totals: API 143/143 (11 files), shared 7/7, `pnpm -r typecheck` clean, `lint:copy` clean — run here
+
+## 2026-10-03 · PR-D (#9) web + e2e (as first opened; deviations renumbered after the merge with main)
+- T-018 ✅ M1 contracts as zod schemas in `packages/shared/src/schemas.ts`, used by the API (requests) and the web client (types) — typecheck, run here
+- T-019 ✅ Supabase Auth in the web app: sign-up (name, email, password, 18+, terms), verify-email (link → back to `next`; resend; cross-device "continue"), log in (+ TOTP step for staff), reset password, session context, guards — run in a local e2e harness against GoTrue built from source
+- T-020 ✅ Explore and campaign page on the API (live/funded tabs, type filter, paging; artist's own story/risks/milestones only; local-time deadline; test-mode notice; refund-promise copy without "escrow") — run here (e2e + screenshots at Pixel 7 width)
+- T-021 ✅ checkout route (hold countdown, quantity, total, charge timing, re-acceptance, Stripe Payment Element / sandbox card form, failure categories, confirmation) and My backings on the API — run here (e2e)
+- T-022 ✅ Playwright golden journey — passed locally 3× from a fresh database (GoTrue + mail sink + gateway harness mirroring the Supabase CLI stack)
+- Bug found by e2e and fixed: `Intl.DateTimeFormat` rejects `dateStyle` + `timeZoneName` → campaign page crashed; new `formatInstant()`.
+- Bug found by screenshots and fixed: My backings refund line overflowed at phone width.
+- Deviation D-013 (was D-006 in the first PR #9): FanZuP absorbs the processing fee on refunds (E1-C default), so the processor balance runs short of what artists are owed unless FanZuP keeps a float there; design §12.1 tells Wayne to keep one on Stripe. Spec impact: none (setup step added). (After the merge with main the sandbox models this with main's `topUp()` hook, D-008, exposed to the e2e as `POST /dev/sandbox/topup` — see the review-fix section below.)
+- Deviation D-014 (was D-007): added `GET /artist/campaigns/:id` (milestone ids are needed to submit evidence). Design §4.2 updated.
+- Deviation D-015 (was D-008): `/checkout/:slug` lives in the public shell (a signed-out fan arriving from a link sees the same chrome as the campaign page); guarded inside the page. Design §11 updated.
+
+## 2026-10-11 · PR #9 brought up to `main` (PRs #6, #7, #8 merged) + review fixes
+- Merged `origin/main` (merge commit `5193b40`). Conflicts: `.gitignore`, `apps/api/src/routes/me.ts`, `apps/api/src/staff.ts`, `packages/shared/src/schemas.ts`, `specs/02-design.md`, `specs/04-worklog.md`, `specs/session-state.md`. Main kept for `apps/api`/specs; #9's intent re-applied: `correlationId` on staff `action` results, `GET /artist/campaigns/:id` design row, checkout in the public shell, platform-float note. #9's hard-coded sandbox float dropped for main's `topUp()` (D-008) + a dev `topup` route. `FunnelEventRequest` narrowed to `perk_selected` (PR #8 review fix 9). CI's API entry is now `dist/server.cjs` (main's build).
+- [major] 1 · Checkout Idempotency-Key lifecycle: `packages/shared/src/checkout-key.ts` (new key after any 4xx; after expired/canceled/payment_failed/refund_pending/refunded; kept after 502, 409 `in_progress`, network, other 5xx) — 23 unit cases in `checkout-key.test.ts`, run here. `Checkout.tsx` re-reads the backing after a failed payment and while polling; a dead backing → review step with a new key. E2E: an expired hold (sandbox tick +20 min) → pay fails "expired" → "Continue to payment" sends a different key and gets a different backing — green in CI
+- [minor] 2 · "Recently funded" = `funded`, `released`, or `closed` with a released tranche — `discovery.test.ts`, run here
+- [minor] 3 · Live order `ends_at asc, created_at desc, id asc`; cursor carries the full sort key; `limit` 1–24. **Found while testing:** postgres.js turned a timestamptz parameter into a JS `Date` (milliseconds), so a row never equalled its own cursor and paging repeated the first page — cursor values are now bound as text. Paging-with-ties test at page sizes 1, 2, 3 — run here
+- [minor] 4 · `staffToken()` deletes the seed reviewer's verified TOTP factors through the Auth admin API (`SUPABASE_SERVICE_ROLE_KEY`, local stack) and enrols afresh; retries stay at 1 in CI. Exercised in CI: the operator smoke leaves a verified factor before the journey runs
+- [minor] 5 · Verify-email polls `GET /me` every 5 s while signed in and unverified (stops on success/unmount); "continue" checks `GET /me` too. No automated test (needs a second session in the e2e)
+- [minor] 6 · T-023 ✅ — CI at `aa1d310`, all jobs green (Evidence table)
+- [minor] 7 · My backings error copy: "This is a display problem; your backings haven't changed."
+- [nit] 8 · Exit test 4 traces added (e2e + `trace.test.ts`): each settlement has its own correlation id (returned by the tick) — funded: `campaign.settled` → payout op confirmed → `campaign.funded` + `tranche.released`; failed: `campaign.settled` → refund op confirmed → `backing.refunded`; verification → tranche-2 payout → `tranche.released`
+- 9 · `GET /config.legal` (`POLICY.legal`); sign-up reads it; checkout re-acceptance uses `GET /me.legal` — API test, run here
+- 10 · `supabase/config.toml` redirect patterns `http://{localhost,127.0.0.1}:{5173,4173}/**` (already in #9); the sign-up link `<origin>/verify-email?next=<path>` is covered; the CI e2e runs the link → checkout path on 4173
+- 11 · FR-BCK-004: `timeLeft()` in `packages/shared/src/campaign.ts` (unit-tested: days from 24 h, `Xh Ym` under 24 h, ended at the instant); the campaign page re-renders every 30 s and exactly at the deadline; the progress bar's "Nd left" hides under 24 h
+- 12 · T-024 operator script + `pnpm m1:operator` + `docs/SETUP.md` Part F + CI smoke (6/6 green). Not exercised automatically: `artist-setup`, `publish`, `evidence`, staff write commands (the same endpoints are covered by the golden journey)
+- 13 · Physical perks: checkout and confirmation say no shipping address is collected in the test-money beta and test-mode perks aren't owed; no shipping promise
+- **Found by the e2e and fixed (`aa1d310`):** the platform float (sandbox top-up) appeared as the total recon diff (+$1,000; +$2,000 on the retry). Unattributed `adjustment` balance transactions are now excluded from `providerTotalMinor`/`diffMinor` and reported as `platformAdjustmentsMinor` (design §7). Same effect on Stripe for exit test 8. Test in `money-flow.test.ts`, run here
+- Totals: API 151/151 (13 files), shared 33/33, typecheck clean, `lint:copy` clean, web build OK — run here; CI all green at `aa1d310`
+- Not done: exit test 8 itself (needs Stripe test keys and the hosted app — Wayne); Payment Element path never run; the e2e job is still not a required check.
+
+## 2026-10-11 · PR #9 review round 2 fixes (independent review of e01e9cf)
+- [major] 1 · Recon float narrowed: Stripe `topup` and the sandbox top-up map to `platform_topup`, the only type excluded from the total diff; payout/`stripe_fee`/dispute/fee corrections stay `adjustment`, count in the total diff and open `unmatched_provider_txn` breaks. New migration `20261011000100_m1_recon_platform_float.sql` (`recon_runs.platform_adjustments_minor`, returned by `/staff/recon/latest`). Tests: `mapBalanceTxn` topup vs payout vs stripe_fee (`money-path.test.ts`), injected payout + fee → total diff and breaks, float persisted and returned (`money-flow.test.ts`) — run here. `docs/SETUP.md` C8: manual payout schedule for the test-mode run. Design §7/§12.1.
+- [minor] 2 · Checkout pay-step errors (5xx/network/unknown) → "Payment not confirmed … check My backings before trying again; you won't be charged twice." "Nothing was charged" only for `POST /backings` errors and declines. Design §4.3.
+- [minor] 3 · After `POST /backings` (incl. a replayed 201 after reload) the page reads `GET /backings/:id`: `held`/`released` → key dropped, confirmation; dead → review with a new key.
+- [minor] 4 · `safeNext` moved to `packages/shared/src/safe-next.ts` (raw + decoded checks, `new URL` same-origin) with unit tests (`/%09/evil.com`, `//evil.com`, `/\evil.com`, `https://evil.com`, valid paths) — run here; shared tests now run in the CI web job.
+- [minor] 5 · Verify-email `GET /me` poll removed (no session before confirmation). Same-browser tabs: supabase-js broadcast + `storage` event. Another device: the first device logs in after confirming elsewhere (design §11). No automated test.
+- [minor] 6 · `perk_selected` carries `source`. [minor] 7 · Explore: AbortController per (tab, type); failed "Show more" keeps the list, retry resumes from `cursor`. [minor] 8 · Hold countdown no longer `aria-live`; hidden live region at 5 min / 1 min / expired. [minor] 9 · Test-mode notice names `4000 0000 0000 0077` on `stripe-test`; generic otherwise (sandbox form names its own card). `lint:copy` clean.
+- [nit] 10 · SETUP Part F moved after Part E. [nit] 11 · `qty` dropped from the design route; e2e viewport stated as 412 px (Pixel 7) in design §2.
+- Totals: API 153/153 (13 files), shared 39/39 (3 files), typecheck clean, `lint:copy` clean, web build OK — run here; CI all green at `1dcede4` (Web, API, E2E golden journey + operator smoke).

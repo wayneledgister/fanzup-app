@@ -38,3 +38,15 @@ export function formatDate(iso: string, style: "short" | "long" = "short"): stri
 export function daysUntil(iso: string, from = new Date()): number {
   return Math.ceil((parseDate(iso).getTime() - from.getTime()) / 86_400_000);
 }
+
+/** One instant in the viewer's own time zone, with the zone shown (FR-BCK-004). */
+export function formatInstant(iso: string, long = false): string {
+  return new Intl.DateTimeFormat(undefined, {
+    ...(long ? { weekday: "long", month: "long" } : { month: "short" }),
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(iso));
+}

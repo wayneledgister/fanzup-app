@@ -19,6 +19,8 @@ export interface ReconResult {
   ledgerTotalMinor: number;
   providerTotalMinor: number;
   diffMinor: number;
+  /** FanZuP's float at the processor (`platform_topup` only); excluded from the totals and the diff, persisted on the run. */
+  platformAdjustmentsMinor: number;
   campaigns: { campaignId: string; ledgerMinor: number; providerMinor: number; diffMinor: number }[];
   breaks: { kind: string; campaignId: string | null; amountMinor: number; refs: Record<string, unknown> }[];
   /** Provider movements whose confirmation is still on its way (op `sent`, or a young unprocessed event): reported, not breaks. */
@@ -103,7 +105,9 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
     const ledgerRefSet = new Set(ledgerRefs.map((r) => r.external_ref));
     const providerRefSet = new Set<string>();
     for (const t of providerTxns) {
-      if (t.type === "adjustment") continue;
+      // Only the float is exempt. Any other movement with no ledger posting (a Stripe payout, stripe_fee, dispute, fee
+      // correction) is money entering or leaving the balance: it is a break (campaign null when unattributed).
+      if (t.type === "platform_topup") continue;
       providerRefSet.add(t.ref);
       if (!ledgerRefSet.has(t.ref)) breaks.push({ kind: "unmatched_provider_txn", campaignId: t.campaignId, amountMinor: t.netMinor, refs: { ref: t.ref, type: t.type } });
     }
@@ -112,7 +116,10 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
     }
 
     const ledgerTotal = campaigns.reduce((s, c) => s + c.ledgerMinor, 0);
-    const providerTotal = providerTxns.reduce((s, t) => s + t.netMinor, 0);
+    // Top-ups (FanZuP's own float for the fees it absorbs on refunds, design §12.1) are not backers' or artists' money and
+    // have no ledger posting, so they're reported separately, not counted as a diff. Nothing else is excluded.
+    const platformAdjustmentsMinor = allProviderTxns.filter((t) => t.type === "platform_topup").reduce((s, t) => s + t.netMinor, 0);
+    const providerTotal = providerTxns.filter((t) => t.type !== "platform_topup").reduce((s, t) => s + t.netMinor, 0);
     await asService(sql, async (tx) => {
       const seen: string[] = [];
       for (const b of breaks) {
@@ -130,10 +137,11 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
       await tx`update public.recon_breaks set resolved_at = now(), resolution = 'cleared_by_run'
                 where resolved_at is null and kind = any(${RUN_DERIVED_KINDS}) and not (dedupe_key = any(${seen}))`;
       await tx`update public.recon_runs set status = 'completed', finished_at = now(), ledger_total_minor = ${ledgerTotal},
-                      provider_total_minor = ${providerTotal}, diff_minor = ${providerTotal - ledgerTotal}, campaigns = ${tx.json(campaigns as never)}
+                      provider_total_minor = ${providerTotal}, diff_minor = ${providerTotal - ledgerTotal},
+                      platform_adjustments_minor = ${platformAdjustmentsMinor}, campaigns = ${tx.json(campaigns as never)}
                 where id = ${run.id}`;
     });
-    return { runId: run.id, ledgerTotalMinor: ledgerTotal, providerTotalMinor: providerTotal, diffMinor: providerTotal - ledgerTotal, campaigns, breaks, inFlight };
+    return { runId: run.id, ledgerTotalMinor: ledgerTotal, providerTotalMinor: providerTotal, diffMinor: providerTotal - ledgerTotal, platformAdjustmentsMinor, campaigns, breaks, inFlight };
   } catch (e) {
     await asService(sql, (tx) => tx`update public.recon_runs set status = 'failed', finished_at = now(), error = ${String((e as Error).message ?? e).slice(0, 500)} where id = ${run.id}`);
     throw e;

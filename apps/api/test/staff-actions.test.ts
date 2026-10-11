@@ -94,7 +94,7 @@ describe("review fix 1: privileged actions are claimed atomically", () => {
   it("an immediate action is recorded already claimed and ends executed", async () => {
     const { backingId } = await heldBacking(ids.solPerkGA, ids.solCampaign);
     const r = (await api("POST", `/staff/backings/${backingId}/refund`, staff, { reason: "Fan asked to cancel by email" })).json().action;
-    expect(r).toEqual({ id: r.id, status: "executed", executeAfter: null });
+    expect(r).toEqual({ id: r.id, status: "executed", executeAfter: null, correlationId: expect.any(String) });
     expect(await statusOf(r.id)).toBe("executed");
   });
 });

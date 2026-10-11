@@ -171,7 +171,7 @@ export class SandboxProvider implements PaymentProvider {
       if (r.type === "payment.succeeded") out.push({ ref: r.object_ref!, type: "charge", netMinor: amt - n(r.payload.feeMinor), feeMinor: n(r.payload.feeMinor), campaignId });
       else if (r.type === "refund.succeeded") out.push({ ref: r.object_ref!, type: "refund", netMinor: -amt, feeMinor: 0, campaignId });
       else if (r.type === "transfer.created") out.push({ ref: r.object_ref!, type: "transfer", netMinor: -amt, feeMinor: 0, campaignId });
-      else if (r.type === "other" && r.payload.metadata?.kind === "topup") out.push({ ref: r.object_ref!, type: "adjustment", netMinor: amt, feeMinor: 0, campaignId: null });
+      else if (r.type === "other" && r.payload.metadata?.kind === "topup") out.push({ ref: r.object_ref!, type: "platform_topup", netMinor: amt, feeMinor: 0, campaignId: null });
     }
     return out;
   }
