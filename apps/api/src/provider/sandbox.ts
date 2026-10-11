@@ -12,13 +12,6 @@ import { asService, n } from "../db";
 import { ingestEvent } from "../inbox";
 import { ProviderError, type BalanceTxn, type NormalizedEvent, type PaymentProvider, type ProviderErrorClass } from "./types";
 
-/**
- * FanZuP's own money sitting in the processor account (not attributed to any campaign). It covers the processing
- * fees FanZuP absorbs on refunds (E1 card C default), which otherwise leave the platform balance short of what
- * artists are owed. On Stripe, Wayne must keep an equivalent float in the platform balance (design §12.1).
- */
-export const SANDBOX_PLATFORM_FLOAT_MINOR = 10_000_00;
-
 type Row = { type: string; object_ref: string | null; payload: { amountMinor?: number; feeMinor?: number; paymentRef?: string; metadata?: Record<string, string> } };
 
 export class SandboxProvider implements PaymentProvider {
@@ -61,10 +54,14 @@ export class SandboxProvider implements PaymentProvider {
     return ingestEvent(this.sql, { ...evt, raw: { ...e } });
   }
 
+  /** Payment attempts this sandbox created, by backing (its "search index"; local/CI only). */
+  private created = new Map<string, string>();
+
   async createPayment(input: Parameters<PaymentProvider["createPayment"]>[0]) {
     this.calls.push({ op: "createPayment", input });
     this.maybeFail("createPayment");
     const paymentRef = `sbx_pi_${input.backingId}`;
+    this.created.set(input.backingId, paymentRef);
     return { paymentRef, clientSecret: `${paymentRef}_secret_${randomUUID().slice(0, 8)}` };
   }
 
@@ -82,6 +79,23 @@ export class SandboxProvider implements PaymentProvider {
       feeMinor: processingFeeMinor(input.amountMinor), metadata: input.metadata,
     });
     return { status: "succeeded" as const, eventRowId: r.id };
+  }
+
+  async findPayment(input: { backingId: string }) {
+    this.calls.push({ op: "findPayment", input });
+    const paymentRef = this.created.get(input.backingId) ?? `sbx_pi_${input.backingId}`;
+    const prior = await this.events({ objectRef: paymentRef });
+    if (!this.created.has(input.backingId) && !prior.length) return null;
+    const status = prior.some((r) => r.type === "payment.succeeded") ? "succeeded" : prior.some((r) => r.type === "payment.canceled") ? "canceled" : "requires_payment_method";
+    return { paymentRef, status };
+  }
+
+  /**
+   * Test hook: add platform money to the sandbox balance (a Stripe top-up). FanZuP absorbs processing fees on refunds
+   * from its own funds, so a platform-wide balance that only ever held backers' money runs short by those fees.
+   */
+  async topUp(amountMinor: number) {
+    await this.emit({ type: "other", objectRef: `sbx_topup_${randomUUID()}`, amountMinor, currency: "usd", metadata: { kind: "topup" } });
   }
 
   async cancelPayment(paymentRef: string) {
@@ -111,7 +125,7 @@ export class SandboxProvider implements PaymentProvider {
     const refundRef = `sbx_re_${input.opId}`;
     await this.emit({
       type: "refund.succeeded", objectRef: refundRef, paymentRef: input.paymentRef, amountMinor: input.amountMinor, currency: "usd",
-      metadata: { outbound_op_id: input.opId, backing_id: input.backingId, campaign_id: input.campaignId },
+      metadata: { outbound_op_id: input.opId, backing_id: input.backingId ?? "", campaign_id: input.campaignId },
     });
     this.maybeFail("refund", true);
     return { refundRef, amountMinor: input.amountMinor };
@@ -128,7 +142,7 @@ export class SandboxProvider implements PaymentProvider {
     const existing = await this.findTransfer({ campaignId: input.campaignId, opId: input.opId });
     if (existing) return existing;
     if (!input.destination.startsWith("sbx_acct_")) throw new ProviderError("permanent", "invalid_destination", "Unknown payout account");
-    const available = SANDBOX_PLATFORM_FLOAT_MINOR + (await this.listBalanceTransactions()).reduce((s, t) => s + t.netMinor, 0);
+    const available = (await this.listBalanceTransactions()).reduce((s, t) => s + t.netMinor, 0);
     if (available < input.amountMinor) throw new ProviderError("wait_funds", "balance_insufficient", "Not enough available balance");
     const transferRef = `sbx_tr_${input.opId}`;
     await this.emit({
@@ -157,6 +171,7 @@ export class SandboxProvider implements PaymentProvider {
       if (r.type === "payment.succeeded") out.push({ ref: r.object_ref!, type: "charge", netMinor: amt - n(r.payload.feeMinor), feeMinor: n(r.payload.feeMinor), campaignId });
       else if (r.type === "refund.succeeded") out.push({ ref: r.object_ref!, type: "refund", netMinor: -amt, feeMinor: 0, campaignId });
       else if (r.type === "transfer.created") out.push({ ref: r.object_ref!, type: "transfer", netMinor: -amt, feeMinor: 0, campaignId });
+      else if (r.type === "other" && r.payload.metadata?.kind === "topup") out.push({ ref: r.object_ref!, type: "platform_topup", netMinor: amt, feeMinor: 0, campaignId: null });
     }
     return out;
   }

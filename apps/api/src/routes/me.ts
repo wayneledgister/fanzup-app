@@ -63,7 +63,10 @@ export const meRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     };
   });
 
-  /** Client-side funnel event (only perk_selected / checkout_started; the rest are recorded by the server). */
+  /**
+   * Client-side funnel event: only `perk_selected`. `checkout_started` is recorded by the backing trigger when the
+   * hold is created, and `account_created`/`backing_confirmed` by the server too (PR #8 review fix 9; design §4.2).
+   */
   app.post("/events", { bodyLimit: 1024 }, async (req, reply) => {
     const body = FunnelEventRequest.parse(req.body);
     const [c] = await asService(d.sql, (tx) => tx`select 1 from public.campaigns where id = ${body.campaignId} and public.campaign_is_public(status)`);

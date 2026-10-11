@@ -20,6 +20,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @fanzup/shared typecheck
+      - run: pnpm --filter @fanzup/shared test
       - run: pnpm --filter @fanzup/web typecheck
       - run: pnpm lint:copy
       - run: pnpm --filter @fanzup/web build
@@ -76,11 +77,20 @@ jobs:
       - name: Start API, worker and web preview
         run: |
           export DATABASE_URL="$SB_DB_URL" SUPABASE_URL="$SB_API_URL" SUPABASE_JWT_SECRET="$SB_JWT_SECRET" ESCROW_PROVIDER=sandbox DEPLOY_ENV=ci NODE_ENV=development
-          (cd apps/api && PORT=8787 CORS_ORIGINS=http://localhost:4173 nohup node dist/server.js > ../../api.log 2>&1 &)
+          (cd apps/api && PORT=8787 CORS_ORIGINS=http://localhost:4173 nohup node dist/server.cjs > ../../api.log 2>&1 &)
           (cd apps/api && WORKER_INTERVAL_MS=1000 nohup node dist/worker.js > ../../worker.log 2>&1 &)
           (cd apps/web && nohup pnpm exec vite preview --port 4173 --strictPort > ../../web.log 2>&1 &)
           for i in $(seq 1 60); do curl -fsS http://localhost:4173/api/health && break; sleep 2; done
           curl -fsS http://localhost:4173/api/health
+      - name: Typecheck e2e and the operator script
+        run: pnpm exec tsc --noEmit -p e2e/tsconfig.json
+      - name: Operator script smoke (T-024) — TOTP enrol, staff read, password + TOTP sign-in, staff read
+        # Runs before the golden journey; the journey's staffToken() then replaces this TOTP factor via the admin API.
+        run: pnpm exec tsx e2e/operator-smoke.ts
+        env:
+          FANZUP_API: http://localhost:4173/api
+          SUPABASE_URL: ${{ env.SB_API_URL }}
+          SUPABASE_ANON_KEY: ${{ env.SB_ANON_KEY }}
       - run: pnpm exec playwright install --with-deps chromium
       - name: Golden journey
         run: pnpm exec playwright test -c e2e/playwright.config.ts
@@ -88,6 +98,7 @@ jobs:
           WEB_URL: http://localhost:4173
           SUPABASE_URL: ${{ env.SB_API_URL }}
           SUPABASE_ANON_KEY: ${{ env.SB_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.SB_SERVICE_ROLE_KEY }}
           MAILPIT_URL: http://127.0.0.1:55324
       - name: Keep logs and the Playwright report
         if: failure()

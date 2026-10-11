@@ -3,6 +3,7 @@
  * When they're missing (e.g. a design-review build), auth screens say sign-in isn't configured here.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { safeNext as safeNextFor } from "@fanzup/shared/safe-next";
 
 const env = import.meta.env as Record<string, string | undefined>;
 const url = env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL;
@@ -17,8 +18,7 @@ export async function accessToken(): Promise<string | null> {
   return data.session?.access_token ?? null;
 }
 
-/** Only same-origin paths are allowed as `next` (no open redirects). */
+/** Only same-origin paths are allowed as `next` (no open redirects; rules + tests in @fanzup/shared/safe-next). */
 export function safeNext(next: string | null | undefined, fallback = "/backed"): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return fallback;
-  return next;
+  return safeNextFor(next, window.location.origin, fallback);
 }

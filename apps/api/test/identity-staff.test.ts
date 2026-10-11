@@ -78,16 +78,27 @@ describe("FR-ID-002/003: staff need a second factor; actor comes from the token"
     expect(r.json().error).toBe("second_factor_required");
     expect((await api("GET", "/staff/queue", staff)).statusCode).toBe(200);
   });
-  it("requires a typed reason of at least 10 characters", async () => {
-    const r = await api("POST", `/staff/backings/${randomUUID()}/refund`, staff, { reason: "short" });
-    expect([400, 404]).toContain(r.statusCode);
+  it("requires a typed reason of at least 10 characters (on a real held backing)", async () => {
+    const f = await createUser(k.sql);
+    const b = await back(k, f.auth, { campaignId: ids.solCampaign, perkId: ids.solPerkGA });
+    await pay(k, b.json().backingId);
+    const before = await asService(k.sql, (tx) => tx`select 1 from public.privileged_actions`);
+    const r = await api("POST", `/staff/backings/${b.json().backingId}/refund`, staff, { reason: "  short   " });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toBe("reason_required");
+    expect(await asService(k.sql, (tx) => tx`select 1 from public.privileged_actions`)).toHaveLength(before.length);
+    expect((await one(k.sql, (tx) => tx<{ status: string }[]>`select status::text from public.backings where id = ${b.json().backingId}`)).status).toBe("held");
   });
   it("staff can't own artists while single-operator mode is on, and can't act on campaigns they own", async () => {
     expect((await api("POST", "/artist", staff, { slug: "reviewer-band", name: "Reviewer Band" })).json().error).toBe("staff_cannot_own");
-    // Even if a link existed (created out of band), the action is refused.
+    // Even if a link existed (created out of band — here while the mode was briefly off), the action is refused.
     const artistId = randomUUID();
     const campaignId = randomUUID();
-    await k.sql`insert into public.artists (id, owner_id, slug, name, identity_status) values (${artistId}, ${ids.reviewer}, 'reviewer-owned', 'Reviewer Owned', 'verified')`;
+    await k.sql.begin(async (tx) => {
+      await tx`update public.platform_settings set value = 'false' where key = 'single_operator_mode'`;
+      await tx`insert into public.artists (id, owner_id, slug, name, identity_status) values (${artistId}, ${ids.reviewer}, 'reviewer-owned', 'Reviewer Owned', 'verified')`;
+      await tx`update public.platform_settings set value = 'true' where key = 'single_operator_mode'`;
+    });
     await k.sql`insert into public.campaigns (id, artist_id, slug, title, type, goal_minor, status) values (${campaignId}, ${artistId}, 'reviewer-owned-c', 'Owned by reviewer', 'Show', 50000, 'in_review')`;
     const r = await api("POST", `/staff/campaigns/${campaignId}/review`, staff, { decision: "approved", reason: "Looks complete and accurate" });
     expect(r.statusCode).toBe(403);
@@ -212,10 +223,14 @@ describe("FR-ID-007 single-operator mode: delays, limits, cancel, weekly review"
     const list = (await api("GET", `/staff/weekly-review?weekStart=${weekStart}`, staff)).json();
     expect(list.actions.length).toBeGreaterThanOrEqual(4);
     expect(list.signoff).toBeNull();
-    const s = await api("POST", "/staff/weekly-review/signoff", staff, { weekStart, note: "Reviewed all actions" });
+    expect((await api("POST", "/staff/weekly-review/signoff", staff, { weekStart, note: "Reviewed all actions" })).statusCode).toBe(400); // no reason
+    const s = await api("POST", "/staff/weekly-review/signoff", staff, { weekStart, note: "Reviewed all actions", reason: "Read every action this week" });
     expect(s.statusCode).toBe(201);
     expect(s.json().signoff.action_count).toBe(list.actions.length);
-    expect((await api("POST", "/staff/weekly-review/signoff", staff, { weekStart })).statusCode).toBe(409);
+    expect(s.json().action.status).toBe("executed");
+    const again = await api("POST", "/staff/weekly-review/signoff", staff, { weekStart, reason: "Trying to sign off twice" });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe("already_signed");
   });
 
   it("a recon override waits out the delay too (G1 N4)", async () => {
@@ -231,6 +246,8 @@ describe("FR-ANL-001 funnel events (first-party)", () => {
     expect((await api("POST", "/events", undefined, { name: "perk_selected", campaignId: randomUUID(), anonId })).statusCode).toBe(404);
     expect((await api("POST", "/events", undefined, { name: "perk_selected", campaignId: ids.novaCampaign, anonId, source: "<script>" })).statusCode).toBe(400);
     expect((await api("POST", "/events", undefined, { name: "backing_confirmed", campaignId: ids.novaCampaign, anonId })).statusCode).toBe(400);
+    // checkout_started is recorded by the backing trigger; clients can't send it (review fix 9).
+    expect((await api("POST", "/events", undefined, { name: "checkout_started", campaignId: ids.novaCampaign, anonId })).statusCode).toBe(400);
   });
 });
 

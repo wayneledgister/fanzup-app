@@ -112,6 +112,16 @@ export class StripeTestProvider implements PaymentProvider {
     });
   }
 
+  findPayment(input: { backingId: string }) {
+    return this.call(async () => {
+      // Search is eventually consistent (indexed within about a minute); callers only search holds that expired
+      // POLICY.checkout.expiryLookupGraceMinutes ago. Backing ids are uuids, so the query needs no escaping.
+      const res = await this.stripe.paymentIntents.search({ query: `metadata['backing_id']:'${input.backingId}'`, limit: 10 });
+      const live = res.data.find((pi) => pi.status !== "canceled") ?? res.data[0];
+      return live ? { paymentRef: live.id, status: live.status } : null;
+    });
+  }
+
   async cancelPayment(paymentRef: string) {
     try {
       await this.stripe.paymentIntents.cancel(paymentRef);
@@ -136,7 +146,10 @@ export class StripeTestProvider implements PaymentProvider {
   refund(input: Parameters<PaymentProvider["refund"]>[0]) {
     return this.call(async () => {
       const r = await this.stripe.refunds.create(
-        { payment_intent: input.paymentRef, amount: input.amountMinor, metadata: { outbound_op_id: input.opId, backing_id: input.backingId, campaign_id: input.campaignId } },
+        {
+          payment_intent: input.paymentRef, amount: input.amountMinor,
+          metadata: { outbound_op_id: input.opId, campaign_id: input.campaignId, ...(input.backingId ? { backing_id: input.backingId } : {}) },
+        },
         { idempotencyKey: input.idempotencyKey },
       );
       return { refundRef: r.id, amountMinor: r.amount };
@@ -216,5 +229,8 @@ export function mapBalanceTxn(bt: Stripe.BalanceTransaction): BalanceTxn {
   }
   if (bt.type === "refund" || bt.type === "payment_refund") return { ref: String(s.id ?? bt.id), type: "refund", netMinor: bt.net, feeMinor: bt.fee, campaignId };
   if (bt.type === "transfer") return { ref: String(s.id ?? bt.id), type: "transfer", netMinor: bt.net, feeMinor: bt.fee, campaignId };
+  // A top-up is FanZuP's own float (design §12.1), never a campaign's money.
+  if (bt.type === "topup") return { ref: String(s.id ?? bt.id), type: "platform_topup", netMinor: bt.net, feeMinor: bt.fee, campaignId: null };
+  // payout, stripe_fee, adjustment (disputes, fee corrections), topup_reversal, …: money moving that recon must see.
   return { ref: bt.id, type: "adjustment", netMinor: bt.net, feeMinor: bt.fee, campaignId };
 }
