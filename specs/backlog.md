@@ -2,6 +2,7 @@
 
 | Item | Origin | Value hypothesis | Size | Added |
 |---|---|---|---|---|
+| FR-ID-006 bullets 2–3: artist age confirmed by identity verification (from the provider's KYC result), and a written procedure + staff action to suspend and handle accounts reported as a minor's | PR #8 (requirements M1 table trim) | Minors' data rules are met for artists and for reported accounts, not only by sign-up attestation | M | 2026-10-11 |
 | Fee corrections: post a provider fee change after capture as a correcting `fee.adjusted` transaction (FR-PAY-007 bullet 4), with a unit test; until then it surfaces as a recon break | PR #7 review round 2; design §7 | Recon stays at zero diff when Stripe adjusts a fee; no manual break handling | S | 2026-10-11 |
 | Disputes & refunds full admin queues | CONSOLIDATION (summaries only on /admin) | Fulfillment failure is a named Mechanism 05 risk; ops needs real queues | M | 2026-10-03 |
 | Promote shared kit (Modal, Toggle, SegmentedTabs, CopyCode, FileDrop) into `components/brand` | Build agents' reports | Removes 3 near-duplicate implementations across fan, creator and campaign | S | 2026-10-03 |
