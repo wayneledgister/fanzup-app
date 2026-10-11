@@ -20,6 +20,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @fanzup/shared typecheck
+      - run: pnpm --filter @fanzup/shared test
       - run: pnpm --filter @fanzup/web typecheck
       - run: pnpm lint:copy
       - run: pnpm --filter @fanzup/web build

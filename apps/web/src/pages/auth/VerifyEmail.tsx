@@ -11,13 +11,14 @@ import { api } from "@/lib/api";
  * Source: FPS EmailVerification.tsx (pending with resend cooldown, resent, verified, expired).
  * M1 (FR-ID-001, FR-BCK-002; card G1-B option 3): the confirmation link from Supabase lands here signed in;
  * once the email is confirmed the fan is forwarded to `next` (checkout with the same campaign and perk).
- * Cross-device (G2 condition 13): opening the link on another device signs that device in and forwards it;
- * the first device can continue with "I've verified — continue", which re-checks the session.
+ * Cross-device (G2 condition 13): opening the link on another device signs that device in and forwards it; the first
+ * device has no session until then, so it logs in after confirming elsewhere ("I've verified — continue" → log in).
+ * Another tab of the same browser is picked up automatically (Supabase cross-tab broadcast + `storage` event).
  */
 
 const COOLDOWN = 60;
-/** How often a signed-in, not-yet-verified device re-checks `GET /me` (design §11). */
-const VERIFY_POLL_MS = 5_000;
+/** supabase-js's localStorage key for the session (`sb-<project-ref>-auth-token`). */
+const AUTH_KEY = /^sb-.+-auth-token$/;
 
 function linkError(): string | null {
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
@@ -42,28 +43,20 @@ export default function VerifyEmail() {
     if (!s.loading && s.session && s.emailVerified) navigate(next, { replace: true });
   }, [s.loading, s.session, s.emailVerified, next, navigate]);
 
-  // Cross-device (design §11): while this device holds a session whose email isn't verified yet, check `GET /me`
-  // every few seconds; once the link has been opened anywhere, refresh the session and carry on to `next`.
-  // Without a session there is nothing to poll — "I've verified — continue" leads to log in instead.
-  const polling = !s.loading && !!s.session && !s.emailVerified && !expired;
+  // Same browser, another tab (design §11): the link opened in a new tab signs that tab in and writes the session to
+  // localStorage. Supabase broadcasts SIGNED_IN to this tab (SessionProvider listens), and as a fallback the `storage`
+  // event for its auth key reloads the session here; the effect above then carries on to `next`.
+  // Another device can't be detected: this tab has no session until the email is confirmed, so the fan logs in here
+  // after confirming elsewhere ("I've verified — continue" → log in).
   const refresh = s.refresh;
   useEffect(() => {
-    if (!polling) return;
-    let alive = true;
-    const t = setInterval(async () => {
-      try {
-        const me = await api.me();
-        if (!alive || !me.emailVerified) return;
-        clearInterval(t);
-        await refresh();
-        if (alive) navigate(next, { replace: true });
-      } catch { /* offline or signed out: keep the button */ }
-    }, VERIFY_POLL_MS);
-    return () => {
-      alive = false;
-      clearInterval(t);
+    if (expired || !supabase) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key && AUTH_KEY.test(e.key) && e.newValue) void refresh().catch(() => { /* keep the button */ });
     };
-  }, [polling, refresh, navigate, next]);
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [expired, refresh]);
 
   useEffect(() => {
     if (wait <= 0) return;

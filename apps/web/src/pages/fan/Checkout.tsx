@@ -22,7 +22,7 @@ import { formatDate, formatInstant, formatMoney } from "@/lib/format";
  */
 
 type Step = "review" | "pay" | "processing" | "done";
-type Failure = { category: "declined" | "expired" | "authentication failed" | "network" | "closed" | "other"; message: string; next: string };
+type Failure = { category: "declined" | "expired" | "authentication failed" | "network" | "unconfirmed" | "closed" | "other"; message: string; next: string };
 
 const localDeadline = (iso: string) => formatInstant(iso, true);
 
@@ -32,20 +32,32 @@ const localDeadline = (iso: string) => formatInstant(iso, true);
  */
 const PHYSICAL_PERK_NOTE = "This is a physical perk. FanZuP doesn't collect shipping addresses in this test-money beta, and artists don't owe perks for test backings.";
 
-/** Design §4.3: provider signal → category shown → next step. */
-export function categorize(e: unknown): Failure {
+/**
+ * A pay-step error we can't classify (5xx, network, unknown): the card may or may not have been charged, so never say
+ * "nothing was charged" — send the fan to My backings. Paying the same backing again can't charge twice (design §4.3).
+ */
+const UNCONFIRMED: Failure = { category: "unconfirmed", message: "We couldn't confirm your payment.", next: "Check My backings before trying again — you won't be charged twice." };
+
+/**
+ * Design §4.3: provider signal → category shown → next step. `stage` says which call failed: "create" (`POST /backings`,
+ * before any card is touched) or "pay" (the card step). "Nothing was charged" is said only for create-step errors and
+ * for declines.
+ */
+export function categorize(e: unknown, stage: "create" | "pay" = "create"): Failure {
   const x = e as { code?: string; decline_code?: string; type?: string; status?: number; message?: string };
   const code = x.decline_code ?? x.code ?? "";
   if (e instanceof ApiError) {
-    if (e.code === "network" || e.code === "provider_unavailable" || e.status >= 500) return { category: "network", message: "We couldn't reach the payment processor.", next: "Check your connection and try again — nothing was charged." };
     if (e.code === "checkout_expired") return { category: "expired", message: "This checkout expired before payment.", next: "Start again from the campaign page — nothing was charged." };
+    if (stage === "pay") return UNCONFIRMED;
+    if (e.code === "network" || e.code === "provider_unavailable" || e.status >= 500) return { category: "network", message: "We couldn't reach the payment processor.", next: "Check your connection and try again — nothing was charged." };
     if (["campaign_closed", "perk_sold_out"].includes(e.code)) return { category: "closed", message: e.message, next: "Go back to the campaign page to pick another perk — nothing was charged." };
     return { category: "other", message: e.message, next: "Nothing was charged." };
   }
-  if (code === "expired_card") return { category: "expired", message: "Your card has expired.", next: "Use a card that hasn't expired." };
+  if (code === "expired_card") return { category: "expired", message: "Your card has expired.", next: "Use a card that hasn't expired. Nothing was charged." };
   if (code === "authentication_required" || code === "payment_intent_authentication_failure" || x.type === "authentication_error")
     return { category: "authentication failed", message: "Your bank's check wasn't completed.", next: "Try again and complete your bank's check." };
   if (x.type === "card_error" || /declin|insufficient|cvc/i.test(code)) return { category: "declined", message: "Your card was declined.", next: "Try another card. Nothing was charged." };
+  if (stage === "pay") return UNCONFIRMED;
   return { category: "network", message: x.message ?? "Something went wrong.", next: "Check your connection and try again — nothing was charged." };
 }
 
@@ -127,6 +139,14 @@ function Checkout() {
       }
       const r = await api.back({ campaignId: c.id, perkId: perk.id, quantity: qty, source: sourceFor(slug) ?? null }, keys.get(keyName));
       setBacking(r);
+      // The key may replay a 201 for a backing already paid (reload mid-payment) or already dead: ask where it is now.
+      let current: { status: string; holdExpiresAt: string | null } | null = null;
+      try {
+        current = await api.backing(r.backingId);
+      } catch { /* can't tell: show the card step; paying twice can't charge twice */ }
+      if (current && PAID_STATUSES.includes(current.status)) return confirmed();
+      const why = current && deadReason(current);
+      if (why) return dead(why);
       setStep("pay");
     } catch (e) {
       // Any stored 4xx ends this attempt: the next try gets a new key. 502 / in_progress / network keep it.
@@ -159,8 +179,9 @@ function Checkout() {
           <h1 className="text-3xl font-bold">Checkout</h1>
           <TestModeNotice />
           {failure && (
-            <Callout tone="error" icon={<CircleAlert />} title={`Payment ${failure.category === "other" || failure.category === "closed" ? "not possible" : failure.category}`}>
+            <Callout tone="error" icon={<CircleAlert />} title={failure.category === "unconfirmed" ? "Payment not confirmed" : `Payment ${failure.category === "other" || failure.category === "closed" ? "not possible" : failure.category}`}>
               <span data-testid="checkout-failure">{failure.message} {failure.next}</span>
+              {failure.category === "unconfirmed" && <> <Link to="/backed" className="font-medium text-gold hover:underline">Open My backings</Link></>}
             </Callout>
           )}
           {step === "review" && (
@@ -233,6 +254,9 @@ function Shell({ slug, children }: { slug: string; children: React.ReactNode }) 
   );
 }
 
+/** Backing statuses that mean the card was charged and the payment applied: show the confirmation, not the card form. */
+const PAID_STATUSES = ["held", "released"];
+
 const EXPIRED: Failure = { category: "expired", message: "This checkout expired before payment.", next: "Start again below — nothing was charged." };
 const REFUNDING: Failure = { category: "closed", message: "Your payment arrived after the campaign or your checkout closed, so it's being refunded in full.", next: "You'll get an email when the refund completes." };
 
@@ -242,6 +266,17 @@ function deadReason(b: { status: string; holdExpiresAt: string | null }): Failur
   if (isDeadBacking(b.status)) return EXPIRED;
   if (b.status === "pending_payment" && b.holdExpiresAt && Date.parse(b.holdExpiresAt) <= Date.now()) return EXPIRED;
   return null;
+}
+
+/**
+ * What the screen-reader live region says about the hold: text changes only at 5 minutes, 1 minute and expiry, so each
+ * threshold is announced once (design §11 accessibility).
+ */
+export function holdAnnouncement(secondsLeft: number): string {
+  if (secondsLeft <= 0) return "Your perk hold expired.";
+  if (secondsLeft <= 60) return "1 minute left to pay before your perk hold expires.";
+  if (secondsLeft <= 300) return "5 minutes left to pay before your perk hold expires.";
+  return "";
 }
 
 function PaymentStep({ backing, processing, onProcessing, onFailure, onConfirmed, onDead }: {
@@ -268,22 +303,24 @@ function PaymentStep({ backing, processing, onProcessing, onFailure, onConfirmed
     for (let i = 0; i < 40; i++) {
       try {
         const b = await api.backing(backing.backingId);
-        if (b.status === "held") return onConfirmed();
+        if (PAID_STATUSES.includes(b.status)) return onConfirmed();
         const why = deadReason(b);
         if (why) return onDead(why);
       } catch { /* keep polling */ }
       await new Promise((r) => setTimeout(r, 1000));
     }
-    onFailure({ category: "network", message: "We're still waiting for your payment to be confirmed.", next: "Check My backings in a minute — you won't be charged twice." });
+    onFailure({ category: "unconfirmed", message: "We're still waiting for your payment to be confirmed.", next: "Check My backings in a minute — you won't be charged twice." });
   };
 
   return (
     <Card className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Payment</h2>
-        <span className="num text-sm text-muted" aria-live="polite">
+        {/* The ticking clock is not a live region (it would announce every second); thresholds are announced below. */}
+        <span className="num text-sm text-muted">
           {secondsLeft > 0 ? <>Perk held for {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}</> : "Hold expired"}
         </span>
+        <span className="sr-only" aria-live="polite" data-testid="hold-announcement">{holdAnnouncement(secondsLeft)}</span>
       </div>
       {secondsLeft === 0 ? (
         <Callout tone="warning" icon={<Clock />} title="Your hold expired">
@@ -327,7 +364,7 @@ function StripeForm({ backing, disabled, onFailure, onPaid }: { backing: BackCam
     setBusy(true);
     const { error } = await ready.stripe.confirmPayment({ elements: ready.elements, redirect: "if_required", confirmParams: { return_url: window.location.href } });
     setBusy(false);
-    if (error) return onFailure(categorize(error));
+    if (error) return onFailure(categorize(error, "pay"));
     onPaid();
   };
 
@@ -352,7 +389,7 @@ function SandboxCardForm({ backing, disabled, onFailure, onPaid }: { backing: Ba
       if (r.status === "declined") onFailure({ category: "declined", message: "Your card was declined.", next: "Try another card. Nothing was charged." });
       else onPaid();
     } catch (e) {
-      onFailure(categorize(e));
+      onFailure(categorize(e, "pay"));
     } finally {
       setBusy(false);
     }

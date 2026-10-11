@@ -9,7 +9,7 @@ import type { CreatorTier } from "@/lib/mock";
 import { api, ApiError, type PerkView, type TrancheView } from "@/lib/api";
 import type { CampaignDetail as Detail } from "@fanzup/shared/schemas";
 import { timeLeft } from "@fanzup/shared/campaign";
-import { anonId, rememberSource } from "@/lib/attribution";
+import { anonId, rememberSource, sourceFor } from "@/lib/attribution";
 import { useSession } from "@/lib/session";
 import { formatDate, formatInstant, formatMoney, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -100,7 +100,7 @@ export default function CampaignDetail() {
 
   const pick = (p: PerkView) => {
     setSelected(p.id);
-    void api.event({ name: "perk_selected", campaignId: c.id, perkId: p.id, anonId: anonId() });
+    void api.event({ name: "perk_selected", campaignId: c.id, perkId: p.id, anonId: anonId(), source: sourceFor(slug) });
   };
 
   const back = () => {

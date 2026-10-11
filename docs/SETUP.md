@@ -4,7 +4,7 @@ Everything that can be done in code is already in the repo. These are the steps 
 
 **Time:**
 - Part A (local): about 30 minutes
-- Parts B–E (hosted): about 1–2 hours
+- Parts B–E (hosted): about 1–2 hours; Part F (exit test 8 on the hosted app) after them
 - Part G (escrow partner): weeks, and it runs alongside everything else
 
 **Layout:**
@@ -176,26 +176,9 @@ select pg_has_role('postgres','service_role','member') as svc,
 6. Turn on **Connect** (Express accounts) in test mode; artists onboard their payout account from the app.
 
 7. **Keep a float of FanZuP's own money in the Stripe test platform balance** (Balance → Add funds, in test mode). FanZuP absorbs the card fee on every refund, so without a float the balance ends up short of what artists are owed and their payouts wait for funds (design §12.1).
+8. **Set the payout schedule to manual** for the test-mode run (Settings → **Payouts** → Payout schedule → **Manual**, in test mode). Reconciliation compares the ledger with every movement in the Stripe balance and excludes only top-ups (the float in step 7, reported as `platform_adjustments_minor`). An automatic payout to your bank, a Stripe fee or a dispute has no ledger posting, so each one shows in the total diff and opens an `unmatched_provider_txn` break, which pauses artist payouts (design §7). With manual payouts, the money backers paid stays in the balance and exit test 8 can diff to zero. If a payout did go out, resolve its break with a reason and note it in the worklog.
 
 > **Fail closed (FR-PAY-008, M1).** A deployed API refuses to start with the sandbox provider or any non-test key. Until the Stripe test variables above are set, hosted `/api` answers **503 "misconfigured"** naming the missing variable. That's deliberate.
-
----
-
-## Part F: Exit test 8 — one Stripe test-mode run on the hosted app
-M1 has no staff or artist screens, so the non-fan half of the journey runs from your Mac with the operator script (`scripts/m1-operator.ts`, design §12.6). It talks to the hosted API like the app does. **Your email goes on the command line; your password and TOTP codes are only ever typed at its prompts** (hidden), and the tokens it gets stay in its memory — nothing is written to disk or printed.
-
-Common flags (all public values): `--api https://<your-site>/api --supabase-url https://<ref>.supabase.co --anon-key <publishable key>`. You can put the last two in `SUPABASE_URL` / `SUPABASE_ANON_KEY` instead. Run `pnpm m1:operator … ` with no command to get a prompt that keeps your session (`help` lists commands); with a command it runs just that one.
-
-You need **two accounts**, both made on the app's sign-up page: yours (staff, B4) and a separate **artist** account (in single-operator mode staff can't own an artist, and a reviewer can't act on their own campaign).
-
-1. **Staff second factor (once):** `pnpm m1:operator <flags> --email <you> totp-enrol` → add the printed `otpauth://` URI (or the secret) to your authenticator app, type the code it shows. Then grant yourself staff (B4 SQL).
-2. **Artist setup:** `pnpm m1:operator <flags> --email <artist> artist-setup` → creates the artist profile, prints the Stripe Connect onboarding link (finish it in the browser; the script re-checks until the payout account is verified), creates a campaign with one perk and two milestones, and submits it. Note the campaign id it prints.
-3. **Review:** `pnpm m1:operator <flags> --email <you>` then at the prompt `staff review <campaignId>` (password + current TOTP code once per session, then a typed reason).
-4. **Publish:** `pnpm m1:operator <flags> --email <artist> publish <campaignId>`.
-5. **Back it as a fan** in the browser (a third account, test card `4000 0000 0000 0077`), enough to meet the goal.
-6. **After the deadline:** the worker settles it and pays milestone 1. The artist finds milestone 2's id with `… --email <artist> campaign <campaignId>` and submits evidence: `… --email <artist> evidence <trancheId> https://<link>`; you verify it: `staff verify <trancheId>`.
-7. **Check:** `staff recon run` (ledger ↔ Stripe test balance must diff to zero), `staff queue dead_letters` (empty), and `staff trace <correlationId>` with the id the verify printed (the payout op and the release).
-Record the run (dates, correlation ids, recon result) in `specs/04-worklog.md`.
 
 ---
 
@@ -259,6 +242,24 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema without a local clone, go to **Actions → Deploy database migrations → Run workflow**. It applies migrations only; it never loads the seed.
 3. **Branches → add rule for `main`:** require a pull request and the status checks **"Web · typecheck, copy rules, build"** and **"API · migrations, ledger, RLS, flow tests"**. These check names appear after the first CI run.
 4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, Supabase's GitHub integration applies it to the hosted project (check Supabase → Database → Migrations). Use **Actions → Deploy database migrations → Run workflow** only if the integration is off.
+
+---
+
+## Part F: Exit test 8 — one Stripe test-mode run on the hosted app
+M1 has no staff or artist screens, so the non-fan half of the journey runs from your Mac with the operator script (`scripts/m1-operator.ts`, design §12.6). It talks to the hosted API like the app does. **Your email goes on the command line; your password and TOTP codes are only ever typed at its prompts** (hidden), and the tokens it gets stay in its memory — nothing is written to disk or printed.
+
+Common flags (all public values): `--api https://<your-site>/api --supabase-url https://<ref>.supabase.co --anon-key <publishable key>`. You can put the last two in `SUPABASE_URL` / `SUPABASE_ANON_KEY` instead. Run `pnpm m1:operator … ` with no command to get a prompt that keeps your session (`help` lists commands); with a command it runs just that one.
+
+You need **two accounts**, both made on the app's sign-up page: yours (staff, B4) and a separate **artist** account (in single-operator mode staff can't own an artist, and a reviewer can't act on their own campaign).
+
+1. **Staff second factor (once):** `pnpm m1:operator <flags> --email <you> totp-enrol` → add the printed `otpauth://` URI (or the secret) to your authenticator app, type the code it shows. Then grant yourself staff (B4 SQL).
+2. **Artist setup:** `pnpm m1:operator <flags> --email <artist> artist-setup` → creates the artist profile, prints the Stripe Connect onboarding link (finish it in the browser; the script re-checks until the payout account is verified), creates a campaign with one perk and two milestones, and submits it. Note the campaign id it prints.
+3. **Review:** `pnpm m1:operator <flags> --email <you>` then at the prompt `staff review <campaignId>` (password + current TOTP code once per session, then a typed reason).
+4. **Publish:** `pnpm m1:operator <flags> --email <artist> publish <campaignId>`.
+5. **Back it as a fan** in the browser (a third account, test card `4000 0000 0000 0077`), enough to meet the goal.
+6. **After the deadline:** the worker settles it and pays milestone 1. The artist finds milestone 2's id with `… --email <artist> campaign <campaignId>` and submits evidence: `… --email <artist> evidence <trancheId> https://<link>`; you verify it: `staff verify <trancheId>`.
+7. **Check:** `staff recon run` (ledger ↔ Stripe test balance must diff to zero; your float from C7 shows separately as `platformAdjustmentsMinor` — any other unexplained movement is a break, see C8), `staff queue dead_letters` (empty), and `staff trace <correlationId>` with the id the verify printed (the payout op and the release).
+Record the run (dates, correlation ids, recon result) in `specs/04-worklog.md`.
 
 ---
 

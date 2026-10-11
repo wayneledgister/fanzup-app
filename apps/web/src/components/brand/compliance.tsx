@@ -42,8 +42,14 @@ export function TestModeNotice({ className }: { className?: string }) {
   if (cfg && !cfg.testMode) return null;
   return (
     <Callout tone="warning" icon={<FlaskConical />} title="Test mode — no real money moves" className={className}>
-      FanZuP is in a test-money beta. Pay with a test card (for example <span className="num">4242 4242 4242 4242</span>). Artists don't owe
-      perks for test backings; anything they send is a bonus.
+      FanZuP is in a test-money beta.{" "}
+      {cfg?.provider === "stripe-test" ? (
+        // Design §12.1 / SETUP Part C: this card's funds are available immediately, so artist payouts don't wait for funds.
+        <>Pay with the test card <span className="num">4000 0000 0000 0077</span> (any future expiry date, any CVC).</>
+      ) : (
+        <>Pay with a test card.</>
+      )}{" "}
+      Artists don't owe perks for test backings; anything they send is a bonus.
     </Callout>
   );
 }
