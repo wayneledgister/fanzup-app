@@ -319,4 +319,13 @@ describe("Stripe adapter contract (recorded payload shapes)", () => {
     const transfer = mapBalanceTxn({ id: "txn_3", type: "transfer", net: -7000, fee: 0, source: { id: "tr_1", transfer_group: "campaign_c1", metadata: {} } } as unknown as Stripe.BalanceTransaction);
     expect(transfer).toMatchObject({ ref: "tr_1", type: "transfer", campaignId: "c1" });
   });
+  it("maps only a top-up to platform_topup; payouts, stripe_fee and other adjustments stay adjustment (recon §7)", () => {
+    const bt = (type: string, net: number, source: unknown) => ({ id: `txn_${type}`, type, net, fee: 0, source } as unknown as Stripe.BalanceTransaction);
+    expect(mapBalanceTxn(bt("topup", 100_000, { id: "tu_1", metadata: {} }))).toEqual({ ref: "tu_1", type: "platform_topup", netMinor: 100_000, feeMinor: 0, campaignId: null });
+    // A top-up is never attributed to a campaign, even if its metadata says so.
+    expect(mapBalanceTxn(bt("topup", 500, { id: "tu_2", metadata: { campaign_id: "c1" } })).campaignId).toBeNull();
+    expect(mapBalanceTxn(bt("payout", -40_000, { id: "po_1", metadata: {} }))).toEqual({ ref: "txn_payout", type: "adjustment", netMinor: -40_000, feeMinor: 0, campaignId: null });
+    expect(mapBalanceTxn(bt("stripe_fee", -200, "fee_src"))).toEqual({ ref: "txn_stripe_fee", type: "adjustment", netMinor: -200, feeMinor: 0, campaignId: null });
+    expect(mapBalanceTxn(bt("adjustment", -1500, { id: "du_1", metadata: {} })).type).toBe("adjustment");
+  });
 });

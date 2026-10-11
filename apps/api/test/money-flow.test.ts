@@ -4,12 +4,13 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { processingFeeMinor } from "@fanzup/shared/policy";
+import type { PaymentProvider } from "../src/provider/types";
 import { loadEnv } from "../src/env";
 import { buildApp } from "../src/app";
 import { createVerifier } from "../src/lib/auth";
 import { asService, n } from "../src/db";
 import { runReconciliation } from "../src/recon";
-import { afterDeadline, back, balances, createUser, ids, JWT_SECRET, kit, one, pay, tick, tokenFor, type Kit } from "./helpers";
+import { afterDeadline, back, balances, createUser, ids, JWT_SECRET, kit, one, pay, tick, tokenFor, tokenWith, type Kit } from "./helpers";
 
 let k: Kit;
 let fanAuth: string;
@@ -271,17 +272,42 @@ describe("FR-CMP-008 discovery", () => {
 });
 
 describe("sandbox dev routes (local/CI only)", () => {
-  it("top-up adds platform money to the sandbox balance as an adjustment recon reports but doesn't count as a diff", async () => {
-    const before = (await k.provider.listBalanceTransactions()).filter((t) => t.type === "adjustment").reduce((s, t) => s + t.netMinor, 0);
+  it("top-up adds platform money to the sandbox balance as a platform_topup recon reports but doesn't count as a diff", async () => {
+    const before = (await k.provider.listBalanceTransactions()).filter((t) => t.type === "platform_topup").reduce((s, t) => s + t.netMinor, 0);
     const reconBefore = await runReconciliation(k.sql, k.provider);
     const r = await k.app.inject({ method: "POST", url: "/api/v1/dev/sandbox/topup", payload: { amountMinor: 12_345 } });
     expect(r.statusCode).toBe(200);
-    const after = (await k.provider.listBalanceTransactions()).filter((t) => t.type === "adjustment").reduce((s, t) => s + t.netMinor, 0);
+    const after = (await k.provider.listBalanceTransactions()).filter((t) => t.type === "platform_topup").reduce((s, t) => s + t.netMinor, 0);
     expect(after - before).toBe(12_345);
     const reconAfter = await runReconciliation(k.sql, k.provider);
     expect(reconAfter.diffMinor).toBe(reconBefore.diffMinor);
     expect(reconAfter.providerTotalMinor).toBe(reconBefore.providerTotalMinor);
     expect(reconAfter.platformAdjustmentsMinor - reconBefore.platformAdjustmentsMinor).toBe(12_345);
+    expect(reconAfter.breaks.some((b) => String(b.refs.ref ?? "").startsWith("sbx_topup_"))).toBe(false);
+    // Persisted on the run and returned by /staff/recon/latest.
+    const staff = `Bearer ${await tokenWith(ids.reviewer, { aal: "aal2" })}`;
+    const latest = (await k.app.inject({ method: "GET", url: "/api/v1/staff/recon/latest", headers: { authorization: staff } })).json();
+    expect(latest.run.id).toBe(reconAfter.runId);
+    expect(n(latest.run.platform_adjustments_minor)).toBe(reconAfter.platformAdjustmentsMinor);
     expect((await k.app.inject({ method: "POST", url: "/api/v1/dev/sandbox/topup", payload: { amountMinor: -1 } })).statusCode).toBe(400);
+  });
+  it("any other unattributed provider movement (a payout, a stripe_fee) stays in the total diff and opens a break", async () => {
+    const clean = await runReconciliation(k.sql, k.provider);
+    const withPayout: PaymentProvider = Object.assign(Object.create(k.provider), {
+      listBalanceTransactions: async () => [
+        ...(await k.provider.listBalanceTransactions()),
+        { ref: "txn_payout_1", type: "adjustment" as const, netMinor: -40_000, feeMinor: 0, campaignId: null },
+        { ref: "txn_fee_1", type: "adjustment" as const, netMinor: -200, feeMinor: 0, campaignId: null },
+      ],
+    });
+    const r = await runReconciliation(k.sql, withPayout);
+    expect(r.providerTotalMinor - clean.providerTotalMinor).toBe(-40_200);
+    expect(r.diffMinor - clean.diffMinor).toBe(-40_200);
+    expect(r.platformAdjustmentsMinor).toBe(clean.platformAdjustmentsMinor);
+    const unmatched = r.breaks.filter((b) => b.kind === "unmatched_provider_txn" && ["txn_payout_1", "txn_fee_1"].includes(b.refs.ref as string));
+    expect(unmatched.map((b) => [b.refs.ref, b.campaignId, b.amountMinor])).toEqual([["txn_payout_1", null, -40_000], ["txn_fee_1", null, -200]]);
+    // Run-derived: the next run without them clears both.
+    const after = await runReconciliation(k.sql, k.provider);
+    expect(after.breaks.some((b) => ["txn_payout_1", "txn_fee_1"].includes(b.refs.ref as string))).toBe(false);
   });
 });
