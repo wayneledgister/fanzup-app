@@ -1,5 +1,5 @@
 # Layer 2 · Album royalty Pool (CR-002) — Requirements
-**Tier:** Enterprise (regulated domain), built as a **demo on mock rails** · **Status:** G1+G2 combined pass (`specs/gates/L2-G1G2.md`) · **Date:** 2026-10-03
+**Tier:** Enterprise (regulated domain), built as a **demo on mock rails** · **Status:** G1+G2 combined pass (`specs/gates/L2-G1G2.md`), revised by the PR #10 review (post-gate delta in the gate record) · **Date:** 2026-10-03, revised 2026-10-11
 **Authority:** [CR-002](../changes/CR-002-l2-album-royalty-pool.md) (Wayne, 2026-10-03).
 **Sources:** cited by ID only — PRD 01 (§6.2–6.5, §8, §11, §11.1), PRD 01a (§2–4), PRD 01b (§1, §3, §5), PRD 02 §8, Mechanisms 01, 03, 04, 07, Brand §7.4–7.5. The repo is public; requirements are written here in our own words and don't reproduce the PRD or mechanism text. Where this file cites an acceptance-criterion ID from those documents (e.g. "01a AC-I1"), the test that covers it carries the same ID.
 
@@ -9,7 +9,7 @@
 - **D-1** Everything is behind the `layer2` flag, enforced by the API (404 `layer2_disabled` on every Layer 2 route) and by the database (every Layer 2 money function refuses when the flag is off). The flag is off by default and can't be on in a deployed environment: Layer 2 requires the mock Reg CF provider, and the API refuses to start with the mock provider when deployed.
 - **D-2** Every Layer 2 screen shows a persistent banner: "Demo — not an offer of securities. Mock escrow and data."
 - **D-3** No real money, KYC, filings or tax forms. Stripe is never used for Layer 2.
-- **D-4** Copy follows Brand §7.4: payouts are always "potential" and paired with risk; the risk disclosure precedes any purchase; Form C link, Reg CF limit and 12-month lock-up are shown; nothing implies liquidity; nothing is sorted or ranked by money or return (PRD 02 §8). Product nouns: Pools, Units, Waterfall. `pnpm lint:copy` covers Layer 2 screens and Layer 2 notices.
+- **D-4** Copy follows Brand §7.4: payouts are always "potential" and paired with risk; the risk disclosure precedes any purchase; Form C link, Reg CF limit, 12-month lock-up and **the intermediary (funding portal or broker-dealer) through which the offering is made** are shown — until one is chosen the intermediary is shown as **"Intermediary: pending — L2-Q3"**, and no copy says or implies that a registered intermediary is already in place (PR #10 review, finding 7); nothing implies liquidity; nothing is sorted or ranked by money or return (PRD 02 §8). Product nouns: Pools, Units, Waterfall. `pnpm lint:copy` covers Layer 2 screens and Layer 2 notices.
 
 ---
 
@@ -19,7 +19,7 @@
 **Story:** As a creator at Rising tier or above, I want a separate path to offer fans a share of an album's royalties, so that Layer 2 stays out of the reward-campaign flow.
 - Given a creator whose tier is Starter, when they open or call Pool creation, then they're refused with the tier rule (PRD 01 §6.3: Starter has no Reg CF access) and shown what Rising requires.
 - The tier is read from `packages/shared` tiers and recorded on the Pool at submission (assessed at submission, not mid-offering).
-- The Pool target can't exceed the creator's tier Reg CF cap minus what they raised in other Reg CF offerings in the trailing 12 months.
+- **Issuer cap (PR #10 review, finding 1).** The Pool's **maximum** (Units × Unit price — not its target, since sales can run past the target up to the maximum) can't exceed the creator's **remaining 12-month Reg CF cap**: the tier cap (never above `POLICY.regCf.issuerCapMinor`, 17 CFR 227.100(a)(1)) minus, over the creator's other Reg CF offerings, the amount raised by those that closed in the trailing 12 months and the **maximum** of those still in review, approved or live. Checked at **submission** and again at **launch** (another Pool may have been submitted or launched in between), both under a lock on the creator's artist row so two Pools can't pass the check concurrently; refused with `tier_cap_exceeded`. The remaining cap at launch is recorded on the Pool, and `reserve_investment` refuses any reservation that would take the Pool's committed amount past it (`issuer_cap_reached`) — a backstop that holds even if the tier or the other offerings change mid-offering.
 
 ### FR-L2-CR-002: Album basics, story, use of funds, milestones
 - Album title, artist display name, planned release date, tracklist (1–30 tracks), artwork (rendered with `ArtistArt`; no uploads in the demo), story, risks.
@@ -29,12 +29,12 @@
 ### FR-L2-CR-003: Royalty terms
 - Revenue types the Pool participates in: **master recording royalties** (default, on), sync (optional), publishing/PRO (selectable but labelled "Trust-based — pending counsel"; Mechanism 01 revenue-type table).
 - Split of covered royalties across **fans / creator / platform** in basis points; must sum to 100%. The platform share is a placeholder labelled "pending fee schedule" (fees are TBD per `docs/brand/fees.html`).
-- Number of Units, Unit price, minimum Units per investor, deadline (14–60 days), **return cap multiple (default 1.5×)**, **maturity (default 5 years)**, distribution schedule (default quarterly).
+- Number of Units, Unit price, minimum Units per investor, deadline (**21–60 days**; the minimum is policy `regCf.minOfferingDays = 21` — Reg CF requires the offering information to be public for at least 21 days before any securities are sold, 17 CFR 227.303(a)(2), with no transmission of funds to the issuer earlier than that, 227.303(e)(3)(i), and an early close only after at least 21 days, 227.304(b)(1); confirmation is counsel item L2-Q10; PR #10 review, finding 2), **return cap multiple (default 1.5×)**, **maturity (default 5 years)**, distribution schedule (default quarterly).
 - The creator sees a plain-language summary and a potential-payout illustration that always includes the zero case.
 
 ### FR-L2-CR-004: Collection mechanism and risk badge
 - Mechanism (01b §1.1 enum + SPLIT_PAYEE per Mechanism 01 integration update): `DISTRIBUTOR_REDIRECT`, `SPLIT_PAYEE`, `LOCKBOX`, `SELF_REPORT`, `LETTER_OF_DIRECTION`.
-- Each revenue type caps the strongest mechanism allowed for it; the effective tier is the weakest across the Pool's revenue types × mechanism. Derived **risk badge**: `SECURED_ISH` ("More secure"), `VERIFIED`, `TRUST_BASED` (wording in design §8).
+- Each revenue type caps the strongest mechanism allowed for it; the effective tier is the weakest across the Pool's revenue types × mechanism. Derived **risk badge**: `SECURED_ISH`, `VERIFIED`, `TRUST_BASED` (internal names, never shown). Shown labels: **"More secure collection"**, "Verified collection", "Trust-based collection". Wherever the strongest badge is shown to a fan, the separate line **"Your claim is unsecured"** appears next to it (gate condition 5; one wording everywhere — design §8, gate record; PR #10 review, finding 3).
 - **01b AC-R6:** a Pool can't go live until its collection-mechanism record is **executed** (by staff, after the creator submits it).
 
 ### FR-L2-CR-005: Submit → Form C review → launch
@@ -63,7 +63,7 @@
 ### FR-L2-INV-004: Purchase
 - Order: risk acknowledgment (versioned) → Units reserved (limit + availability) → provider trade → fund move into the offering escrow → confirmation page. Idempotent per `Idempotency-Key`.
 - Units can't oversell the Pool; self-investment by the creator is refused.
-- Cancellation allowed until 48 hours before the deadline (full refund through the provider).
+- Cancellation allowed until 48 hours before the deadline (17 CFR 227.304(a); full refund through the provider). A `reserved` investment is cancelled at once; a `funded` one moves to `refund_pending` and is refunded in full. An investment in `funding` (fund move in flight) **can't be cancelled yet**: the request is refused with `409 funding_in_progress` ("Your payment is still moving. Try again once it has arrived.") and the investor can cancel once it is `funded`, if still before the cut-off. The cut-off is not extended for a fund move that settles late (PR #10 review, finding 9).
 
 ### FR-L2-INV-005: Portfolio
 - Units held, amount, status, lock-up end date and countdown (12 months from issue; Mechanism 07 P0: no transfers, no prices), potential vs received distributions, return-cap progress, maturity date, documents (Form C, confirmation, distribution statements).
@@ -71,7 +71,7 @@
 ## 3. Escrow and money after funding (FR-L2-ESC, FR-L2-REV, FR-L2-WF)
 
 ### FR-L2-ESC-001: Escrow invariants (01a AC-E1…E5)
-- **AC-E1** Σ funded-and-held investments == escrow FBO ledger account == provider escrow balance for the offering, after every event.
+- **AC-E1** (reworded, PR #10 review, finding 5) **Before close:** Σ amounts of the offering's `funded` + `refund_pending` investments == the escrow FBO ledger account (`pool_escrow`), after every committed money function. **Ledger vs provider (any time):** the escrow FBO ledger account == the provider's escrow balance for the offering when compared after the event inbox is drained; when compared with events or outbound operations still in flight, the in-flight amounts are reported separately and don't count as a difference (the M1 in-flight allowance, M1 design §7). After close the first equality no longer applies (money leaves by tranche); AC-E4/E5 govern it.
 - **AC-E2** Target-or-refund: at the deadline, funded ≥ target → close; else every investor is refunded in full.
 - **AC-E3** Nothing leaves escrow to the issuer before close.
 - **AC-E4** After close, money is released only per verified milestone tranches (tranche 1 at close), never more than raised.
@@ -82,7 +82,7 @@
 - A reconciliation run matches statements to settlements. **Only bank-reconciled cash becomes `collected`** and distributable (**01b AC-R1, R2**). A statement without cash is "reported, not collected" (**AC-R3**). A settlement short of its statement is collected at the cash amount and opens a shortfall break (**AC-R4**). Reconciliation is idempotent and re-runnable (**AC-R8**).
 
 ### FR-L2-REV-002: Default handling (01b §5)
-- Collection state machine `COLLECTING → AT_RISK → DEFAULT → REMEDIATION → COLLECTING | CHARGED_OFF`. A period whose settlement is missing or short past its due date moves to AT_RISK; uncured after the cure period moves to DEFAULT; staff move DEFAULT to REMEDIATION or CHARGED_OFF with a reason. Every transition notifies the Pool's holders.
+- Collection state machine `COLLECTING → AT_RISK → DEFAULT → REMEDIATION → COLLECTING | CHARGED_OFF`. A period whose settlement is missing or short past its due date moves to AT_RISK; uncured after the cure period moves to DEFAULT; staff move DEFAULT to REMEDIATION or CHARGED_OFF with a reason. **REMEDIATION → COLLECTING is a staff action, never automatic** (PR #10 review, finding 4): allowed only once the Pool is cured — bank-reconciled cash covers every missed period, so no period is past due — and refused otherwise (`not_cured`); it goes through `privileged()` with a typed reason and is audited. REMEDIATION → CHARGED_OFF is also a staff action. (AT_RISK → COLLECTING stays automatic when the late cash is reconciled before DEFAULT.) Every transition notifies the Pool's holders.
 
 ### FR-L2-WF-001: Waterfall (01a §4)
 - Distribution runs are **deterministic and replayable**: dry-run and commit produce the same allocation and the same hash for the same inputs (**AC-W1**).
@@ -100,8 +100,11 @@
 - **NFR-L2-01 Provider boundary:** one `RegCfProvider` interface; domain code never calls the mock directly; a `northcapital` adapter can replace it (ADR-007).
 - **NFR-L2-02 Mock fidelity:** API-key auth, idempotency keys, asynchronous status changes, signed webhooks (stored before processing), deterministic triggers (`KYCFAIL`, `AMLHOLD`, whole-dollar amount ending in 13 → fund move returned), admin time travel.
 - **NFR-L2-03 Money:** integer cents, double-entry, append-only ledger, money only through SQL functions with idempotency keys; clients can't read or write Layer 2 money tables.
-- **NFR-L2-04 Tests:** AC-I1, I2, I5, E1, E5, W1–W4, W6, R1–R4 and webhook signature/idempotency have named tests; a Playwright journey covers create → approve → KYC → invest → fund → reconcile → distribute → portfolio, and the failed-Pool refund path.
+- **NFR-L2-04 Tests:** AC-I1, I2, I5, E1, E5, W1–W4, W6, R1–R4, webhook signature/idempotency, the issuer cap on the maximum (submit, launch, reservation backstop) and the 21-day minimum deadline have named tests; a Playwright journey covers create → approve → KYC → invest → fund → reconcile → distribute → portfolio, and the failed-Pool refund path.
 - **NFR-L2-05 Mock data:** `supabase/seed_layer2.sql` (local/CI only) with Pools in different states, one per risk badge, and matching mock-escrow fixtures; `*@fanzup.test` accounts; no published credential for any staff-like account.
 
 ## Open items (for counsel/partners — never decided in code)
-L2-Q1 PRD trace · L2-Q2 issuer entity and whether a crowdfunding vehicle (Rule 3a-9 SPV, Mechanism 03) is used · L2-Q3 funding portal / intermediary · L2-Q4 North Capital sandbox access · L2-Q5 publishing letter of direction · L2-Q6 1099 characterization · L2-Q7 platform fee on royalties (Form C disclosure) · L2-Q8 state blue-sky notice filings · L2-Q9 cancellation/reconfirmation mechanics owned by the portal.
+L2-Q1 PRD trace · L2-Q2 issuer entity and whether a crowdfunding vehicle (Rule 3a-9 SPV, Mechanism 03) is used · L2-Q3 funding portal / intermediary · L2-Q4 North Capital sandbox access · L2-Q5 publishing letter of direction · L2-Q6 1099 characterization · L2-Q7 platform fee on royalties (Form C disclosure) · L2-Q8 state blue-sky notice filings · L2-Q9 cancellation/reconfirmation mechanics owned by the portal · L2-Q10 minimum offering period: confirm 21 days (`regCf.minOfferingDays`, 17 CFR 227.303(a)(2), 227.304(b)(1)) and whether the intermediary needs a longer minimum or counts it from Form C filing rather than launch (PR #10 review).
+
+## Change log
+- 2026-10-11 (PR #10 review): FR-L2-CR-001 issuer cap checked on the **maximum** at submission and launch, plus a reservation backstop (finding 1); FR-L2-CR-003 deadline 21–60 days, `regCf.minOfferingDays`, L2-Q10 (finding 2); FR-L2-CR-004 one badge wording + "Your claim is unsecured" line (finding 3); FR-L2-REV-002 REMEDIATION → COLLECTING by staff action after a cure (finding 4); AC-E1 pre-close equality + drained-inbox / in-flight comparison (finding 5); D-4 intermediary disclosure, "pending — L2-Q3" (finding 7); FR-L2-INV-004 cancel during `funding` refused (finding 9).
