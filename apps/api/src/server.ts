@@ -69,7 +69,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   }
 }
 
-// Everywhere else (local dev, Render, tests via `node dist/server.js`): listen on a port.
+// Everywhere else (local dev, Render, `node dist/server.cjs`): listen on a port.
 if (!process.env.VERCEL) {
   ready
     .then(async ({ app, env }) => {
