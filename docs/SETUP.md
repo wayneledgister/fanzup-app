@@ -130,8 +130,21 @@ pnpm exec supabase db push                        # applies supabase/migrations
 - **Hosted databases (staging and production) never get the seed.** `supabase/seed.sql` is for local and CI only: its users have a published password and it includes a staff reviewer. A hosted project starts empty; you create your own account through the app's sign-up page (B4).
 - Do **not** push to prod by hand. After Part E, GitHub does it with your approval.
 
+### B3a. Check the hosted project has no seeded users (each hosted project, before B4)
+**Why:** every seeded user shares the published password `FanzupDev123` (A3), and `reviewer@fanzup.test` is staff. If the seed ever reached a hosted project, anyone could sign in as that reviewer, enrol their own TOTP factor on it (it has none) and get full staff powers — refunds, verifications, replays. In **SQL Editor**:
+```sql
+select email from auth.users where email like '%@fanzup.test';
+select * from public.staff;
+```
+**✅ Check:** the first returns no rows; the second returns no rows (or, after B4, only yours). If any seeded user exists, remove its staff power first, then the users:
+```sql
+delete from public.staff where user_id in (select id from auth.users where email like '%@fanzup.test');
+delete from auth.users where email like '%@fanzup.test';
+```
+If the second delete is refused (seed artists, campaigns or backings still reference those users), the whole seed ran. The staff power is already gone; the clean fix is a fresh project (B1) with B3 run against it. Don't use `supabase db reset --linked` — it loads the seed again.
+
 ### B4. Make yourself a reviewer
-Sign up through the app's sign-up page first. **The real sign-up page only exists once PR #9 (`feat/m1-web-e2e`) is merged and deployed** — before that, `/signup` is the prototype's mock and creates no account; the 18+ trigger arrives with PR #8's migrations. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP and, in **SQL Editor**:
+Do B3a first. Then sign up through the app's sign-up page. **The real sign-up page only exists once PR #9 (`feat/m1-web-e2e`) is merged and deployed** — before that, `/signup` is the prototype's mock and creates no account; the 18+ trigger arrives with PR #8's migrations. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP and, in **SQL Editor**:
 ```sql
 insert into public.staff (user_id, role)
 select id, 'admin' from auth.users where email = 'wayne.ledg@gmail.com';

@@ -61,7 +61,7 @@ Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the co
 | FR-ID-006 | Full |
 | FR-ID-007 | Full except the break-glass suspension (FR-CMP-007 is M2) |
 | FR-NTF-001 | Five templates (receipt, funded, failed + refund started, refund completed, milestone released), outbox-driven, logged with template version; the delivery provider is an open setup step (log transport until Wayne picks one) |
-| FR-PRV-001 | Mechanics: versioned placeholder documents, acceptance recorded with version, time, IP, user agent; re-acceptance blocks backing |
+| FR-PRV-001 | Mechanics: versioned placeholder documents, acceptance recorded with version and time; re-acceptance blocks backing. **Trimmed (design §9 G-1):** IP and user agent are recorded only on re-acceptance through the API (`POST /me/acceptances`); sign-up acceptance rows lack them (sign-up goes browser → Supabase Auth directly) — G-1 → M2 |
 | FR-PLT-006 | Full |
 | FR-ANL-001 (events) | First-party server-side funnel events: perk selected, checkout started, account created, backing confirmed, source (`ref`) |
 | NFR-SEC-01 | Column allowlist for `artists` and `profiles` (payout/identity refs never public) + automated test; full allowlist over every object at M2 |
@@ -77,7 +77,7 @@ Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the co
 | NFR-QA-01 | Core: parallel backings, last-unit race, concurrent retries, duplicate and late events, refunds, many campaigns with one failing |
 | NFR-QA-02 | The golden journey above (other journeys M2) |
 
-**Not in M1** (still P0a, due at M2 unless re-prioritised): FR-BCK-001's optional extra amount and shipping address (M1 campaigns carry no physical perks, so NFR-SEC-08 and FR-FUL-001's address rules aren't triggered), FR-CMP-007 suspension, FR-ADM-001 web queues (M1 has API queues only), FR-ADM-003 money view UI, FR-PLT-001 server flags, FR-PLT-002 route pruning, FR-PLT-005 uploads, FR-PRV-004, FR-TAX-004 per-user limits beyond the unconfirmed-checkout cap, NFR-SEC-03/05/06/09/13/14, NFR-OPS-01/02/07/08/09/11, NFR-PERF-03/04 as measured SLOs, NFR-A11Y-01..04 automation, NFR-QA-03/05. All P0b, P1, P2 work. The PRD trace (brief Q1) must be done before M2 starts.
+**Not in M1** (still P0a, due at M2 unless re-prioritised): FR-BCK-001's optional extra amount and shipping address (M1 campaigns carry no physical perks, so NFR-SEC-08 and FR-FUL-001's address rules aren't triggered), FR-CMP-007 suspension, FR-ADM-001 web queues (M1 has API queues only), FR-ADM-003 money view UI, FR-PLT-001 server flags, FR-PLT-002 route pruning, FR-PLT-005 uploads, FR-PRV-004, FR-TAX-004 per-user limits beyond the unconfirmed-checkout cap, FR-PRV-001's IP and user agent on sign-up acceptance rows (design G-1), NFR-SEC-03/05/06/09/13/14, NFR-OPS-01/02/07/08/09/11, NFR-PERF-03/04 as measured SLOs, NFR-A11Y-01..04 automation, NFR-QA-03/05. All P0b, P1, P2 work. The PRD trace (brief Q1) must be done before M2 starts.
 
 ---
 
