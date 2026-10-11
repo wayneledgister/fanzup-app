@@ -33,6 +33,9 @@ export interface Deps {
   extraSteps?: JobDeps["extraSteps"];
 }
 
+/** Vercel puts exactly one proxy in front of the function (design §9). Same rule as Fastify `trustProxy: <number>`. */
+export const TRUSTED_PROXY_HOPS = 1;
+
 const defaultNotifier = createNotifier();
 export const jobDeps = (d: Deps): JobDeps => ({ sql: d.sql, provider: d.provider, notify: d.notify ?? defaultNotifier, extraSteps: [...(d.extraSteps ?? []), (now) => executeDueActions(d, now)] });
 
@@ -47,8 +50,10 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
             serializers: { req: (req) => ({ method: req.method, url: pathOnly(req.url), id: req.id }) },
           },
     bodyLimit: 64 * 1024,
-    // Behind Vercel's proxy: req.ip comes from X-Forwarded-For (recorded with consents, FR-PRV-001).
-    trustProxy: true,
+    // Behind Vercel's edge: exactly one proxy hop, so req.ip is the address that hop saw (the right-most
+    // X-Forwarded-For entry), not a value the client wrote further left. Recorded with consents (FR-PRV-001).
+    // If another proxy is ever put in front (e.g. a CDN), raise this to the real hop count (design §9).
+    trustProxy: (_addr: string, hop: number) => hop < TRUSTED_PROXY_HOPS,
     genReqId: (req) => acceptCorrelationId(req.headers["x-correlation-id"]),
   });
 
