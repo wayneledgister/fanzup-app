@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { asUser, n } from "../db";
 import { requireUser, requireVerifiedUser, HttpError } from "../lib/auth";
+import { asService } from "../db";
 import { createBacking } from "../checkout";
 import type { Deps } from "../app";
 
@@ -22,6 +23,9 @@ export const backingRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     const key = req.headers["idempotency-key"];
     if (typeof key !== "string" || key.length < 8 || key.length > 200) throw new HttpError(400, "idempotency_key_required", "Send an Idempotency-Key header.");
     const body = BackingBody.parse(req.body);
+    // FR-PRV-001: the current terms must be accepted before backing (re-acceptance blocks the next backing).
+    const [{ missing }] = await asService(d.sql, (tx) => tx<{ missing: string[] }[]>`select public.missing_acceptances(${user.sub}) as missing`);
+    if (missing.length) throw new HttpError(403, "acceptance_required", "Please review and accept the current terms before backing.");
     const r = await createBacking(d.sql, d.provider, user.sub, key, body);
     return reply.status(r.status).send(r.body);
   });
@@ -39,13 +43,5 @@ export const backingRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
       id: b.id, status: b.status, amountMinor: n(b.amount_minor), holdExpiresAt: b.hold_expires_at?.toISOString() ?? null,
       campaign: { slug: b.slug, title: b.title, endsAt: b.ends_at?.toISOString() ?? null }, perk: { title: b.perk_title },
     };
-  });
-
-  /** The signed-in fan's backings (RLS: only their own). Enriched with ledger-derived money state in PR-C. */
-  app.get("/me/backings", async (req) => {
-    const user = await requireUser(req, d.verify);
-    const rows = await asUser(d.sql, user, (tx) => tx<{ id: string; campaign_id: string; perk_id: string; amount_minor: bigint; status: string; created_at: Date }[]>`
-      select id, campaign_id, perk_id, amount_minor, status::text, created_at from public.backings where backer_id = ${user.sub} order by created_at desc`);
-    return { backings: rows.map((r) => ({ id: r.id, campaignId: r.campaign_id, perkId: r.perk_id, status: r.status, amountMinor: n(r.amount_minor), createdAt: r.created_at.toISOString() })) };
   });
 };

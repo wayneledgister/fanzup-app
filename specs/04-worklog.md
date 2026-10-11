@@ -28,9 +28,13 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 | shared + API (baseline before M1) | `pnpm test`, local Postgres 16 | 29/29 green | 2026-10-03 |
 | shared (PR-B) | `pnpm --filter @fanzup/shared test` | 7/7 green | 2026-10-03 |
 | API (PR-B) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 61/61 green | 2026-10-03 |
+| CI PR-A #6, PR-B #7 | GitHub Actions (Postgres 17) | web ✅ api ✅ | 2026-10-03 |
+| API (PR-C) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 81/81 green | 2026-10-03 |
 | shared (PR #7 review fixes) | `pnpm --filter @fanzup/shared test` | 7/7 green | 2026-10-11 |
 | API (PR #7 review fixes) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 91/91 green (7 files) | 2026-10-11 |
 | typecheck | `pnpm -r typecheck` | clean | 2026-10-11 |
+| API (PR #8 review fixes, after merging main) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 143/143 green (11 files) | 2026-10-11 |
+| shared, typecheck, copy lint (PR #8 review fixes) | `pnpm --filter @fanzup/shared test`, `pnpm -r typecheck`, `pnpm --filter @fanzup/web lint:copy` | 7/7, clean, clean | 2026-10-11 |
 
 ## Not run here
 - Anything needing Docker (Supabase CLI stack, e2e) — runs only in CI.
@@ -80,3 +84,40 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - [minor] `apply_payment_captured` returns `'duplicate'` when the backing already has this `payment_ref` and is held/released/refund_pending/refunded (pre-M1 captures were keyed `capture:<backing_id>`). Test in `migration-backfill.test.ts` (pre-M1 postings keyed by backing, then replays) — run here (fails on 27167f2). Design backfill paragraph: hand check of pre-M1 refunds in flight before deploy
 - Design §3.3, §3.5, §3.5.1, §3.5.2, §5 and README money-path rules updated
 - Totals: API 104/104 (9 files), shared 7/7, `pnpm -r typecheck` clean — run here
+
+## 2026-10-03 · PR-C identity, staff, artist
+- CI on PR-A (#6) and PR-B (#7): ✅ both jobs green (GitHub Actions, Postgres 17)
+- T-011 ✅ identity: attestation trigger, consents, verified-email gate, `/me`, re-acceptance with IP/UA — `identity-staff` tests, run here
+- T-012 ✅ staff `aal2`, privileged actions, single-operator delay/limits/cancel, weekly review + sign-off — run here
+- T-013 ✅ staff endpoints: review, verify, refund, replay (event/op), recon run/latest/override, queue, trace — run here
+- T-014 ✅ artist API: profile, payout onboarding (sandbox), draft CRUD, perks, tranches, submit, publish, evidence; cross-artist isolation — run here. Stripe Connect onboarding against Stripe: **not run** (no keys)
+- T-015 ✅ notifications: 6 templates (5 M1 messages + "refund started" for auto/staff refunds), versioned, log transport, test-mode footer; `lint:copy` now scans API templates — run here
+- T-016 ✅ funnel events: account_created (trigger), checkout_started + backing_confirmed (backing trigger), perk_selected (`POST /events`, bounded) — run here
+- T-017 ✅ column allowlists (artists, profiles) + no client access to any new internal table + clients can't call workflow functions — `rls` tests, run here
+- Deviation D-009 (numbered D-004 before the merge with main): FR-ID-004 (M1) — the artist's identity status becomes `verified` when the provider reports the payout account ready (Stripe Connect performs KYC in its hosted onboarding; the sandbox connects at once). Design §4.2 implied it; now explicit. Spec impact: none (FR-ID-004 already says identity and payout setup run through the provider's hosted flow).
+- Deviation D-010 (numbered D-005 before the merge with main): `checkout_started` is recorded server-side when the backing hold is created; the web app only sends `perk_selected` (Pragmatist G2 nit). Spec impact: none.
+
+## 2026-10-11 · PR #8 brought up to `main` (PRs #6, #7 merged) + review round 1 fixes and tracked spec changes
+- Merged `origin/main` into `feat/m1-identity-staff`. Only `specs/04-worklog.md` conflicted (kept main's sections; PR-C deviations renumbered D-009/D-010). PR #8 doesn't redefine any money function PR #7 rewrote (`request_backing_refund`, settlement, captures stay PR #7's; notifications hang off PR #7's outbox rows), so no money SQL needed re-applying. All 124 tests green right after the merge.
+- [major] 1 · Atomic claims: new `privileged_actions.status` `executing`; immediate actions inserted `executing`; `executeDueActions` claims `scheduled → executing` with `for update skip locked`; final updates conditional on `executing`; cancel only from `scheduled` (one transaction with its audit row). Tests: cancelled → never executed; claimed → cancel 409 and not re-picked; cancel racing the executor ×5 → exactly one wins; two concurrent executors → one run — run here
+- [minor] 2 · Reason test uses a real held backing → 400 `reason_required`, no action row, backing still `held` — run here
+- [minor] 3 · Tests added: milestone verification above $1,000 → scheduled for `delayHours`, then executed; failed-campaign settle → `campaign_failed_refund_started` + `refund_completed` (not to a backer refunded earlier); staff refund → `refund_started` + `refund_completed`; failed action → `staff.<action>.failed` — run here
+- [minor] 4 · `staff.<action>.failed` audit event with `{ error_code }` only (NFR-COMP-11) — run here
+- [minor] 5 · `GET /staff/queue` returns `singleOperatorMode` — run here
+- [minor] 6 · `artists_no_staff_owner` trigger (insert or owner change) refuses a staff owner while single-operator mode is on; `staff_cannot_own` → 403. Test: insert as the staff user through `authenticated` (the Supabase REST path) refused; a non-staff user can still insert — run here
+- [minor] 7 · Daily-limit check + insert in one transaction under `pg_advisory_xact_lock(hashtext('privileged_actions:<action>'))`; `executing` counts toward the limit. Test: two concurrent refunds that each fit but not together → one 200, one `daily_limit` — run here
+- [minor] 8 · Notifications: redelivery re-sends unless `sent`. Failed-campaign recipients = backings with `captured_minor` whose settlement refund was queued with reason `campaign_failed` (outbox), whatever their refund status. **Found while fixing:** the old query (`status in ('held','released')`) matched nobody after PR #7's settlement moves backings to `refund_pending`, so no backer got the failed-campaign email — now tested — run here
+- [minor] 9 · `POST /events` accepts only `perk_selected`; design §4.2/§4.4 updated — run here
+- [nit] 10 · Weekly sign-off requires a typed `reason`; the `weekly_review.signoff` executor inserts the sign-off row (duplicate → action `failed` + 409 `already_signed`) — run here
+- [nit] 11 · Design §3.7: three consent rows (attestation, terms, privacy) and `privacy_version` required
+- [nit] 12 · `trustProxy` trusts one hop (`TRUSTED_PROXY_HOPS = 1`, Vercel); a function form because Fastify's types here don't accept a number. Test: `X-Forwarded-For: <client-written>, <proxy-seen>` → consent IP is the right-most — run here. Design §9
+- 13 · Delayed `backing.refund` with `now() + delayHours >= ends_at` → 409 `refund_after_deadline`, no row; both sides tested — run here
+- 14 · `payouts` queue branch (`Payout waiting (<waiting>)`) + `StaffQueueType` in `packages/shared/src/schemas.ts` (unknown type → 400) — run here
+- 15 · `sync.test.ts` parses `supabase/seed.sql` (every `auth.users` row) against `POLICY.legal`; `createUser()` uses `POLICY.legal` — run here
+- 16 · Guard test in `rls.test.ts`: no workflow passes `--include-seed`; no migration inserts into `public.staff` — run here
+- 17 · Requirements M1 table: FR-ID-006 → bullet 1 only, bullets 2–3 "Not in M1" + backlog row; FR-BCK-001 trim reworded (physical perks may exist, no address collected, test-mode perks aren't owed — FR-PLT-006); no code change, tracked in T-014
+- Also: `currency_mismatch` refund reason has a sentence in `refund_started` (PR #7 added the code)
+- Deviation D-011: single-operator mode is visible (`GET /staff/queue`) but toggling it stays a SQL-only change (`update platform_settings set value = 'false' where key = 'single_operator_mode'`) with no audit row of its own. FR-ID-007 asks for "a visible, audited platform setting"; an audited toggle endpoint is M2 with the second staff member. Spec impact: none beyond the M1 trim noted here.
+- Deviation D-012: migration `…0400` edited in place (status `executing`, `single_operator_mode()`, staff-owner trigger) rather than a fix-up migration — PR #8 is unmerged and nothing outside local/CI has applied it (same reasoning as D-007).
+- Not done: an action left `executing` by a crashed process is not re-run automatically (by design — it may have moved money); it shows on the `scheduled` queue as "stuck executing" after 15 minutes and is resolved by hand.
+- Totals: API 143/143 (11 files), shared 7/7, `pnpm -r typecheck` clean, `lint:copy` clean — run here

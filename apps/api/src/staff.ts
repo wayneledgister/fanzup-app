@@ -1,0 +1,258 @@
+/**
+ * Staff authority and single-operator mode (FR-ID-002 staff, FR-ID-003, FR-ID-007; card G1-A option 1).
+ *
+ * Every privileged action: second-factor session (aal2) from the verified token, a typed reason, a row in
+ * privileged_actions and an audit event. While single-operator mode is on, money actions above
+ * singleOperator.delayAboveMinor wait singleOperator.delayHours (cancellable), and daily limits apply to refunds
+ * and verifications. A staff member can never act on a campaign they own.
+ */
+import type { FastifyRequest } from "fastify";
+import { POLICY } from "@fanzup/shared/policy";
+import { asService, n, type Claims, type Sql } from "./db";
+import { currentCtx, runWithCtx, setActor } from "./context";
+import { HttpError, requireUser } from "./lib/auth";
+import { log, redact } from "./log";
+import type { Deps } from "./app";
+import { processEventById } from "./inbox";
+
+export async function requireStaff(req: FastifyRequest, d: Pick<Deps, "verify" | "sql">): Promise<Claims> {
+  const u = await requireUser(req, d.verify);
+  const [s] = await asService(d.sql, (tx) => tx<{ role: string }[]>`select role from public.staff where user_id = ${u.sub}`);
+  if (!s) throw new HttpError(403, "not_staff", "This area is for FanZuP staff.");
+  if (u.aal !== "aal2") throw new HttpError(403, "second_factor_required", "Confirm it's you with your authenticator app to use staff tools.");
+  setActor(u.sub, "staff", "aal2");
+  return u;
+}
+
+export async function singleOperatorMode(sql: Sql): Promise<boolean> {
+  const [r] = await asService(sql, (tx) => tx<{ on: boolean }[]>`select public.single_operator_mode() as on`);
+  return r.on;
+}
+
+export type ActionName = "campaign.review" | "tranche.verify" | "backing.refund" | "recon.override" | "provider_event.replay" | "outbound_op.replay" | "weekly_review.signoff";
+
+/** Actions that move money (delay + daily limits apply while single-operator mode is on). */
+const MONEY_ACTIONS = new Set<ActionName>(["tranche.verify", "backing.refund"]);
+
+interface ActionRow {
+  id: string;
+  action: ActionName;
+  subject_id: string | null;
+  actor_id: string;
+  aal: string;
+  reason: string;
+  amount_minor: bigint | null;
+  params: Record<string, unknown>;
+  correlation_id: string | null;
+  status: string;
+  execute_after: Date;
+}
+
+type Executor = (d: Pick<Deps, "sql" | "provider">, a: ActionRow) => Promise<unknown>;
+
+const EXECUTORS: Record<ActionName, Executor> = {
+  "campaign.review": async (d, a) => {
+    const p = a.params as { decision: string; notes?: string; checklist?: unknown };
+    await asService(d.sql, (tx) => tx`select public.review_campaign(${a.subject_id}, ${p.decision}, ${tx.json((p.checklist ?? {}) as never)}, ${p.notes ?? null})`);
+  },
+  "tranche.verify": async (d, a) => {
+    await asService(d.sql, (tx) => tx`select public.verify_tranche(${a.subject_id}, ${a.actor_id})`);
+  },
+  "backing.refund": async (d, a) => {
+    await asService(d.sql, (tx) => tx`select public.request_backing_refund(${a.subject_id}, ${a.reason})`);
+  },
+  "recon.override": async (d) => {
+    const until = new Date(Date.now() + 24 * 3_600_000).toISOString();
+    await asService(d.sql, (tx) => tx`
+      insert into public.platform_settings (key, value) values ('recon_override_until', ${tx.json(until)})
+      on conflict (key) do update set value = excluded.value, updated_at = now()`);
+  },
+  "provider_event.replay": async (d, a) => {
+    await asService(d.sql, (tx) => tx`update public.provider_events set status = 'failed', attempts = 0, next_attempt_at = now() where id = ${a.subject_id} and status in ('failed', 'dead', 'unmatched')`);
+    await processEventById(d.sql, d.provider, a.subject_id!);
+  },
+  "outbound_op.replay": async (d, a) => {
+    const [r] = await asService(d.sql, (tx) => tx`
+      update public.outbound_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, last_error = null
+       where id = ${a.subject_id} and status in ('dead', 'failed') returning id`);
+    if (!r) throw new HttpError(409, "not_replayable", "Only dead-lettered or failed operations can be replayed.");
+  },
+  // The sign-off row is written by the executor, so it exists only if the action executed (PR #8 review fix 10).
+  "weekly_review.signoff": async (d, a) => {
+    const p = a.params as { weekStart: string; note?: string | null };
+    try {
+      const [row] = await asService(d.sql, (tx) => tx`
+        insert into public.review_signoffs (week_start, actor_id, note, action_count)
+        select ${p.weekStart}::date, ${a.actor_id}, ${p.note ?? null}, count(*)
+          from public.privileged_actions
+         where action <> 'weekly_review.signoff' and created_at >= ${p.weekStart}::date and created_at < ${p.weekStart}::date + 7
+        returning *`);
+      return row;
+    } catch (e) {
+      if ((e as { code?: string }).code === "23505") throw new HttpError(409, "already_signed", "That week is already signed off.");
+      throw e;
+    }
+  },
+};
+
+/** The campaign a subject belongs to (for the reviewer ≠ owner rule), or null. */
+async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | null): Promise<string | null> {
+  if (!subjectId) return null;
+  const from: Partial<Record<ActionName, string>> = {
+    "campaign.review": "public.campaigns c join public.artists a on a.id = c.artist_id where c.id = $1",
+    "tranche.verify": "public.campaign_tranches t join public.campaigns c on c.id = t.campaign_id join public.artists a on a.id = c.artist_id where t.id = $1",
+    "backing.refund": "public.backings b join public.campaigns c on c.id = b.campaign_id join public.artists a on a.id = c.artist_id where b.id = $1",
+  };
+  const clause = from[action];
+  if (!clause) return null;
+  const rows = await asService(sql, (tx) => tx.unsafe<{ owner_id: string }[]>(`select a.owner_id from ${clause}`, [subjectId]));
+  if (!rows.length) throw new HttpError(404, "not_found", "We couldn't find that item.");
+  return rows[0].owner_id;
+}
+
+export interface ActionResult {
+  id: string;
+  status: "scheduled" | "executed";
+  executeAfter: string | null;
+  /** What the executor returned (e.g. the sign-off row); not part of the HTTP `action` object. */
+  result?: unknown;
+}
+
+/**
+ * Record a privileged action and run it now or schedule it.
+ *
+ * Claiming (PR #8 review fix 1): an immediate action is inserted already `executing`, so neither the worker nor a
+ * cancel can touch it; a delayed one is inserted `scheduled`, and only `executeDueActions` (which claims it with
+ * `scheduled → executing` under `for update skip locked`) or `cancelAction` (only from `scheduled`) can move it.
+ * Final updates are conditional on `executing`, so every action runs at most once.
+ *
+ * Daily limits (review fix 7): the check and the insert run in one transaction under a per-action-type advisory
+ * lock, so two concurrent requests can't both fit under the same limit.
+ */
+export async function privileged(
+  d: Pick<Deps, "sql" | "provider">,
+  input: { action: ActionName; subjectId: string | null; reason: unknown; amountMinor?: number | null; params?: Record<string, unknown> },
+): Promise<ActionResult> {
+  const c = currentCtx();
+  if (!c?.actorId || c.actorKind !== "staff" || c.aal !== "aal2") throw new HttpError(403, "second_factor_required", "Staff session with second factor required.");
+  const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+  if (reason.length < 10) throw new HttpError(400, "reason_required", "Type a reason of at least 10 characters. It goes in the audit log and your weekly review.");
+  if ((await campaignOwner(d.sql, input.action, input.subjectId)) === c.actorId) {
+    throw new HttpError(403, "reviewer_is_owner", "You can't act on a campaign you own.");
+  }
+
+  const single = await singleOperatorMode(d.sql);
+  const amount = input.amountMinor ?? null;
+  const money = single && MONEY_ACTIONS.has(input.action);
+  // A recon override lifts the payout pause for everyone, so it always waits out the delay (G1 N4).
+  const delayed = (money && (amount ?? 0) > POLICY.singleOperator.delayAboveMinor) || (single && input.action === "recon.override");
+  const delayHours = delayed ? POLICY.singleOperator.delayHours : 0;
+
+  const [row] = await asService(d.sql, async (tx) => {
+    if (money) {
+      await tx`select pg_advisory_xact_lock(hashtext(${"privileged_actions:" + input.action}))`;
+      const [day] = await tx<{ refunds: bigint; verifications: bigint }[]>`
+        select coalesce(sum(amount_minor) filter (where action = 'backing.refund'), 0) as refunds,
+               count(*) filter (where action = 'tranche.verify') as verifications
+          from public.privileged_actions
+         where status in ('scheduled', 'executing', 'executed') and created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'`;
+      if (input.action === "backing.refund" && n(day.refunds) + (amount ?? 0) > POLICY.singleOperator.dailyLimits.refundsMinor) {
+        throw new HttpError(409, "daily_limit", "This would pass today's refund limit for single-operator mode. It resets at midnight UTC.");
+      }
+      if (input.action === "tranche.verify" && n(day.verifications) >= POLICY.singleOperator.dailyLimits.verifications) {
+        throw new HttpError(409, "daily_limit", "Today's verification limit for single-operator mode is reached. It resets at midnight UTC.");
+      }
+    }
+    // A delayed staff refund must not run at or after the campaign's deadline (design §9; review round 2).
+    if (delayed && input.action === "backing.refund") {
+      const [late] = await tx<{ late: boolean }[]>`
+        select now() + make_interval(hours => ${delayHours}) >= c.ends_at as late
+          from public.backings b join public.campaigns c on c.id = b.campaign_id where b.id = ${input.subjectId}`;
+      if (late?.late) {
+        throw new HttpError(409, "refund_after_deadline",
+          "This refund would run after the campaign ends. If the campaign misses its goal every backer is refunded automatically; refunds from a funded campaign arrive in M2.");
+      }
+    }
+    const rows = await tx<ActionRow[]>`
+      insert into public.privileged_actions (action, subject_id, actor_id, aal, reason, amount_minor, params, status, execute_after)
+      values (${input.action}, ${input.subjectId}, ${c.actorId}, ${c.aal}, ${reason}, ${amount}, ${tx.json((input.params ?? {}) as never)},
+              ${delayed ? "scheduled" : "executing"}, now() + make_interval(hours => ${delayHours}))
+      returning *`;
+    await tx`insert into public.audit_events (action, entity, entity_id, data)
+             values (${"staff." + input.action + (delayed ? ".scheduled" : ".requested")}, 'privileged_action', ${rows[0].id},
+                     ${tx.json({ subject_id: input.subjectId, amount_minor: amount, delayed })})`;
+    return rows;
+  });
+  if (delayed) return { id: row.id, status: "scheduled", executeAfter: row.execute_after.toISOString() };
+  return execute(d, row);
+}
+
+/** Error code for the audit trail (audit payloads carry ids and codes only, NFR-COMP-11). */
+function errorCode(e: unknown): string {
+  if (e instanceof HttpError) return e.code;
+  const pg = e as { code?: string; message?: string };
+  if (pg.code === "P0001" && pg.message && /^[a-z_]{3,60}$/.test(pg.message)) return pg.message;
+  return pg.code ?? "error";
+}
+
+/** Run an action this process has claimed (`status = 'executing'`). */
+async function execute(d: Pick<Deps, "sql" | "provider">, a: ActionRow): Promise<ActionResult> {
+  let result: unknown;
+  try {
+    result = await EXECUTORS[a.action](d, a);
+  } catch (e) {
+    const msg = redact(String((e as { detail?: string; message?: string }).detail ?? (e as Error).message ?? e));
+    await asService(d.sql, async (tx) => {
+      const [r] = await tx`update public.privileged_actions set status = 'failed', error = ${msg}, executed_at = now()
+                            where id = ${a.id} and status = 'executing' returning id`;
+      if (r) {
+        await tx`insert into public.audit_events (action, entity, entity_id, data)
+                 values (${"staff." + a.action + ".failed"}, 'privileged_action', ${a.id}, ${tx.json({ error_code: errorCode(e) })})`;
+      }
+    });
+    throw e;
+  }
+  await asService(d.sql, async (tx) => {
+    const [r] = await tx`update public.privileged_actions set status = 'executed', executed_at = now()
+                          where id = ${a.id} and status = 'executing' returning id`;
+    if (!r) {
+      log("alert", "staff_action.claim_lost", { actionId: a.id, action: a.action });
+      return;
+    }
+    await tx`insert into public.audit_events (action, entity, entity_id) values (${"staff." + a.action + ".executed"}, 'privileged_action', ${a.id})`;
+  });
+  return { id: a.id, status: "executed", executeAfter: null, result };
+}
+
+/**
+ * Worker step: claim scheduled actions whose delay has passed (`scheduled → executing`, skip-locked, so two workers
+ * never take the same row and a cancel can't race the run) and execute them as their original actor.
+ */
+export async function executeDueActions(d: Pick<Deps, "sql" | "provider">, now = new Date()) {
+  const due = await asService(d.sql, (tx) => tx<ActionRow[]>`
+    update public.privileged_actions set status = 'executing'
+     where id in (select id from public.privileged_actions
+                   where status = 'scheduled' and execute_after <= ${now}
+                   order by execute_after for update skip locked limit 20)
+    returning *`);
+  for (const a of due) {
+    await runWithCtx({ correlationId: a.correlation_id, actorId: a.actor_id, actorKind: "staff", aal: a.aal }, async () => {
+      try {
+        await execute(d, a);
+      } catch (e) {
+        log("alert", "staff_action.failed", { actionId: a.id, action: a.action, error: redact(String((e as Error).message ?? e)) });
+      }
+    });
+  }
+  return due.length;
+}
+
+/** Cancel a scheduled action. Only `scheduled` can be cancelled; once claimed (`executing`) it runs to the end. */
+export async function cancelAction(sql: Sql, id: string, reason: string) {
+  await asService(sql, async (tx) => {
+    const [r] = await tx<{ id: string }[]>`
+      update public.privileged_actions set status = 'cancelled', error = ${"cancelled: " + reason} where id = ${id} and status = 'scheduled' returning id`;
+    if (!r) throw new HttpError(409, "not_cancellable", "Only scheduled actions can be cancelled.");
+    await tx`insert into public.audit_events (action, entity, entity_id) values ('staff.action.cancelled', 'privileged_action', ${id})`;
+  });
+}

@@ -29,3 +29,7 @@ export const CampaignSummary = z.object({
   artist: z.object({ id: z.string().uuid(), name: z.string(), slug: z.string() }),
 });
 export type CampaignSummary = z.infer<typeof CampaignSummary>;
+
+/** `GET /staff/queue?type=` (design §4.2). `payouts`: releases waiting on a payout account, funds, a recon pause or an earlier tranche. */
+export const StaffQueueType = z.enum(["review", "verification", "refunds", "payouts", "unmatched", "dead_letters", "breaks", "failed_events", "scheduled"]);
+export type StaffQueueType = z.infer<typeof StaffQueueType>;
