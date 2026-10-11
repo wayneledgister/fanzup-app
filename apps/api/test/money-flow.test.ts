@@ -271,12 +271,17 @@ describe("FR-CMP-008 discovery", () => {
 });
 
 describe("sandbox dev routes (local/CI only)", () => {
-  it("top-up adds platform money to the sandbox balance as an adjustment recon skips", async () => {
+  it("top-up adds platform money to the sandbox balance as an adjustment recon reports but doesn't count as a diff", async () => {
     const before = (await k.provider.listBalanceTransactions()).filter((t) => t.type === "adjustment").reduce((s, t) => s + t.netMinor, 0);
+    const reconBefore = await runReconciliation(k.sql, k.provider);
     const r = await k.app.inject({ method: "POST", url: "/api/v1/dev/sandbox/topup", payload: { amountMinor: 12_345 } });
     expect(r.statusCode).toBe(200);
     const after = (await k.provider.listBalanceTransactions()).filter((t) => t.type === "adjustment").reduce((s, t) => s + t.netMinor, 0);
     expect(after - before).toBe(12_345);
+    const reconAfter = await runReconciliation(k.sql, k.provider);
+    expect(reconAfter.diffMinor).toBe(reconBefore.diffMinor);
+    expect(reconAfter.providerTotalMinor).toBe(reconBefore.providerTotalMinor);
+    expect(reconAfter.platformAdjustmentsMinor - reconBefore.platformAdjustmentsMinor).toBe(12_345);
     expect((await k.app.inject({ method: "POST", url: "/api/v1/dev/sandbox/topup", payload: { amountMinor: -1 } })).statusCode).toBe(400);
   });
 });

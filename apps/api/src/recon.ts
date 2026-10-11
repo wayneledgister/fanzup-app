@@ -19,6 +19,8 @@ export interface ReconResult {
   ledgerTotalMinor: number;
   providerTotalMinor: number;
   diffMinor: number;
+  /** Unattributed platform money at the processor (top-ups / float); excluded from the totals and the diff. */
+  platformAdjustmentsMinor: number;
   campaigns: { campaignId: string; ledgerMinor: number; providerMinor: number; diffMinor: number }[];
   breaks: { kind: string; campaignId: string | null; amountMinor: number; refs: Record<string, unknown> }[];
   /** Provider movements whose confirmation is still on its way (op `sent`, or a young unprocessed event): reported, not breaks. */
@@ -112,7 +114,10 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
     }
 
     const ledgerTotal = campaigns.reduce((s, c) => s + c.ledgerMinor, 0);
-    const providerTotal = providerTxns.reduce((s, t) => s + t.netMinor, 0);
+    // Unattributed platform adjustments (top-ups: FanZuP's own float for the fees it absorbs on refunds, design §12.1) are not
+    // backers' or artists' money and have no ledger posting, so they're reported separately, not counted as a diff.
+    const platformAdjustmentsMinor = allProviderTxns.filter((t) => t.type === "adjustment" && !t.campaignId).reduce((s, t) => s + t.netMinor, 0);
+    const providerTotal = providerTxns.filter((t) => !(t.type === "adjustment" && !t.campaignId)).reduce((s, t) => s + t.netMinor, 0);
     await asService(sql, async (tx) => {
       const seen: string[] = [];
       for (const b of breaks) {
@@ -133,7 +138,7 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
                       provider_total_minor = ${providerTotal}, diff_minor = ${providerTotal - ledgerTotal}, campaigns = ${tx.json(campaigns as never)}
                 where id = ${run.id}`;
     });
-    return { runId: run.id, ledgerTotalMinor: ledgerTotal, providerTotalMinor: providerTotal, diffMinor: providerTotal - ledgerTotal, campaigns, breaks, inFlight };
+    return { runId: run.id, ledgerTotalMinor: ledgerTotal, providerTotalMinor: providerTotal, diffMinor: providerTotal - ledgerTotal, platformAdjustmentsMinor, campaigns, breaks, inFlight };
   } catch (e) {
     await asService(sql, (tx) => tx`update public.recon_runs set status = 'failed', finished_at = now(), error = ${String((e as Error).message ?? e).slice(0, 500)} where id = ${run.id}`);
     throw e;
