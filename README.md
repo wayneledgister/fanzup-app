@@ -38,6 +38,7 @@ pnpm typecheck && pnpm lint:copy
 - A failed campaign becomes `refunded` only when no backing is `held` or `refund_pending`.
 - A backing request is claimed and its hold created in one transaction; the same Idempotency-Key always gets the same outcome, including the same error.
 - A capture is refunded from what was actually captured, never from what the backing expected. A payment that belongs to no backing (a second payment, or one naming only a campaign) is recorded once and refunded by its own operation.
+- Milestone payouts release strictly in order, and each transfer sends exactly what the ledger will accept at confirmation: a tranche's payout is created only after every earlier tranche is released, and its amount is re-checked against the ledger right before the transfer and never changed after the first call.
 
 ## Feature flags
 `layer2` (Reg CF investing) and `postBeta` (soft transfers, holder votes) are off by default. Set `VITE_FLAG_LAYER2=true` or `VITE_FLAG_POSTBETA=true`, or append `?flags=layer2,postBeta` to a URL for review.

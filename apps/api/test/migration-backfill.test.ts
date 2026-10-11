@@ -61,6 +61,14 @@ beforeAll(async () => {
                   (${b.liveRefunded}, ${live}, ${livePerk}, ${fan2}, 1, 1000, 59, 'refunded', 'pi_live_3'),
                   (${b.failedHeld}, ${failed}, ${failedPerk}, ${fan}, 1, 2000, 88, 'held', 'pi_failed_1'),
                   (${b.fundedReleased}, ${funded}, ${fundedPerk}, ${fan}, 1, 60000, 1770, 'released', 'pi_funded_1')`;
+  // Pre-M1 capture postings were keyed capture:<backing_id> (M1 keys them capture:<payment_ref>).
+  for (const [backing, campaign, ref, amount, fee] of [[b.liveHeld, live, "pi_live_1", 2000, 88], [b.failedHeld, failed, "pi_failed_1", 2000, 88]] as const) {
+    await db`select public.ledger_post('backing.captured', ${"capture:" + backing}, ${db.json([
+      { account: (await db<{ id: string }[]>`select public.ledger_account('escrow_cash', ${campaign}) as id`)[0].id, amount: amount - fee },
+      { account: (await db<{ id: string }[]>`select public.ledger_account('processing_fees') as id`)[0].id, amount: fee },
+      { account: (await db<{ id: string }[]>`select public.ledger_account('backer_liability', ${campaign}) as id`)[0].id, amount: -amount },
+    ])}, ${campaign}, ${backing}, ${ref}, null)`;
+  }
 
   for (const f of files.filter((f) => f >= M1_FIRST)) await db.unsafe(readFileSync(join(MIGRATIONS, f), "utf8"));
 }, 60_000);
@@ -103,5 +111,19 @@ describe("M1 migration backfill of pre-M1 rows (review round 2, item 4)", () => 
         from public.perks p`;
     for (const r of rows) expect(r.claimed, r.id).toBe(r.held);
     expect(rows.find((r) => r.id === failedPerk)?.claimed).toBe(0);
+  });
+
+  it("a replayed capture of a pre-M1 backing (posted under capture:<backing_id>) is a duplicate, not a second posting (review round 3)", async () => {
+    const count = async () => (await db<{ c: number }[]>`select count(*)::int as c from public.ledger_transactions`)[0].c;
+    const before = await count();
+    const held = await db<{ r: string }[]>`select public.apply_payment_captured(${b.liveHeld}, 'pi_live_1', 2000, 'usd', 88, 'capture:pi_live_1') as r`;
+    const pending = await db<{ r: string }[]>`select public.apply_payment_captured(${b.failedHeld}, 'pi_failed_1', 2000, 'usd', 88, 'capture:pi_failed_1') as r`;
+    const released = await db<{ r: string }[]>`select public.apply_payment_captured(${b.fundedReleased}, 'pi_funded_1', 60000, 'usd', 1770, 'capture:pi_funded_1') as r`;
+    expect([held[0].r, pending[0].r, released[0].r]).toEqual(["duplicate", "duplicate", "duplicate"]);
+    expect(await count()).toBe(before);
+    const [c] = await db<{ raised_minor: string }[]>`select raised_minor from public.campaigns where id = ${live}`;
+    expect(c.raised_minor).toBe("3000");
+    const statuses = await db<{ status: string }[]>`select status::text from public.backings where id in (${b.liveHeld}, ${b.failedHeld}) order by status`;
+    expect(statuses.map((r) => r.status)).toEqual(["held", "refund_pending"]);
   });
 });

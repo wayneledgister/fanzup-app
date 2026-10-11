@@ -7,7 +7,8 @@
  *
  * The op row is committed before the provider is called; EVERY run asks the provider for an earlier attempt first
  * (whatever `attempts` says — the call may have acted before we recorded anything); the ledger posts only on
- * confirmation and only the exact amount. No DB lock is held across a provider call.
+ * confirmation and only the exact amount. No DB lock is held across a provider call. A payout's amount is re-derived
+ * from the ledger right before its first provider call and frozen from then on (never a stale amount).
  * A `permanent` error fails the op with an alert; only an amount mismatch also opens a recon break (design §5).
  */
 import { POLICY } from "@fanzup/shared/policy";
@@ -28,6 +29,8 @@ export interface OpRow {
   idempotency_key: string;
   status: string;
   provider_ref: string | null;
+  /** Set just before the first provider call; a payout's amount is frozen from then on. */
+  call_started_at: Date | null;
   attempts: number;
   correlation_id: string | null;
   created_at: Date;
@@ -43,14 +46,44 @@ export async function ensureRefundOp(tx: Tx, backingId: string, reason: string |
     on conflict (kind, subject_id) do nothing`;
 }
 
-/** Create (once) the payout op for a verified tranche. Amount = what the rules say is owed now. */
+/**
+ * Create (once) the payout op for a verified tranche — only when every earlier tranche is already released, because
+ * what a tranche is owed (`tranche_release_amount`) depends on the earlier releases (the last tranche gets whatever
+ * `artist_payable` still holds). A tranche verified while an earlier one is still paying gets its op when that one
+ * releases: `record_tranche_released` re-queues `tranche.release` for it (PR #7 review round 3; design §3.5, §5).
+ */
 export async function ensurePayoutOp(tx: Tx, trancheId: string) {
   await tx`
     insert into public.outbound_ops (kind, subject_id, campaign_id, amount_minor, idempotency_key)
     select 'payout', t.id, t.campaign_id, public.tranche_release_amount(t.id), 'release:' || t.id
       from public.campaign_tranches t
      where t.id = ${trancheId} and t.status = 'verified' and public.tranche_release_amount(t.id) > 0
+       and not exists (select 1 from public.campaign_tranches x where x.campaign_id = t.campaign_id and x.seq < t.seq and x.status <> 'released')
     on conflict (kind, subject_id) do nothing`;
+}
+
+/**
+ * Just before a payout's provider call (no transfer found for the op): re-derive what the ledger will accept at
+ * confirmation and record that the call has started, in one transaction. Before the first call the op amount is
+ * brought up to date; once a call has started it never changes, and a differing amount fails the op instead of
+ * sending a stale figure (design §5). Returns the amount to send.
+ */
+async function startPayoutCall(sql: Sql, op: OpRow): Promise<number> {
+  return asService(sql, async (tx) => {
+    const [row] = await tx<{ amount_minor: bigint; call_started_at: Date | null; owed: bigint | null }[]>`
+      select o.amount_minor, o.call_started_at, public.tranche_release_amount(o.subject_id) as owed
+        from public.outbound_ops o where o.id = ${op.id} for update`;
+    const owed = n(row.owed ?? 0);
+    if (owed <= 0) throw new ProviderError("permanent", "payout_nothing_owed", "Nothing is owed for this tranche");
+    if (owed !== n(row.amount_minor)) {
+      if (row.call_started_at) {
+        throw new ProviderError("permanent", "payout_amount_changed", `Owed ${owed} differs from ${n(row.amount_minor)} already sent to the provider`);
+      }
+      log("warn", "outbound.payout_amount_updated", { opId: op.id, from: n(row.amount_minor), to: owed });
+    }
+    await tx`update public.outbound_ops set amount_minor = ${owed}, call_started_at = coalesce(call_started_at, now()) where id = ${op.id}`;
+    return owed;
+  });
 }
 
 /** Run due ops one at a time. Each op is leased for 5 minutes so two workers never run the same op. */
@@ -106,10 +139,14 @@ export async function runOp(sql: Sql, provider: PaymentProvider, op: OpRow) {
        where t.id = ${op.subject_id}`);
     if (t.earlier_pending) return defer(sql, op, "earlier_tranche", 30);
     if (!t.payout_ref) return defer(sql, op, "payout_account", 15 * 60);
-    const res =
-      (await provider.findTransfer({ campaignId: op.campaign_id, opId: op.id })) ??
-      (await provider.transfer({ campaignId: op.campaign_id, trancheId: op.subject_id, destination: t.payout_ref, amountMinor: amount, idempotencyKey: op.idempotency_key, opId: op.id }));
-    if (res.amountMinor !== amount) return failOpOnAmountMismatch(sql, op, res.transferRef, res.amountMinor);
+    let res = await provider.findTransfer({ campaignId: op.campaign_id, opId: op.id });
+    if (!res) {
+      // Never send a stale amount: what is owed is re-derived from the ledger right before the call (design §5).
+      const sendAmount = await startPayoutCall(sql, op);
+      op = { ...op, amount_minor: BigInt(sendAmount) };
+      res = await provider.transfer({ campaignId: op.campaign_id, trancheId: op.subject_id, destination: t.payout_ref, amountMinor: sendAmount, idempotencyKey: op.idempotency_key, opId: op.id });
+    }
+    if (res.amountMinor !== n(op.amount_minor)) return failOpOnAmountMismatch(sql, op, res.transferRef, res.amountMinor);
     try {
       await confirmPayout(sql, op, res.transferRef, res.amountMinor);
     } catch (e) {

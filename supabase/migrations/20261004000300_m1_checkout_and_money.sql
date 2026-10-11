@@ -108,6 +108,9 @@ begin
   select * into c from public.campaigns where id = v_campaign for update;
   select * into b from public.backings where id = p_backing for update;
   if exists (select 1 from public.ledger_transactions where idempotency_key = p_idem) then return 'duplicate'; end if;
+  -- The same payment already applied to this backing under an older key (pre-M1 captures were keyed
+  -- capture:<backing_id>, PR #7 review round 3): nothing to post again.
+  if b.payment_ref = p_payment_ref and b.status in ('held', 'released', 'refund_pending', 'refunded') then return 'duplicate'; end if;
   -- A second, different payment for a backing that already has one: money we hold for nobody (§3.5.1 rule 4).
   if b.payment_ref is not null and b.payment_ref <> p_payment_ref then return 'stray'; end if;
   if p_amount <= 0 or p_fee < 0 or p_fee >= p_amount then
@@ -485,10 +488,14 @@ begin
 end $$;
 
 -- Payout confirmed: post exactly the amount the provider moved, which must equal what the rules say is owed.
+-- Tranches release strictly in order: a later tranche's payout op is created only once every earlier tranche is
+-- released (ensurePayoutOp), so releasing a tranche re-queues `tranche.release` for the next one if it is already
+-- verified (PR #7 review round 3). The next tranche is locked first, so a verification racing this release either
+-- commits before (seen here as verified, queued here) or after (its own tranche.release finds this one released).
 drop function public.record_tranche_released(uuid, text, text);
 create function public.record_tranche_released(p_tranche uuid, p_payout_ref text, p_amount bigint, p_idem text)
 returns bigint language plpgsql security definer set search_path = '' as $$
-declare t public.campaign_tranches; c public.campaigns; v_campaign uuid; v_amt bigint; v_last boolean;
+declare t public.campaign_tranches; c public.campaigns; v_campaign uuid; v_amt bigint; v_last boolean; v_next public.campaign_tranches;
 begin
   -- Lock order campaign → tranche (settle_campaign's order), both BEFORE the idempotency check, so a concurrent
   -- duplicate waits for the first confirmation to commit and then returns its amount instead of failing on status.
@@ -513,6 +520,10 @@ begin
   ), c.id, null, p_payout_ref, 'tranche ' || t.seq);
   update public.campaign_tranches set status = 'released', released_minor = v_amt, released_at = now() where id = t.id;
   if v_last then update public.campaigns set status = 'released' where id = c.id; end if;
+  select * into v_next from public.campaign_tranches where campaign_id = c.id and seq = t.seq + 1 for update;
+  if found and v_next.status = 'verified' then
+    insert into public.outbox (topic, payload) values ('tranche.release', jsonb_build_object('tranche_id', v_next.id));
+  end if;
   insert into public.outbox (topic, payload) values ('notify.milestone_released', jsonb_build_object('tranche_id', t.id));
   insert into public.audit_events (action, entity, entity_id, data)
   values ('tranche.released', 'tranche', t.id, jsonb_build_object('amount_minor', v_amt, 'payout_ref', p_payout_ref));

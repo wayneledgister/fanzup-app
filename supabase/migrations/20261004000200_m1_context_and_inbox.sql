@@ -109,6 +109,9 @@ create table public.outbound_ops (
   status text not null default 'initiated' check (status in ('initiated', 'sent', 'confirmed', 'failed', 'dead')),
   waiting text,                                    -- e.g. 'funds', 'payout_account', 'recon_pause', 'earlier_tranche'
   provider_ref text,
+  -- Set (once) just before the first provider call. Until then a payout op's amount is re-derived from the ledger
+  -- before sending; after it, the amount never changes (design §3.3, §5).
+  call_started_at timestamptz,
   attempts integer not null default 0,
   next_attempt_at timestamptz not null default now(),
   lease_until timestamptz,
