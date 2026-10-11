@@ -34,7 +34,13 @@ describe("row level security", () => {
   });
   it("clients can't call money functions", async () => {
     await expect(asUser(sql, fan, (tx) => tx`select public.settle_campaign(${ids.novaCampaign})`)).rejects.toThrow(/permission denied/);
-    await expect(asUser(sql, fan, (tx) => tx`select public.record_backing_captured(gen_random_uuid(), 'x', 0, 'x')`)).rejects.toThrow(/permission denied/);
+    await expect(asUser(sql, fan, (tx) => tx`select public.apply_payment_captured(gen_random_uuid(), 'x', 1, 'usd', 0, 'x')`)).rejects.toThrow(/permission denied/);
+    await expect(asUser(sql, fan, (tx) => tx`select public.apply_stray_capture(gen_random_uuid(), 'x', 1, 'usd', 0, gen_random_uuid())`)).rejects.toThrow(/permission denied/);
+    await expect(asUser(sql, fan, (tx) => tx`select public.record_refund_confirmed(gen_random_uuid(), 'x', 1, 'x')`)).rejects.toThrow(/permission denied/);
+  });
+  it("the pre-M1 capture and refund functions are gone (every path goes through the M1 functions)", async () => {
+    const rows = await sql`select proname from pg_proc where pronamespace = 'public'::regnamespace and proname in ('record_backing_captured', 'record_backing_refunded')`;
+    expect(rows).toHaveLength(0);
   });
   it("artists can edit their own draft campaigns, not live ones", async () => {
     const [d] = await asUser(sql, nova, (tx) => tx<{ id: string }[]>`

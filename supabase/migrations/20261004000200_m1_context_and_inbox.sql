@@ -39,16 +39,19 @@ alter table public.backings
   add column source text check (source is null or source ~ '^[a-z0-9_-]{1,40}$'),
   -- amount actually captured by the provider (may differ from amount_minor on a mismatch; refunds use this)
   add column captured_minor bigint check (captured_minor is null or captured_minor > 0),
+  -- currency the provider actually captured in (design §3.5; a mismatch is refunded, never applied)
+  add column captured_currency text,
   -- perk units currently reserved for this backing (held at checkout start, returned on cancel/refund)
   add column units_held boolean not null default false,
   -- included in the campaign's public raised/backers counters
   add column counted boolean not null default false;
 create index backings_open_holds_idx on public.backings (hold_expires_at) where status = 'pending_payment';
 
--- Claim-first idempotency (design §4.4).
+-- Claim-first idempotency (design §4.4). claimed_at drives the abandoned-claim rule (POLICY.checkout.abandonedClaimMinutes).
 alter table public.api_idempotency
   add column resource_id uuid,
-  add column state text not null default 'done' check (state in ('in_progress', 'done'));
+  add column state text not null default 'done' check (state in ('in_progress', 'done')),
+  add column claimed_at timestamptz;
 
 -- ── Provider event inbox (FR-PAY-002) ──────────────────────────────────
 create table public.provider_events (
@@ -60,8 +63,10 @@ create table public.provider_events (
   account text,
   object_ref text,
   payload jsonb not null,
-  status text not null default 'received' check (status in ('received', 'processed', 'ignored', 'unmatched', 'failed', 'dead')),
+  -- 'processing' = claimed by one processor (inline webhook attempt, worker, replay) until lease_until.
+  status text not null default 'received' check (status in ('received', 'processing', 'processed', 'ignored', 'unmatched', 'failed', 'dead')),
   attempts integer not null default 0,
+  lease_until timestamptz,
   last_error text,
   correlation_id text default public.ctx('correlation_id'),
   received_at timestamptz not null default now(),
@@ -69,15 +74,16 @@ create table public.provider_events (
   processed_at timestamptz,
   unique (provider, event_id)
 );
-create index provider_events_pending_idx on public.provider_events (next_attempt_at) where status in ('received', 'failed');
+create index provider_events_pending_idx on public.provider_events (next_attempt_at) where status in ('received', 'processing', 'failed');
 create index provider_events_object_idx on public.provider_events (provider, object_ref);
 
 -- ── Two-phase outbound operations (FR-PAY-004) ─────────────────────────
 create table public.outbound_ops (
   id uuid primary key default gen_random_uuid(),
   kind text not null check (kind in ('refund', 'payout')),
-  subject_id uuid not null,                       -- backing (refund) or tranche (payout)
+  subject_id uuid not null,                       -- backing (refund), tranche (payout), or provider event (stray-capture refund)
   campaign_id uuid not null references public.campaigns (id),
+  payment_ref text,                                -- set only for a stray-capture refund (design §3.5.1)
   amount_minor bigint not null check (amount_minor > 0),
   idempotency_key text not null unique,
   reason text,
