@@ -28,7 +28,7 @@ pnpm typecheck && pnpm lint:copy
 ```
 
 ## Money-path rules (enforced in the database, tested in CI)
-- FanZuP never holds cash. A third-party escrow partner does; the ledger mirrors it (Mechanism 05).
+- FanZuP never holds cash itself. No custodian is live yet (FR-PAY-010), so only test money moves: the payment processor in test mode holds the test funds, and live payment keys are refused (FR-PAY-008, FR-PLT-006). The ledger mirrors what the processor holds.
 - Amounts are integer cents. The ledger is double-entry, append-only, and every transaction balances.
 - Every money operation is idempotent. Retries can't double-charge or double-pay.
 - Clients can't write money fields or call money functions. RLS and column grants stop them; only the API's service role can.
