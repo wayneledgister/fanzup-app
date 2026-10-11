@@ -93,7 +93,7 @@ The tests need a Postgres server they can create and drop scratch databases on. 
 ```bash
 TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres pnpm test
 ```
-**✅ Check:** 26 tests pass. They cover:
+**✅ Check:** every test passes (the count grows with each PR; CI's API job runs the same suite). They cover:
 - the ledger always balancing
 - funded and failed flows
 - idempotency
@@ -127,12 +127,24 @@ pnpm exec supabase login                          # opens the browser once
 pnpm exec supabase link --project-ref <staging-ref>   # asks for the DB password
 pnpm exec supabase db push                        # applies supabase/migrations
 ```
-- **Staging only:** to load the test users and campaigns, run `pnpm exec supabase db push --include-seed`.
-- **Production:** never load the seed. Its users have a published password.
+- **Hosted databases (staging and production) never get the seed.** `supabase/seed.sql` is for local and CI only: its users have a published password and it includes a staff reviewer. A hosted project starts empty; you create your own account through the app's sign-up page (B4).
 - Do **not** push to prod by hand. After Part E, GitHub does it with your approval.
 
+### B3a. Check the hosted project has no seeded users (each hosted project, before B4)
+**Why:** every seeded user shares the published password `FanzupDev123` (A3), and `reviewer@fanzup.test` is staff. If the seed ever reached a hosted project, anyone could sign in as that reviewer, enrol their own TOTP factor on it (it has none) and get full staff powers — refunds, verifications, replays. In **SQL Editor**:
+```sql
+select email from auth.users where email like '%@fanzup.test';
+select * from public.staff;
+```
+**✅ Check:** the first returns no rows; the second returns no rows (or, after B4, only yours). If any seeded user exists, remove its staff power first, then the users:
+```sql
+delete from public.staff where user_id in (select id from auth.users where email like '%@fanzup.test');
+delete from auth.users where email like '%@fanzup.test';
+```
+If the second delete is refused (seed artists, campaigns or backings still reference those users), the whole seed ran. The staff power is already gone; the clean fix is a fresh project (B1) with B3 run against it. Don't use `supabase db reset --linked` — it loads the seed again.
+
 ### B4. Make yourself a reviewer
-In **SQL Editor** on staging, after signing up through the app or Auth → Add user:
+Do B3a first. Then sign up through the app's sign-up page. **The real sign-up page only exists once PR #9 (`feat/m1-web-e2e`) is merged and deployed** — before that, `/signup` is the prototype's mock and creates no account; the 18+ trigger arrives with PR #8's migrations. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP and, in **SQL Editor**:
 ```sql
 insert into public.staff (user_id, role)
 select id, 'admin' from auth.users where email = 'wayne.ledg@gmail.com';
@@ -158,7 +170,7 @@ select pg_has_role('postgres','service_role','member') as svc,
 3. **Local:** run `stripe listen --forward-to localhost:8787/api/v1/webhooks/stripe` and put the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`. Set `ESCROW_PROVIDER=stripe-test` (the old name `stripe-dev` still works). Pay with test card `4000 0000 0000 0077` so funds are available for artist transfers immediately; other test cards leave transfers waiting for funds.
 4. **Hosted, after Part D (Vercel):**
    - Go to Developers → **Webhooks** → Add endpoint `https://<your-vercel-domain>/api/v1/webhooks/stripe`.
-   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `refund.created`, `refund.updated`, `refund.failed` and `transfer.created`.
+   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `refund.created`, `refund.updated`, `refund.failed` and `transfer.created` — one platform endpoint; no Connect-events endpoint is needed (design §12.1).
    - Put its signing secret in Vercel as `STRIPE_WEBHOOK_SECRET`.
 5. Copy the **publishable key** (`pk_test_…`) into `STRIPE_PUBLISHABLE_KEY` (API) — the web app reads it from `/api/v1/config`.
 6. Turn on **Connect** (Express accounts) in test mode; artists onboard their payout account from the app.
@@ -198,7 +210,7 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 
 3. **Deploy**, then check:
    - `https://<your-app>.vercel.app/api/health` returns `{"ok":true,…}`
-   - `https://<your-app>.vercel.app/campaigns/nova-live-band-tour` loads the page, not a 404
+   - `https://<your-app>.vercel.app/explore` loads the page, not a 404 (deep links fall back to the app; the hosted database has no demo campaigns)
 4. Put the Vercel URL into Supabase → Authentication → **Site URL** and **Redirect URLs** (B2).
 
 ### D2. Render (worker only)
@@ -206,7 +218,8 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 2. Fill in:
    - `DATABASE_URL`: Supabase → **Connect** → **Session pooler** (port **5432**). Render connects over IPv4, and the shared pooler is Supabase's IPv4 route.
    - `SUPABASE_URL`
-   - `STRIPE_SECRET_KEY`
+   - `STRIPE_SECRET_KEY` (the same `sk_test_…` key as Vercel)
+   - That's all. The worker doesn't receive webhooks, so it does **not** need `STRIPE_WEBHOOK_SECRET` (only the Vercel API does, and it refuses to start without it). `NODE_ENV`, `ESCROW_PROVIDER=stripe-test`, `DEPLOY_ENV=staging` and `DB_POOL_MAX` come from `render.yaml`.
 3. In the service → **Settings → Build & Deploy**, set **Auto-Deploy** to **"After CI checks pass"**.
 4. **✅ Check:** the logs show `{"msg":"worker.start",…}`, and a `worker.tick` line appears whenever there's work to do.
 
@@ -215,15 +228,17 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 ---
 
 ## Part E: GitHub settings (repo → Settings)
-1. **Environments:** create **`staging`** and **`production`**.
+> **How migrations reach the hosted database:** Supabase's own GitHub integration (Supabase → Project Settings → Integrations → GitHub, "Deploy to production" on `main`) applies `supabase/migrations/` when a change merges to `main`. It needs no GitHub secrets. The **Deploy database migrations** workflow below is a **manual fallback only**; it never runs on push, so the two can't race. Steps 1–2 are needed only if you want that fallback.
+
+1. **Environments (fallback only):** create **`staging`** and **`production`**.
    - On `production`, tick **Required reviewers** and add yourself. Every prod migration then waits for your click.
    - In each environment add:
      - **secret** `SUPABASE_ACCESS_TOKEN`: create at supabase.com/dashboard/account/tokens
      - **secret** `SUPABASE_DB_PASSWORD`: that project's password
      - **variable** `SUPABASE_PROJECT_REF`: that project's ref
-2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema (and, on staging, the demo data) without a local clone, go to **Actions → Deploy database migrations → Run workflow** and tick *include_seed*.
+2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema without a local clone, go to **Actions → Deploy database migrations → Run workflow**. It applies migrations only; it never loads the seed.
 3. **Branches → add rule for `main`:** require a pull request and the status checks **"Web · typecheck, copy rules, build"** and **"API · migrations, ledger, RLS, flow tests"**. These check names appear after the first CI run.
-4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, the **Deploy database migrations** workflow runs on staging, then waits for your approval before production.
+4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, Supabase's GitHub integration applies it to the hosted project (check Supabase → Database → Migrations). Use **Actions → Deploy database migrations → Run workflow** only if the integration is off.
 
 ---
 

@@ -40,13 +40,13 @@ Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the co
 | FR-PAY-003 | Full for late captures and amount mismatch; unmatched captures listed in the staff unmatched-money view (API). The fan email for the auto-refund reason is the "refund started" template |
 | FR-PAY-004 | Full: initiated record before the provider call, provider lookup before any retry, exact-amount check, dead-letter after `outbound.maxAttempts` (paging = alert log line + staff queue in M1) |
 | FR-PAY-005 | Evidence as text and links (file uploads wait for FR-PLT-005 at M2); verification under FR-ID-007 single-operator rules; automatic in-order release |
-| FR-PAY-006 | Full, with the parallel-request test in CI |
-| FR-PAY-007 | Against the processor only: daily run + on-demand run, per-campaign and total diff, breaks with amount and age, payouts pause on an aged or material break (refunds continue), staff override with reason |
+| FR-PAY-006 | Full, with the parallel-request test in CI. The idempotency claim and the checkout hold are created in one transaction; a concurrent request with the same key waits and then gets the stored outcome; rule violations (sold out, campaign closed, caps) are stored so a retry gets the same error; a claim left `in_progress` with no backing for over 2 minutes is treated as abandoned and may be re-claimed (design §4.4) |
+| FR-PAY-007 | Against the processor only: daily run + on-demand run, per-campaign and total diff, breaks with amount and age, payouts pause on an aged or material break (refunds continue), staff override with reason. **Bullet 4 (fee corrections by a correcting `fee.adjusted` transaction): Not in M1** — a fee change after capture surfaces as a recon break instead (design §7; backlog) |
 | FR-PAY-008 | Bullets 1–2 (sandbox/dev adapters refuse to start when deployed as production; live keys refused); bullet 3 via FR-PLT-006 |
 | FR-PAY-009 | Fan view only (money state per backing derived from the ledger) |
-| FR-BCK-001 | Card checkout (Stripe Payment Element; a labelled sandbox card form in CI); charge at backing; failure categories; confirmation |
+| FR-BCK-001 | Card checkout (Stripe Payment Element; a labelled sandbox card form in CI); charge at backing; failure categories; confirmation. **Trimmed:** no optional extra amount and no shipping address in M1 — M1 campaigns have no physical perks, so NFR-SEC-08 is not triggered |
 | FR-BCK-002 | Full (card G1-B option 3) |
-| FR-BCK-004 | Full |
+| FR-BCK-004 | **Full, with D-001** (open for Wayne's confirmation): including "hours and minutes left" when under 24 hours on the campaign page. The deadline check for a late capture uses the time the payment is processed, not Stripe's capture time, so a payment captured seconds before the deadline but processed after it is refunded in full with an apology (worklog D-001) |
 | FR-BCK-005 | Without PDF receipts (P1); perk status "Not yet shipped" until FR-FUL-002 |
 | FR-CMP-001/002 | Through the API (draft CRUD with perks and tranches, submit, review, publish). Wiring the 26-route web wizard to the API is **M2** |
 | FR-CMP-003 | Campaign page renders only the artist's own fields; empty sections hidden; milestone progress with dates |
@@ -61,13 +61,13 @@ Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the co
 | FR-ID-006 | Full |
 | FR-ID-007 | Full except the break-glass suspension (FR-CMP-007 is M2) |
 | FR-NTF-001 | Five templates (receipt, funded, failed + refund started, refund completed, milestone released), outbox-driven, logged with template version; the delivery provider is an open setup step (log transport until Wayne picks one) |
-| FR-PRV-001 | Mechanics: versioned placeholder documents, acceptance recorded with version, time, IP, user agent; re-acceptance blocks backing |
+| FR-PRV-001 | Mechanics: versioned placeholder documents, acceptance recorded with version and time; re-acceptance blocks backing. **Trimmed (design §9 G-1):** IP and user agent are recorded only on re-acceptance through the API (`POST /me/acceptances`); sign-up acceptance rows lack them (sign-up goes browser → Supabase Auth directly) — G-1 → M2 |
 | FR-PLT-006 | Full |
 | FR-ANL-001 (events) | First-party server-side funnel events: perk selected, checkout started, account created, backing confirmed, source (`ref`) |
 | NFR-SEC-01 | Column allowlist for `artists` and `profiles` (payout/identity refs never public) + automated test; full allowlist over every object at M2 |
 | NFR-SEC-02 | Every M1 money, workflow, backing and staff write goes through the API; clients lose direct execute on workflow functions. Revoking clients' direct draft-table grants waits for the wizard wiring at M2 |
 | NFR-SEC-04 | Fail closed: deployed environments refuse to start with the sandbox provider or without required config |
-| NFR-SEC-07 | Seed never loaded outside local/CI; no seeded staff outside local/CI |
+| NFR-SEC-07 | Seed never loaded outside local/CI; no seeded staff outside local/CI. Hosted databases (staging and production) never get `seed.sql`: the deploy workflow has no seed option, and staff is granted by manual SQL (design §9) |
 | NFR-SEC-12 | Logs redact the listed fields |
 | NFR-COMP-11 | Audit events carry actor kind, request/correlation id, factor level; ids only in payloads |
 | NFR-COMP-12 | Reject update/delete/truncate on ledger and audit tables |
@@ -77,7 +77,7 @@ Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the co
 | NFR-QA-01 | Core: parallel backings, last-unit race, concurrent retries, duplicate and late events, refunds, many campaigns with one failing |
 | NFR-QA-02 | The golden journey above (other journeys M2) |
 
-**Not in M1** (still P0a, due at M2 unless re-prioritised): FR-CMP-007 suspension, FR-ADM-001 web queues (M1 has API queues only), FR-ADM-003 money view UI, FR-PLT-001 server flags, FR-PLT-002 route pruning, FR-PLT-005 uploads, FR-PRV-004, FR-TAX-004 per-user limits beyond the unconfirmed-checkout cap, NFR-SEC-03/05/06/09/13/14, NFR-OPS-01/02/07/08/09/11, NFR-PERF-03/04 as measured SLOs, NFR-A11Y-01..04 automation, NFR-QA-03/05. All P0b, P1, P2 work. The PRD trace (brief Q1) must be done before M2 starts.
+**Not in M1** (still P0a, due at M2 unless re-prioritised): FR-BCK-001's optional extra amount and shipping address (M1 campaigns carry no physical perks, so NFR-SEC-08 and FR-FUL-001's address rules aren't triggered), FR-CMP-007 suspension, FR-ADM-001 web queues (M1 has API queues only), FR-ADM-003 money view UI, FR-PLT-001 server flags, FR-PLT-002 route pruning, FR-PLT-005 uploads, FR-PRV-004, FR-TAX-004 per-user limits beyond the unconfirmed-checkout cap, FR-PRV-001's IP and user agent on sign-up acceptance rows (design G-1), NFR-SEC-03/05/06/09/13/14, NFR-OPS-01/02/07/08/09/11, NFR-PERF-03/04 as measured SLOs, NFR-A11Y-01..04 automation, NFR-QA-03/05. All P0b, P1, P2 work. The PRD trace (brief Q1) must be done before M2 starts.
 
 ---
 
@@ -915,3 +915,5 @@ G1 is approved for M1 only. Before M2:
 - 2026-10-03: v2 draft created from council E1 (Claude, on Wayne's request "evaluate and come up with an improvement spec … enterprise level"). Scope per E1 card A default.
 - 2026-10-03: revised after G1 pass 1. P0 split into P0a (test-mode beta) / P0b (live money). Added FR-PAY-010 custody integration, FR-PAY-011 undeliverable refunds, FR-CMP-008 discovery, FR-ID-007 single-operator mode, FR-ID-008 payout-account cooling-off, FR-TAX-005 sales tax, FR-PRV-005 marketing/tracking consent, FR-PRV-006 artist use of backer data, FR-PLT-005 safe uploads; NFR-SEC-12..14, NFR-COMP-19..23, NFR-OPS-12..13. System-derived actor + factor on privileged actions; two-person control placed on milestone verification, not release. Restored E1 levels for fan cancel, late-perk remedy, fan problems, export/deletion and status page (P0b). One number per obligation (auto-refund initiated ≤ 1 h, confirmed ≤ 5 business days). Audit payloads carry ids only; address purge outlasts dispute windows. Added E1-conditions trace and Appendix A policy defaults. Checkout per card G1-B default (light account).
 - 2026-10-03: G1 decisions recorded (Wayne): G1-C option 1 (M1 only; PRD trace gates M2), G1-A option 1, G1-B option 3 (full account first), Appendix A accepted. Added §Milestone M1 scope (from `.G1-pragmatist.md`). Rewrote FR-BCK-002 for full account first and aligned FR-ID-001 (N2). FR-BCK-001 charge at backing (N8). New FR-PLT-006 test-money promise (N9).
+- 2026-10-11: PR #6 review round 1 — M1 table: FR-PAY-006 one-transaction claim rule; FR-BCK-001 trims (no extra amount, no shipping address) stated; FR-BCK-004 under-24 h display and processing-time deadline (D-001); NFR-SEC-07 hosted-seed rule. Also listed under "Not in M1".
+- 2026-10-11: PR #6 review round 2 — M1 table: FR-BCK-004 marked "Full, with D-001" (fan-facing choice, open for Wayne's confirmation).
