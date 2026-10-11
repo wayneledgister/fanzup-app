@@ -1,5 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import { POLICY } from "@fanzup/shared/policy";
+import type { PublicConfig } from "@fanzup/shared/schemas";
 import type { Env } from "./env";
 import { asService, type Sql } from "./db";
 import type { PaymentProvider } from "./provider";
@@ -115,10 +117,13 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     }
   });
 
-  app.get(`${API_PREFIX}/v1/config`, async () => ({
+  // Design §4.2/§3.7: the sign-up form sends the current document versions it reads from here, so the web build
+  // never hard-codes them (the new-user trigger refuses any other version).
+  app.get(`${API_PREFIX}/v1/config`, async (): Promise<PublicConfig> => ({
     provider: deps.provider.name,
     testMode: deps.provider.testMode,
     stripePublishableKey: deps.provider.publishableKey,
+    legal: { termsVersion: POLICY.legal.termsVersion, privacyVersion: POLICY.legal.privacyVersion },
   }));
 
   await app.register(campaignRoutes(deps), { prefix: `${API_PREFIX}/v1` });

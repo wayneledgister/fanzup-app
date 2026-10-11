@@ -8,6 +8,7 @@ import { TierBadge } from "@/components/public/cards";
 import type { CreatorTier } from "@/lib/mock";
 import { api, ApiError, type PerkView, type TrancheView } from "@/lib/api";
 import type { CampaignDetail as Detail } from "@fanzup/shared/schemas";
+import { timeLeft } from "@fanzup/shared/campaign";
 import { anonId, rememberSource } from "@/lib/attribution";
 import { useSession } from "@/lib/session";
 import { formatDate, formatInstant, formatMoney, formatNumber } from "@/lib/format";
@@ -32,14 +33,6 @@ const FAQ = [
 
 const localDeadline = (iso: string) => formatInstant(iso);
 
-function timeLeft(iso: string | null): { label: string; value: string; ended: boolean } {
-  if (!iso) return { label: "", value: "—", ended: true };
-  const ms = Date.parse(iso) - Date.now();
-  if (ms <= 0) return { label: "ended", value: "Ended", ended: true };
-  const h = Math.floor(ms / 3_600_000);
-  if (h < 24) return { label: "left", value: `${h}h ${Math.floor((ms % 3_600_000) / 60_000)}m`, ended: false }; // FR-BCK-004
-  return { label: "days left", value: String(Math.ceil(ms / 86_400_000)), ended: false };
-}
 
 export default function CampaignDetail() {
   const { id: slug = "" } = useParams();
@@ -64,11 +57,18 @@ export default function CampaignDetail() {
     };
   }, [slug, params]);
 
-  // Keep the countdown honest near the deadline (closes on every surface within a minute — FR-BCK-004).
+  // Keep the countdown honest (FR-BCK-004): under 24 h it shows hours and minutes, re-rendered every 30 s, and one
+  // extra render lands exactly at the deadline instant so "Back" closes when the instant passes, not up to 30 s later.
+  const endsAt = data?.campaign.endsAt ?? null;
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 30_000);
-    return () => clearInterval(t);
-  }, []);
+    const left = endsAt ? Date.parse(endsAt) - Date.now() : 0;
+    const atDeadline = left > 0 && left < 2_147_000_000 ? setTimeout(() => tick((n) => n + 1), left + 50) : undefined;
+    return () => {
+      clearInterval(t);
+      if (atDeadline) clearTimeout(atDeadline);
+    };
+  }, [endsAt]);
 
   if (state === "loading") {
     return <Container size="xl" className="py-16"><div className="h-96 animate-pulse rounded-lg border border-line bg-surface" aria-busy="true" aria-label="Loading campaign" /></Container>;
@@ -146,7 +146,7 @@ export default function CampaignDetail() {
                 <TierBadge tier={c.artist.tier as CreatorTier} />
               </div>
               <Card className="flex flex-col gap-5">
-                <FundingProgress raisedMinor={c.raisedMinor} goalMinor={c.goalMinor} backers={c.backers} daysLeft={t.ended ? undefined : Math.ceil((Date.parse(c.endsAt!) - Date.now()) / 86_400_000)} />
+                <FundingProgress raisedMinor={c.raisedMinor} goalMinor={c.goalMinor} backers={c.backers} daysLeft={t.ended || t.msLeft < 86_400_000 ? undefined : Math.ceil(t.msLeft / 86_400_000)} />
                 <div className="grid grid-cols-3 gap-4 border-t border-line pt-4 text-center">
                   <MiniStat icon={<Users />} value={formatNumber(c.backers)} label="backers" />
                   <MiniStat icon={<CalendarClock />} value={t.value} label={t.label} />

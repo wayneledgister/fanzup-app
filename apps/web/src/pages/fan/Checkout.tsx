@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { ArrowLeft, CircleAlert, CircleCheck, Clock, CreditCard, Share2, ShieldCheck } from "lucide-react";
 import type { Stripe, StripeElements } from "@stripe/stripe-js";
 import { POLICY } from "@fanzup/shared/policy";
+import { checkoutKeyName, checkoutKeys, isDeadBacking } from "@fanzup/shared/checkout-key";
 import type { BackCampaignResponse, CampaignDetail, Me } from "@fanzup/shared/schemas";
 import { ArtistArt, Button, Callout, Card, Checkbox, Container, EscrowNotice, Field, KeyValue, Select, TestModeNotice, TextInput } from "@/components/brand";
 import { RequireAccount } from "@/components/RequireAccount";
@@ -25,6 +26,12 @@ type Failure = { category: "declined" | "expired" | "authentication failed" | "n
 
 const localDeadline = (iso: string) => formatInstant(iso, true);
 
+/**
+ * FR-BCK-001 M1 trim + FR-PLT-006: physical perks may exist, but no shipping address is collected and test-mode
+ * perks aren't owed — so nothing here may promise shipping.
+ */
+const PHYSICAL_PERK_NOTE = "This is a physical perk. FanZuP doesn't collect shipping addresses in this test-money beta, and artists don't owe perks for test backings.";
+
 /** Design §4.3: provider signal → category shown → next step. */
 export function categorize(e: unknown): Failure {
   const x = e as { code?: string; decline_code?: string; type?: string; status?: number; message?: string };
@@ -42,20 +49,16 @@ export function categorize(e: unknown): Failure {
   return { category: "network", message: x.message ?? "Something went wrong.", next: "Check your connection and try again — nothing was charged." };
 }
 
-const keyFor = (slug: string, perk: string, qty: number) => `fanzup.checkout.${slug}.${perk}.${qty}`;
-function idempotencyKey(slug: string, perk: string, qty: number) {
-  const k = keyFor(slug, perk, qty);
+/** sessionStorage can throw (private mode, blocked storage); the helper then keeps keys in memory. */
+const storage = (() => {
   try {
-    let v = sessionStorage.getItem(k);
-    if (!v) {
-      v = crypto.randomUUID();
-      sessionStorage.setItem(k, v);
-    }
-    return v;
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
   } catch {
-    return crypto.randomUUID();
+    return null;
   }
-}
+})();
+/** Idempotency-Key per checkout attempt; new key after any 4xx or a dead backing (design §11; shared helper + tests). */
+const keys = checkoutKeys(storage);
 
 export default function CheckoutPage() {
   return (
@@ -68,7 +71,6 @@ export default function CheckoutPage() {
 function Checkout() {
   const { slug = "" } = useParams();
   const [params] = useSearchParams();
-  const navigate = useNavigate();
   const perkId = params.get("perk") ?? "";
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [me, setMe] = useState<Me | null>(null);
@@ -109,21 +111,26 @@ function Checkout() {
   const soldOut = perk.remaining === 0;
   const needsAcceptance = me.needsAcceptance.length > 0;
 
+  const keyName = checkoutKeyName(slug, perk.id, qty);
+
   const start = async () => {
     setFailure(undefined);
     setBusy(true);
     try {
       if (needsAcceptance) {
+        // Current versions come from the server (`GET /me.legal`), never from the web build.
         await api.accept(me.needsAcceptance.map((k) => ({
           kind: k as "terms" | "privacy" | "adult_attestation",
-          version: k === "terms" ? POLICY.legal.termsVersion : k === "privacy" ? POLICY.legal.privacyVersion : "v1",
+          version: k === "terms" ? me.legal.termsVersion : k === "privacy" ? me.legal.privacyVersion : "v1",
         })));
         setMe({ ...me, needsAcceptance: [] });
       }
-      const r = await api.back({ campaignId: c.id, perkId: perk.id, quantity: qty, source: sourceFor(slug) ?? null }, idempotencyKey(slug, perk.id, qty));
+      const r = await api.back({ campaignId: c.id, perkId: perk.id, quantity: qty, source: sourceFor(slug) ?? null }, keys.get(keyName));
       setBacking(r);
       setStep("pay");
     } catch (e) {
+      // Any stored 4xx ends this attempt: the next try gets a new key. 502 / in_progress / network keep it.
+      if (e instanceof ApiError) keys.afterError(keyName, e);
       setFailure(categorize(e));
     } finally {
       setBusy(false);
@@ -131,13 +138,19 @@ function Checkout() {
   };
 
   const confirmed = () => {
-    try {
-      sessionStorage.removeItem(keyFor(slug, perk.id, qty));
-    } catch { /* ignore */ }
+    keys.discard(keyName);
     setStep("done");
   };
 
-  if (step === "done" && backing) return <Confirmation detail={detail} perkTitle={perk.title} amountMinor={backing.amountMinor} />;
+  /** The backing can't be paid any more (hold expired, canceled, refunded): new key, back to the review step. */
+  const dead = (f: Failure) => {
+    keys.discard(keyName);
+    setBacking(null);
+    setFailure(f);
+    setStep("review");
+  };
+
+  if (step === "done" && backing) return <Confirmation detail={detail} perkTitle={perk.title} physical={perk.kind === "physical"} amountMinor={backing.amountMinor} />;
 
   return (
     <Shell slug={slug}>
@@ -178,7 +191,7 @@ function Checkout() {
             </Card>
           )}
           {(step === "pay" || step === "processing") && backing && (
-            <PaymentStep backing={backing} processing={step === "processing"} onProcessing={() => setStep("processing")} onFailure={(f) => { setFailure(f); setStep("pay"); }} onConfirmed={confirmed} onExpired={() => navigate(`/campaigns/${slug}`)} />
+            <PaymentStep backing={backing} processing={step === "processing"} onProcessing={() => setStep("processing")} onFailure={(f) => { setFailure(f); setStep("pay"); }} onConfirmed={confirmed} onDead={dead} />
           )}
         </div>
 
@@ -198,6 +211,7 @@ function Checkout() {
               <KeyValue k="Total (USD)" v={<span className="num text-lg" data-testid="checkout-total">{formatMoney(total, { cents: true })}</span>} />
             </div>
             <p className="text-xs text-muted">No fees are added. The artist covers card processing.</p>
+            {perk.kind === "physical" && <p className="text-xs text-muted" data-testid="physical-perk-note">{PHYSICAL_PERK_NOTE}</p>}
             {c.endsAt && <p className="text-xs text-muted">Campaign deadline: <span className="num">{localDeadline(c.endsAt)}</span></p>}
           </Card>
           <EscrowNotice compact />
@@ -219,14 +233,34 @@ function Shell({ slug, children }: { slug: string; children: React.ReactNode }) 
   );
 }
 
-function PaymentStep({ backing, processing, onProcessing, onFailure, onConfirmed, onExpired }: {
-  backing: BackCampaignResponse; processing: boolean; onProcessing: () => void; onFailure: (f: Failure) => void; onConfirmed: () => void; onExpired: () => void;
+const EXPIRED: Failure = { category: "expired", message: "This checkout expired before payment.", next: "Start again below — nothing was charged." };
+const REFUNDING: Failure = { category: "closed", message: "Your payment arrived after the campaign or your checkout closed, so it's being refunded in full.", next: "You'll get an email when the refund completes." };
+
+/** A backing that can't be paid any more, as the fan should hear it; null while it's still payable. */
+function deadReason(b: { status: string; holdExpiresAt: string | null }): Failure | null {
+  if (b.status === "refund_pending" || b.status === "refunded") return REFUNDING;
+  if (isDeadBacking(b.status)) return EXPIRED;
+  if (b.status === "pending_payment" && b.holdExpiresAt && Date.parse(b.holdExpiresAt) <= Date.now()) return EXPIRED;
+  return null;
+}
+
+function PaymentStep({ backing, processing, onProcessing, onFailure, onConfirmed, onDead }: {
+  backing: BackCampaignResponse; processing: boolean; onProcessing: () => void; onFailure: (f: Failure) => void; onConfirmed: () => void; onDead: (f: Failure) => void;
 }) {
   const [secondsLeft, setSecondsLeft] = useState(() => Math.max(0, Math.round((Date.parse(backing.holdExpiresAt) - Date.now()) / 1000)));
   useEffect(() => {
     const t = setInterval(() => setSecondsLeft(Math.max(0, Math.round((Date.parse(backing.holdExpiresAt) - Date.now()) / 1000))), 1000);
     return () => clearInterval(t);
   }, [backing.holdExpiresAt]);
+
+  /** A payment attempt failed: if the backing itself is dead (e.g. the hold expired), this attempt is over. */
+  const failed = async (f: Failure) => {
+    try {
+      const why = deadReason(await api.backing(backing.backingId));
+      if (why) return onDead(why);
+    } catch { /* can't tell: keep the attempt */ }
+    onFailure(f);
+  };
 
   /** Wait until the backend has applied the payment (webhook / sandbox event → ledger). */
   const waitForCapture = async () => {
@@ -235,8 +269,8 @@ function PaymentStep({ backing, processing, onProcessing, onFailure, onConfirmed
       try {
         const b = await api.backing(backing.backingId);
         if (b.status === "held") return onConfirmed();
-        if (b.status === "refund_pending" || b.status === "refunded") return onFailure({ category: "closed", message: "Your payment arrived after the campaign or your checkout closed, so it's being refunded in full.", next: "You'll get an email when the refund completes." });
-        if (b.status === "canceled") return onFailure({ category: "expired", message: "This checkout expired before payment.", next: "Start again from the campaign page — nothing was charged." });
+        const why = deadReason(b);
+        if (why) return onDead(why);
       } catch { /* keep polling */ }
       await new Promise((r) => setTimeout(r, 1000));
     }
@@ -253,12 +287,12 @@ function PaymentStep({ backing, processing, onProcessing, onFailure, onConfirmed
       </div>
       {secondsLeft === 0 ? (
         <Callout tone="warning" icon={<Clock />} title="Your hold expired">
-          Nothing was charged. <button type="button" className="font-medium text-gold hover:underline" onClick={onExpired}>Start again</button>
+          Nothing was charged. <button type="button" className="font-medium text-gold hover:underline" onClick={() => onDead(EXPIRED)} data-testid="start-again">Start again</button>
         </Callout>
       ) : backing.provider === "stripe-test" ? (
-        <StripeForm backing={backing} disabled={processing} onFailure={onFailure} onPaid={waitForCapture} />
+        <StripeForm backing={backing} disabled={processing} onFailure={failed} onPaid={waitForCapture} />
       ) : (
-        <SandboxCardForm backing={backing} disabled={processing} onFailure={onFailure} onPaid={waitForCapture} />
+        <SandboxCardForm backing={backing} disabled={processing} onFailure={failed} onPaid={waitForCapture} />
       )}
       {processing && <p className="text-sm text-muted" aria-live="polite">Confirming your payment…</p>}
     </Card>
@@ -338,7 +372,7 @@ function SandboxCardForm({ backing, disabled, onFailure, onPaid }: { backing: Ba
   );
 }
 
-function Confirmation({ detail, perkTitle, amountMinor }: { detail: CampaignDetail; perkTitle: string; amountMinor: number }) {
+function Confirmation({ detail, perkTitle, physical, amountMinor }: { detail: CampaignDetail; perkTitle: string; physical: boolean; amountMinor: number }) {
   const c = detail.campaign;
   const [copied, setCopied] = useState(false);
   const url = `${window.location.origin}/campaigns/${c.slug}`;
@@ -366,7 +400,8 @@ function Confirmation({ detail, perkTitle, amountMinor }: { detail: CampaignDeta
         {c.endsAt && (
           <div className="flex flex-col gap-2 text-sm">
             <p><span className="font-medium">Deadline:</span> <span className="num">{localDeadline(c.endsAt)}</span></p>
-            <p className="text-muted">If the goal is reached by then, {c.artist.name} receives the money in stages as milestones are verified, and you'll get your perk by its delivery date.</p>
+            <p className="text-muted">If the goal is reached by then, {c.artist.name} receives the money in stages as milestones are verified{physical ? "." : ", and the perk is due by its delivery date (in test mode the artist doesn't owe it)."}</p>
+            {physical && <p className="text-muted">{PHYSICAL_PERK_NOTE}</p>}
             <p className="text-muted">If it isn't, you're refunded in full automatically — you don't need to do anything.</p>
           </div>
         )}

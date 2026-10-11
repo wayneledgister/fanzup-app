@@ -37,6 +37,8 @@ export const PublicConfig = z.object({
   provider: z.enum(["sandbox", "stripe-test"]),
   testMode: z.boolean(),
   stripePublishableKey: z.string().nullable(),
+  /** Current Terms/Privacy versions; the sign-up form sends these (design §3.7). */
+  legal: z.object({ termsVersion: z.string(), privacyVersion: z.string() }),
 });
 export type PublicConfig = z.infer<typeof PublicConfig>;
 

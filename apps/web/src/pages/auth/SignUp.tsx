@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft, CircleAlert, Gift, Headphones, Mic2 } from "lucide-react";
-import { POLICY } from "@fanzup/shared/policy";
+import { loadConfig } from "@/lib/config";
 import { Button, Callout, Checkbox, ChoiceCard, Field, IconChip, TextInput } from "@/components/brand";
 import { AuthCard, EMAIL_RE, PasswordInput, PasswordStrength, passwordScore } from "@/components/public/auth";
 import { safeNext, supabase } from "@/lib/supabase";
@@ -54,6 +54,13 @@ export default function SignUp() {
     if (Object.values(errors).some(Boolean)) return;
     if (!supabase) return setFailure("Sign-up isn't configured in this environment.");
     setLoading(true);
+    // The current Terms/Privacy versions come from the API (`GET /config.legal`, design §3.7), never from the
+    // web build: the new-user trigger refuses any other version.
+    const cfg = await loadConfig();
+    if (!cfg) {
+      setLoading(false);
+      return setFailure("We couldn't create your account just now. Please try again in a moment.");
+    }
     const redirect = `${window.location.origin}/verify-email?next=${encodeURIComponent(afterVerify)}`;
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
@@ -63,8 +70,8 @@ export default function SignUp() {
         data: {
           display_name: name.trim(),
           adult_attested: true,
-          terms_version: POLICY.legal.termsVersion,
-          privacy_version: POLICY.legal.privacyVersion,
+          terms_version: cfg.legal.termsVersion,
+          privacy_version: cfg.legal.privacyVersion,
           anon_id: anonId(),
         },
       },

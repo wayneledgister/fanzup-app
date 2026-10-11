@@ -113,7 +113,7 @@ TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres pnpm t
 ### B2. Auth settings (both projects): Dashboard → Authentication
 1. **URL Configuration:**
    - Site URL = your web URL. Use the Vercel URL from Part D for now; switch to your domain later.
-   - Add the same URL to **Redirect URLs**.
+   - Add the pattern `https://<your-site>/**` to **Redirect URLs** (with the `/**`: the confirmation link returns to `/verify-email?next=…`, design §12.2). Local and CI patterns are already in `supabase/config.toml`.
 2. **Sign In / Providers → Email:**
    - **Confirm email:** on
    - **Secure password change:** on
@@ -144,7 +144,7 @@ delete from auth.users where email like '%@fanzup.test';
 If the second delete is refused (seed artists, campaigns or backings still reference those users), the whole seed ran. The staff power is already gone; the clean fix is a fresh project (B1) with B3 run against it. Don't use `supabase db reset --linked` — it loads the seed again.
 
 ### B4. Make yourself a reviewer
-Do B3a first. Then sign up through the app's sign-up page. **The real sign-up page only exists once PR #9 (`feat/m1-web-e2e`) is merged and deployed** — before that, `/signup` is the prototype's mock and creates no account; the 18+ trigger arrives with PR #8's migrations. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP and, in **SQL Editor**:
+Do B3a first. Then sign up through the app's sign-up page. **The real sign-up page only exists once PR #9 (`feat/m1-web-e2e`) is merged and deployed** — before that, `/signup` is the prototype's mock and creates no account; the 18+ trigger arrives with PR #8's migrations. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP with the operator script (M1 has no enrolment screen; Part F): `pnpm m1:operator --api https://<your-site>/api --supabase-url https://<ref>.supabase.co --anon-key <publishable key> --email <you> totp-enrol`, and, in **SQL Editor**:
 ```sql
 insert into public.staff (user_id, role)
 select id, 'admin' from auth.users where email = 'wayne.ledg@gmail.com';
@@ -175,7 +175,27 @@ select pg_has_role('postgres','service_role','member') as svc,
 5. Copy the **publishable key** (`pk_test_…`) into `STRIPE_PUBLISHABLE_KEY` (API) — the web app reads it from `/api/v1/config`.
 6. Turn on **Connect** (Express accounts) in test mode; artists onboard their payout account from the app.
 
+7. **Keep a float of FanZuP's own money in the Stripe test platform balance** (Balance → Add funds, in test mode). FanZuP absorbs the card fee on every refund, so without a float the balance ends up short of what artists are owed and their payouts wait for funds (design §12.1).
+
 > **Fail closed (FR-PAY-008, M1).** A deployed API refuses to start with the sandbox provider or any non-test key. Until the Stripe test variables above are set, hosted `/api` answers **503 "misconfigured"** naming the missing variable. That's deliberate.
+
+---
+
+## Part F: Exit test 8 — one Stripe test-mode run on the hosted app
+M1 has no staff or artist screens, so the non-fan half of the journey runs from your Mac with the operator script (`scripts/m1-operator.ts`, design §12.6). It talks to the hosted API like the app does. **Your email goes on the command line; your password and TOTP codes are only ever typed at its prompts** (hidden), and the tokens it gets stay in its memory — nothing is written to disk or printed.
+
+Common flags (all public values): `--api https://<your-site>/api --supabase-url https://<ref>.supabase.co --anon-key <publishable key>`. You can put the last two in `SUPABASE_URL` / `SUPABASE_ANON_KEY` instead. Run `pnpm m1:operator … ` with no command to get a prompt that keeps your session (`help` lists commands); with a command it runs just that one.
+
+You need **two accounts**, both made on the app's sign-up page: yours (staff, B4) and a separate **artist** account (in single-operator mode staff can't own an artist, and a reviewer can't act on their own campaign).
+
+1. **Staff second factor (once):** `pnpm m1:operator <flags> --email <you> totp-enrol` → add the printed `otpauth://` URI (or the secret) to your authenticator app, type the code it shows. Then grant yourself staff (B4 SQL).
+2. **Artist setup:** `pnpm m1:operator <flags> --email <artist> artist-setup` → creates the artist profile, prints the Stripe Connect onboarding link (finish it in the browser; the script re-checks until the payout account is verified), creates a campaign with one perk and two milestones, and submits it. Note the campaign id it prints.
+3. **Review:** `pnpm m1:operator <flags> --email <you>` then at the prompt `staff review <campaignId>` (password + current TOTP code once per session, then a typed reason).
+4. **Publish:** `pnpm m1:operator <flags> --email <artist> publish <campaignId>`.
+5. **Back it as a fan** in the browser (a third account, test card `4000 0000 0000 0077`), enough to meet the goal.
+6. **After the deadline:** the worker settles it and pays milestone 1. The artist finds milestone 2's id with `… --email <artist> campaign <campaignId>` and submits evidence: `… --email <artist> evidence <trancheId> https://<link>`; you verify it: `staff verify <trancheId>`.
+7. **Check:** `staff recon run` (ledger ↔ Stripe test balance must diff to zero), `staff queue dead_letters` (empty), and `staff trace <correlationId>` with the id the verify printed (the payout op and the release).
+Record the run (dates, correlation ids, recon result) in `specs/04-worklog.md`.
 
 ---
 

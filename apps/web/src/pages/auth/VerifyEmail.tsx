@@ -5,6 +5,7 @@ import { Button, Callout } from "@/components/brand";
 import { AuthCard, StepsList } from "@/components/public/auth";
 import { safeNext, supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/session";
+import { api } from "@/lib/api";
 
 /**
  * Source: FPS EmailVerification.tsx (pending with resend cooldown, resent, verified, expired).
@@ -15,6 +16,8 @@ import { useSession } from "@/lib/session";
  */
 
 const COOLDOWN = 60;
+/** How often a signed-in, not-yet-verified device re-checks `GET /me` (design §11). */
+const VERIFY_POLL_MS = 5_000;
 
 function linkError(): string | null {
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
@@ -39,6 +42,29 @@ export default function VerifyEmail() {
     if (!s.loading && s.session && s.emailVerified) navigate(next, { replace: true });
   }, [s.loading, s.session, s.emailVerified, next, navigate]);
 
+  // Cross-device (design §11): while this device holds a session whose email isn't verified yet, check `GET /me`
+  // every few seconds; once the link has been opened anywhere, refresh the session and carry on to `next`.
+  // Without a session there is nothing to poll — "I've verified — continue" leads to log in instead.
+  const polling = !s.loading && !!s.session && !s.emailVerified && !expired;
+  const refresh = s.refresh;
+  useEffect(() => {
+    if (!polling) return;
+    let alive = true;
+    const t = setInterval(async () => {
+      try {
+        const me = await api.me();
+        if (!alive || !me.emailVerified) return;
+        clearInterval(t);
+        await refresh();
+        if (alive) navigate(next, { replace: true });
+      } catch { /* offline or signed out: keep the button */ }
+    }, VERIFY_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [polling, refresh, navigate, next]);
+
   useEffect(() => {
     if (wait <= 0) return;
     const t = setTimeout(() => setWait((w) => w - 1), 1000);
@@ -55,10 +81,15 @@ export default function VerifyEmail() {
   const continueNow = async () => {
     setChecking(true);
     setNotYet(false);
-    if (s.session) await s.refresh();
+    if (!s.session) {
+      setChecking(false);
+      return navigate(`/login?next=${encodeURIComponent(next)}`);
+    }
+    const verified = await api.me().then((m) => m.emailVerified).catch(() => false);
+    await s.refresh();
     setChecking(false);
-    if (!s.session) return navigate(`/login?next=${encodeURIComponent(next)}`);
-    setNotYet(true); // the effect above navigates if the refresh found a verified email
+    if (verified) return navigate(next, { replace: true });
+    setNotYet(true);
   };
 
   if (s.session && s.emailVerified) {

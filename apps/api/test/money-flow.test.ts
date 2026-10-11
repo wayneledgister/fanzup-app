@@ -269,3 +269,14 @@ describe("FR-CMP-008 discovery", () => {
     expect(r.campaign).toHaveProperty("story");
   });
 });
+
+describe("sandbox dev routes (local/CI only)", () => {
+  it("top-up adds platform money to the sandbox balance as an adjustment recon skips", async () => {
+    const before = (await k.provider.listBalanceTransactions()).filter((t) => t.type === "adjustment").reduce((s, t) => s + t.netMinor, 0);
+    const r = await k.app.inject({ method: "POST", url: "/api/v1/dev/sandbox/topup", payload: { amountMinor: 12_345 } });
+    expect(r.statusCode).toBe(200);
+    const after = (await k.provider.listBalanceTransactions()).filter((t) => t.type === "adjustment").reduce((s, t) => s + t.netMinor, 0);
+    expect(after - before).toBe(12_345);
+    expect((await k.app.inject({ method: "POST", url: "/api/v1/dev/sandbox/topup", payload: { amountMinor: -1 } })).statusCode).toBe(400);
+  });
+});
