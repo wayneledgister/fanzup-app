@@ -29,7 +29,11 @@ begin
   end if;
   select cm.id, cm.status, cm.ends_at, cm.title, a.owner_id into c
     from public.campaigns cm join public.artists a on a.id = cm.artist_id
-   where cm.id = p_campaign;
+   where cm.id = p_campaign
+     -- Take the campaign lock the backing insert's foreign key would take anyway, but BEFORE the perk lock, so
+     -- this function also follows campaign → backing → perk (a capture or settlement holding the campaign and
+     -- then touching the perk can't deadlock with us). KEY SHARE doesn't block other checkouts.
+     for key share of cm;
   if not found then
     raise exception using errcode = 'P0001', message = 'campaign_not_found', detail = 'We couldn''t find that campaign.';
   end if;
@@ -86,23 +90,26 @@ end $$;
 -- Applies a confirmed payment. Anything the platform can't accept (hold expired, campaign closed, amount or
 -- currency differs) is still recorded — money in — and a full refund of what was actually captured is queued —
 -- money out. Idempotent on p_idem = 'capture:<payment_ref>' (keyed by the payment, not the backing).
--- The backing row is locked BEFORE the idempotency check, so two processors racing on one capture serialise:
--- the second sees the first's posting and returns 'duplicate'.
+-- Lock order (every money function): campaign → backing(s) → perk, the same order settle_campaign uses, so a
+-- capture racing the deadline can't deadlock against settlement. The backing's campaign_id is read unlocked (it
+-- never changes), then the campaign and the backing are locked — both BEFORE the idempotency check, so two
+-- processors racing on one capture serialise: the second sees the first's posting and returns 'duplicate'.
 -- Returns 'applied', 'duplicate', 'stray' (the backing already belongs to a different payment: the caller hands
 -- the payment to apply_stray_capture) or 'refund:<reason>'.
 create function public.apply_payment_captured(
   p_backing uuid, p_payment_ref text, p_amount bigint, p_currency text, p_fee bigint, p_idem text)
 returns text language plpgsql security definer set search_path = '' as $$
-declare b public.backings; c public.campaigns; v_reason text; v_new_backer boolean;
+declare b public.backings; c public.campaigns; v_campaign uuid; v_reason text; v_new_backer boolean;
 begin
-  select * into b from public.backings where id = p_backing for update;
+  select campaign_id into v_campaign from public.backings where id = p_backing;
   if not found then
     raise exception using errcode = 'P0001', message = 'backing_not_found', detail = 'No backing for this payment.';
   end if;
+  select * into c from public.campaigns where id = v_campaign for update;
+  select * into b from public.backings where id = p_backing for update;
   if exists (select 1 from public.ledger_transactions where idempotency_key = p_idem) then return 'duplicate'; end if;
   -- A second, different payment for a backing that already has one: money we hold for nobody (§3.5.1 rule 4).
   if b.payment_ref is not null and b.payment_ref <> p_payment_ref then return 'stray'; end if;
-  select * into c from public.campaigns where id = b.campaign_id for update;
   if p_amount <= 0 or p_fee < 0 or p_fee >= p_amount then
     raise exception using errcode = 'P0001', message = 'invalid_capture', detail = 'Captured amount or fee is invalid.';
   end if;
@@ -237,6 +244,8 @@ create function public.leave_held_for_refund(p_backing uuid) returns void
 language plpgsql security definer set search_path = '' as $$
 declare b public.backings;
 begin
+  -- Lock order campaign → backing (a no-op re-lock when the caller already holds the campaign).
+  perform 1 from public.campaigns where id = (select campaign_id from public.backings where id = p_backing) for update;
   select * into b from public.backings where id = p_backing for update;
   if b.status <> 'held' then raise exception 'backing % is %, expected held', b.id, b.status; end if;
   if b.counted then
@@ -251,11 +260,13 @@ end $$;
 -- backings are already refund_pending from settlement; funded-campaign refunds are M2.
 create function public.request_backing_refund(p_backing uuid, p_reason text) returns void
 language plpgsql security definer set search_path = '' as $$
-declare b public.backings; c public.campaigns;
+declare b public.backings; c public.campaigns; v_campaign uuid;
 begin
-  select * into b from public.backings where id = p_backing for update;
+  -- Lock order campaign → backing (see apply_payment_captured).
+  select campaign_id into v_campaign from public.backings where id = p_backing;
   if not found then raise exception using errcode = 'P0001', message = 'backing_not_found', detail = 'No such backing.'; end if;
-  select * into c from public.campaigns where id = b.campaign_id for update;
+  select * into c from public.campaigns where id = v_campaign for update;
+  select * into b from public.backings where id = p_backing for update;
   if b.status <> 'held' or c.status <> 'live' then
     raise exception using errcode = 'P0001', message = 'refund_not_available',
       detail = 'Only a backing held on a live campaign can be refunded in M1.';
@@ -273,13 +284,15 @@ end $$;
 -- Requires refund_pending; changes no counters (they fell when the backing left `held`).
 create function public.record_refund_confirmed(p_backing uuid, p_refund_ref text, p_amount bigint, p_idem text)
 returns uuid language plpgsql security definer set search_path = '' as $$
-declare b public.backings; c public.campaigns; v_tx uuid;
+declare b public.backings; c public.campaigns; v_campaign uuid; v_tx uuid;
 begin
-  select * into b from public.backings where id = p_backing for update;
+  -- Lock order campaign → backing (see apply_payment_captured), both before the idempotency check.
+  select campaign_id into v_campaign from public.backings where id = p_backing;
   if not found then raise exception using errcode = 'P0001', message = 'backing_not_found', detail = 'No such backing.'; end if;
+  select * into c from public.campaigns where id = v_campaign for update;
+  select * into b from public.backings where id = p_backing for update;
   select id into v_tx from public.ledger_transactions where idempotency_key = p_idem;
   if v_tx is not null then return v_tx; end if;
-  select * into c from public.campaigns where id = b.campaign_id for update;
   if b.status <> 'refund_pending' then
     raise exception using errcode = 'P0001', message = 'refund_state', detail = format('Backing is %s, not refund_pending.', b.status);
   end if;
@@ -317,6 +330,27 @@ drop function public.record_backing_captured(uuid, text, bigint, text);
 alter table public.campaigns
   add column settled_raised_minor bigint check (settled_raised_minor is null or settled_raised_minor >= 0),
   add column settled_backers_count integer check (settled_backers_count is null or settled_backers_count >= 0);
+
+-- Backfill campaigns that predate M1 (PR #7 review round 2). Pre-M1 code never lowered raised_minor/backers_count
+-- after settlement, so for an already-settled campaign they ARE the deadline figures: keep them as the public
+-- settled figures, then bring the live counters onto the M1 counter rule (held + released only).
+update public.campaigns
+   set settled_raised_minor = raised_minor, settled_backers_count = backers_count
+ where settled_at is not null and settled_raised_minor is null;
+-- A pre-M1 failed campaign's still-held backings are owed refunds (their backing.refund outbox rows are already
+-- queued): move them to refund_pending exactly as settle_campaign's failed branch now does, units given back.
+update public.perks p set claimed = p.claimed - x.qty
+  from (select b.perk_id, sum(b.quantity)::integer as qty
+          from public.backings b join public.campaigns c on c.id = b.campaign_id
+         where c.status = 'failed' and b.status = 'held' and b.units_held
+         group by b.perk_id) x
+ where p.id = x.perk_id;
+update public.backings b set status = 'refund_pending', counted = false, units_held = false
+  from public.campaigns c
+ where c.id = b.campaign_id and c.status = 'failed' and b.status = 'held';
+update public.campaigns c
+   set raised_minor = coalesce((select sum(b.amount_minor) from public.backings b where b.campaign_id = c.id and b.counted), 0),
+       backers_count = (select count(distinct b.backer_id) from public.backings b where b.campaign_id = c.id and b.counted);
 
 create or replace function public.settle_campaign(p_campaign uuid, p_now timestamptz default now())
 returns public.campaign_status language plpgsql security definer set search_path = '' as $$
@@ -454,14 +488,16 @@ end $$;
 drop function public.record_tranche_released(uuid, text, text);
 create function public.record_tranche_released(p_tranche uuid, p_payout_ref text, p_amount bigint, p_idem text)
 returns bigint language plpgsql security definer set search_path = '' as $$
-declare t public.campaign_tranches; c public.campaigns; v_amt bigint; v_last boolean;
+declare t public.campaign_tranches; c public.campaigns; v_campaign uuid; v_amt bigint; v_last boolean;
 begin
-  if exists (select 1 from public.ledger_transactions where idempotency_key = p_idem) then
-    select released_minor into v_amt from public.campaign_tranches where id = p_tranche; return v_amt;
-  end if;
+  -- Lock order campaign → tranche (settle_campaign's order), both BEFORE the idempotency check, so a concurrent
+  -- duplicate waits for the first confirmation to commit and then returns its amount instead of failing on status.
+  select campaign_id into v_campaign from public.campaign_tranches where id = p_tranche;
+  if not found then raise exception 'tranche % not found', p_tranche; end if;
+  select * into c from public.campaigns where id = v_campaign for update;
   select * into t from public.campaign_tranches where id = p_tranche for update;
+  if exists (select 1 from public.ledger_transactions where idempotency_key = p_idem) then return t.released_minor; end if;
   if t.status <> 'verified' then raise exception 'tranche % is %, expected verified', p_tranche, t.status; end if;
-  select * into c from public.campaigns where id = t.campaign_id for update;
   if c.status <> 'funded' then raise exception 'campaign % is %, expected funded', c.id, c.status; end if;
   if exists (select 1 from public.campaign_tranches where campaign_id = c.id and seq < t.seq and status <> 'released') then
     raise exception using errcode = 'P0001', message = 'earlier_tranche_pending', detail = 'Earlier milestones must be released first.';

@@ -10,7 +10,8 @@ import { logOnlyNotify } from "./notify";
 import { runWorkerTick } from "./jobs";
 import { log, redact } from "./log";
 
-const env = loadEnv();
+// The worker never receives webhooks, so STRIPE_WEBHOOK_SECRET isn't required here (render.yaml omits it).
+const env = loadEnv(process.env, { requireWebhookSecret: false });
 const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
 const provider = createProvider(env, sql);
 let stopping = false;

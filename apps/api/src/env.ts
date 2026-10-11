@@ -58,11 +58,20 @@ export function sanitizePgUrl(url: string): string {
  * fails closed.
  */
 export function isDeployed(src: NodeJS.ProcessEnv, deployEnv?: string): boolean {
-  if (src.VERCEL_ENV || src.RENDER || src.NODE_ENV === "production") return true;
+  // `vercel dev` sets VERCEL_ENV=development on a developer machine; only preview/production are hosted.
+  if (src.VERCEL_ENV === "production" || src.VERCEL_ENV === "preview" || src.RENDER || src.NODE_ENV === "production") return true;
   return deployEnv === "staging" || deployEnv === "production";
 }
 
-export function loadEnv(src: NodeJS.ProcessEnv = process.env): Env {
+export interface LoadEnvOptions {
+  /**
+   * The API process receives Stripe webhooks, so a deployed API must have STRIPE_WEBHOOK_SECRET (fail closed).
+   * The background worker never verifies webhooks and doesn't need it (render.yaml doesn't set it).
+   */
+  requireWebhookSecret?: boolean;
+}
+
+export function loadEnv(src: NodeJS.ProcessEnv = process.env, opts: LoadEnvOptions = {}): Env {
   const parsed = Env.parse(withIntegrationAliases(src));
   const env: Env = { ...parsed, deployed: isDeployed(src, parsed.DEPLOY_ENV) };
   if (!env.SUPABASE_URL && !env.SUPABASE_JWT_SECRET) throw new Error("Set SUPABASE_URL (JWKS) or SUPABASE_JWT_SECRET to verify users");
@@ -76,7 +85,9 @@ export function loadEnv(src: NodeJS.ProcessEnv = process.env): Env {
   }
   if (env.ESCROW_PROVIDER === "stripe-test") {
     if (!env.STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY: required for ESCROW_PROVIDER=stripe-test");
-    if (env.deployed && !env.STRIPE_WEBHOOK_SECRET) throw new Error("STRIPE_WEBHOOK_SECRET: required in a deployed environment");
+    if (opts.requireWebhookSecret && env.deployed && !env.STRIPE_WEBHOOK_SECRET) {
+      throw new Error("STRIPE_WEBHOOK_SECRET: required for the API in a deployed environment");
+    }
   }
   if (env.STRIPE_PUBLISHABLE_KEY && !env.STRIPE_PUBLISHABLE_KEY.startsWith("pk_test_")) {
     throw new Error("STRIPE_PUBLISHABLE_KEY: only pk_test_… keys are allowed (FR-PAY-008)");

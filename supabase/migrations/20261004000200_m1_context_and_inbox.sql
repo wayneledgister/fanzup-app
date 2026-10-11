@@ -45,6 +45,22 @@ alter table public.backings
   add column units_held boolean not null default false,
   -- included in the campaign's public raised/backers counters
   add column counted boolean not null default false;
+-- Backfill rows that predate M1 (PR #7 review round 2), so the counter rule (design §3.5) holds for them:
+--  · counted    = the backing is in the public raised/backers counters = held or released.
+--  · units_held = the backing's units are in perks.claimed. Before M1 units were claimed at CAPTURE (and given back
+--    at refund), not at checkout, so that is held or released too — a pre-M1 pending_payment row reserved nothing.
+--  · captured_minor / captured_currency: pre-M1 captures always took exactly amount_minor in the campaign's
+--    currency; refunds compare against captured_minor.
+--  · a pre-M1 pending_payment row has no hold expiry; give it one now so the worker's normal expiry path
+--    (cancel at the provider, then release) closes it.
+update public.backings b
+   set counted = b.status in ('held', 'released'),
+       units_held = b.status in ('held', 'released'),
+       captured_minor = case when b.status in ('held', 'released', 'refunded') then coalesce(b.captured_minor, b.amount_minor) else b.captured_minor end,
+       captured_currency = case when b.status in ('held', 'released', 'refunded') then coalesce(b.captured_currency, c.currency) else b.captured_currency end,
+       hold_expires_at = case when b.status = 'pending_payment' then coalesce(b.hold_expires_at, now()) else b.hold_expires_at end
+  from public.campaigns c
+ where c.id = b.campaign_id;
 create index backings_open_holds_idx on public.backings (hold_expires_at) where status = 'pending_payment';
 
 -- Claim-first idempotency (design §4.4). claimed_at drives the abandoned-claim rule (POLICY.checkout.abandonedClaimMinutes).
@@ -67,6 +83,9 @@ create table public.provider_events (
   status text not null default 'received' check (status in ('received', 'processing', 'processed', 'ignored', 'unmatched', 'failed', 'dead')),
   attempts integer not null default 0,
   lease_until timestamptz,
+  -- New random value on every claim. The processor's outcome update matches it (and status 'processing'), so a
+  -- processor whose lease expired and was re-claimed can't overwrite the new claimant's result.
+  claim_token uuid,
   last_error text,
   correlation_id text default public.ctx('correlation_id'),
   received_at timestamptz not null default now(),

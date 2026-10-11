@@ -33,6 +33,8 @@ export interface EventRow {
   attempts: number;
   received_at: Date;
   correlation_id: string | null;
+  /** Set by the claim; outcome updates only apply while the row still carries it. */
+  claim_token: string;
 }
 
 /**
@@ -63,12 +65,12 @@ export async function processPendingEvents(sql: Sql, provider: PaymentProvider, 
   let done = 0;
   for (; done < limit; done++) {
     const [row] = await asService(sql, (tx) => tx<EventRow[]>`
-      update public.provider_events set status = 'processing', lease_until = now() + interval '5 minutes'
+      update public.provider_events set status = 'processing', lease_until = now() + interval '5 minutes', claim_token = gen_random_uuid()
        where id = (select id from public.provider_events
                     where (status in ('received', 'failed') and next_attempt_at <= now())
                        or (status = 'processing' and lease_until < now())
                     order by received_at limit 1 for update skip locked)
-      returning id, provider, event_id, type, object_ref, payload, attempts, received_at, correlation_id`);
+      returning id, provider, event_id, type, object_ref, payload, attempts, received_at, correlation_id, claim_token`);
     if (!row) break;
     await processEventRow(sql, provider, row);
   }
@@ -81,10 +83,10 @@ export async function processPendingEvents(sql: Sql, provider: PaymentProvider, 
  */
 export async function processEventById(sql: Sql, provider: PaymentProvider, id: string) {
   const [row] = await asService(sql, (tx) => tx<EventRow[]>`
-    update public.provider_events set status = 'processing', lease_until = now() + interval '5 minutes'
+    update public.provider_events set status = 'processing', lease_until = now() + interval '5 minutes', claim_token = gen_random_uuid()
      where id = ${id}
        and (status in ('received', 'failed') or (status = 'processing' and lease_until < now()))
-    returning id, provider, event_id, type, object_ref, payload, attempts, received_at, correlation_id`);
+    returning id, provider, event_id, type, object_ref, payload, attempts, received_at, correlation_id, claim_token`);
   if (row) await processEventRow(sql, provider, row);
   return !!row;
 }
@@ -92,6 +94,11 @@ export async function processEventById(sql: Sql, provider: PaymentProvider, id: 
 type Outcome = "processed" | "ignored" | "unmatched" | "wait";
 
 async function processEventRow(sql: Sql, provider: PaymentProvider, row: EventRow) {
+  // Every outcome write is conditional on still holding the claim: if this processor outlived its lease and another
+  // one re-claimed the row, the newer claimant's result stands (the money functions are idempotent either way).
+  const lostClaim = (n: number) => {
+    if (n === 0) log("warn", "provider_event.claim_lost", { eventId: row.id, type: row.type });
+  };
   let outcome: Outcome;
   try {
     outcome = await handle(sql, provider, row);
@@ -102,20 +109,24 @@ async function processEventRow(sql: Sql, provider: PaymentProvider, row: EventRo
     await asService(sql, (tx) => tx`
       update public.provider_events
          set status = ${dead ? "dead" : "failed"}, attempts = ${attempts}, last_error = ${msg}, lease_until = null,
-             next_attempt_at = now() + make_interval(secs => ${Math.min(3600, 15 * 2 ** row.attempts)})
-       where id = ${row.id}`);
+             next_attempt_at = now() + make_interval(secs => ${Math.min(3600, 15 * 2 ** row.attempts)}), claim_token = null
+       where id = ${row.id} and status = 'processing' and claim_token = ${row.claim_token}`).then((r) => lostClaim(r.count));
     log(dead ? "alert" : "warn", dead ? "provider_event.dead_letter" : "provider_event.failed", { eventId: row.id, type: row.type, error: msg });
     return;
   }
   if (outcome === "wait") {
     if (Date.now() - row.received_at.getTime() < GRACE_MS) {
-      await asService(sql, (tx) => tx`update public.provider_events set status = 'received', lease_until = null, next_attempt_at = now() + interval '30 seconds' where id = ${row.id}`);
+      await asService(sql, (tx) => tx`
+        update public.provider_events set status = 'received', lease_until = null, claim_token = null, next_attempt_at = now() + interval '30 seconds'
+         where id = ${row.id} and status = 'processing' and claim_token = ${row.claim_token}`).then((r) => lostClaim(r.count));
       return;
     }
     outcome = "unmatched";
   }
   await asService(sql, (tx) => tx`
-    update public.provider_events set status = ${outcome}, attempts = attempts + 1, last_error = null, lease_until = null, processed_at = now() where id = ${row.id}`);
+    update public.provider_events
+       set status = ${outcome}, attempts = attempts + 1, last_error = null, lease_until = null, claim_token = null, processed_at = now()
+     where id = ${row.id} and status = 'processing' and claim_token = ${row.claim_token}`).then((r) => lostClaim(r.count));
 }
 
 async function opFor(sql: Sql, kind: "refund" | "payout", p: EventPayload, objectRef: string | null) {

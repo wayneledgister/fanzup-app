@@ -220,6 +220,50 @@ describe("capture matching and stray captures (design §3.5.1, T-005)", () => {
     expect(results).toEqual(["applied", "duplicate", "duplicate"]);
     expect((await backing(id2)).status).toBe("held");
   });
+
+  it("lock order: a capture waits on the campaign before touching the backing, so settlement can't deadlock with it", async () => {
+    const f = await createUser(k.sql);
+    const r = await back(k, f.auth, { campaignId: ids.novaCampaign, perkId: ids.novaPerkDiary });
+    const id = r.json().backingId as string;
+    const ref = `sbx_pi_${id}`;
+    let capture: Promise<string> | undefined;
+    await k.sql.begin(async (tx) => {
+      // settle_campaign's first two steps: lock the campaign, then its backings.
+      await tx`select 1 from public.campaigns where id = ${ids.novaCampaign} for update`;
+      capture = asService(k.sql, (t2) => t2<{ r: string }[]>`select public.apply_payment_captured(${id}, ${ref}, 1000, 'usd', 59, ${"capture:" + ref}) as r`).then((x) => x[0].r);
+      await new Promise((res) => setTimeout(res, 300)); // the capture is now queued on the campaign lock
+      // With the old order (backing → campaign) the capture would hold this row and NOWAIT would fail (55P03).
+      await tx`select 1 from public.backings where campaign_id = ${ids.novaCampaign} for update nowait`;
+    });
+    expect(await capture).toBe("applied");
+    expect((await backing(id)).status).toBe("held");
+  });
+
+  it("a processor that lost its claim (lease expired, row re-claimed) doesn't overwrite the new claimant's state", async () => {
+    const f = await createUser(k.sql);
+    const r = await back(k, f.auth, { campaignId: ids.novaCampaign, perkId: ids.novaPerkDiary });
+    const id = r.json().backingId as string;
+    const ref = `sbx_pi_${id}`;
+    const { feeMinor: _fee, ...noFee } = captureEvent({ ref, backingId: id, campaignId: ids.novaCampaign, amount: 1000 });
+    const { id: evt } = await ingestEvent(k.sql, noFee);
+    const newToken = randomUUID();
+    const slow: PaymentProvider = Object.create(k.provider);
+    // While the first processor is mid-work, its lease runs out and a second processor claims the row.
+    slow.paymentFee = async () => {
+      await asService(k.sql, (tx) => tx`
+        update public.provider_events set status = 'processing', lease_until = now() + interval '5 minutes', claim_token = ${newToken} where id = ${evt}`);
+      return processingFeeMinor(1000);
+    };
+    expect(await processEventById(k.sql, slow, evt)).toBe(true);
+    const row = await one(k.sql, (tx) => tx<{ status: string; attempts: number; claim_token: string | null }[]>`
+      select status, attempts, claim_token from public.provider_events where id = ${evt}`);
+    expect(row).toMatchObject({ status: "processing", attempts: 0, claim_token: newToken });
+    expect((await backing(id)).status).toBe("held"); // the money still moved exactly once
+    // Let the new claimant's lease lapse; the next processor finishes the row (the capture is a duplicate).
+    await asService(k.sql, (tx) => tx`update public.provider_events set lease_until = now() - interval '1 second' where id = ${evt}`);
+    expect(await processEventById(k.sql, k.provider, evt)).toBe(true);
+    expect(await one(k.sql, (tx) => tx<{ status: string }[]>`select status from public.provider_events where id = ${evt}`)).toMatchObject({ status: "processed" });
+  });
 });
 
 describe("outbound ops (FR-PAY-004 review fixes)", () => {
@@ -309,5 +353,67 @@ describe("deploy detection (NFR-SEC-04, FR-PAY-008)", () => {
     expect(isDeployed({} as NodeJS.ProcessEnv, undefined)).toBe(false);
     const base = { DATABASE_URL: k.db.url, SUPABASE_JWT_SECRET: JWT_SECRET, ESCROW_PROVIDER: "sandbox" };
     expect(() => loadEnv({ ...base, DEPLOY_ENV: "local", VERCEL_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(/sandbox provider can't run/);
+  });
+
+  it("vercel dev (VERCEL_ENV=development) is not a deployment; preview and production are", () => {
+    expect(isDeployed({ VERCEL_ENV: "development" } as NodeJS.ProcessEnv, "local")).toBe(false);
+    expect(isDeployed({ VERCEL_ENV: "development" } as NodeJS.ProcessEnv, undefined)).toBe(false);
+    expect(isDeployed({ VERCEL_ENV: "preview" } as NodeJS.ProcessEnv, undefined)).toBe(true);
+    expect(isDeployed({ VERCEL_ENV: "production" } as NodeJS.ProcessEnv, undefined)).toBe(true);
+    const base = { DATABASE_URL: k.db.url, SUPABASE_JWT_SECRET: JWT_SECRET, ESCROW_PROVIDER: "sandbox" };
+    expect(loadEnv({ ...base, VERCEL_ENV: "development", DEPLOY_ENV: "local" } as NodeJS.ProcessEnv).deployed).toBe(false);
+  });
+
+  // Exactly the variables render.yaml + docs/SETUP.md D2 give the worker (plus RENDER, which Render injects).
+  const renderWorkerEnv = {
+    RENDER: "true",
+    NODE_VERSION: "22",
+    NODE_ENV: "production",
+    DATABASE_URL: "postgres://postgres.ref:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres",
+    SUPABASE_URL: "https://abc.supabase.co",
+    STRIPE_SECRET_KEY: "sk_test_abc",
+    ESCROW_PROVIDER: "stripe-test",
+    DEPLOY_ENV: "staging",
+    DB_POOL_MAX: "5",
+  };
+
+  it("the Render worker env (no STRIPE_WEBHOOK_SECRET) loads for the worker", () => {
+    const env = loadEnv(renderWorkerEnv as NodeJS.ProcessEnv, { requireWebhookSecret: false });
+    expect(env.deployed).toBe(true);
+    expect(env.ESCROW_PROVIDER).toBe("stripe-test");
+    expect(env.STRIPE_WEBHOOK_SECRET).toBeUndefined();
+    expect(loadEnv(renderWorkerEnv as NodeJS.ProcessEnv).deployed).toBe(true); // default = worker behaviour
+  });
+
+  it("the deployed API env still fails closed without STRIPE_WEBHOOK_SECRET", () => {
+    const apiEnv = { ...renderWorkerEnv, RENDER: undefined, VERCEL_ENV: "production" };
+    expect(() => loadEnv(apiEnv as NodeJS.ProcessEnv, { requireWebhookSecret: true })).toThrow(/STRIPE_WEBHOOK_SECRET/);
+    const ok = loadEnv({ ...apiEnv, STRIPE_WEBHOOK_SECRET: "whsec_x" } as NodeJS.ProcessEnv, { requireWebhookSecret: true });
+    expect(ok.STRIPE_WEBHOOK_SECRET).toBe("whsec_x");
+  });
+});
+
+describe("record_tranche_released under concurrency (review round 2, item 6)", () => {
+  let k2: Kit;
+  beforeAll(async () => {
+    k2 = await kit();
+    await k2.sql`update public.campaigns set goal_minor = 50000 where id = ${ids.novaCampaign}`; // $500, so $600 funds it
+  });
+  afterAll(async () => k2?.close());
+
+  it("concurrent duplicate confirmations of one payout post once and all return the amount", async () => {
+    const f = await createUser(k2.sql);
+    const r = await back(k2, f.auth, { campaignId: ids.novaCampaign, perkId: ids.novaPerkTickets, quantity: 4 }); // $600 ≥ goal
+    expect((await pay(k2, r.json().backingId)).json().status).toBe("succeeded");
+    await processPendingEvents(k2.sql, k2.provider);
+    const at = await afterDeadline(k2.sql, ids.novaCampaign);
+    await asService(k2.sql, (tx) => tx`select public.settle_campaign(${ids.novaCampaign}, ${at})`);
+    const t1 = await one(k2.sql, (tx) => tx<{ id: string; owed: bigint }[]>`
+      select id, public.tranche_release_amount(id) as owed from public.campaign_tranches where campaign_id = ${ids.novaCampaign} and seq = 1`);
+    const owed = n(t1.owed);
+    const call = () => asService(k2.sql, (tx) => tx<{ v: bigint }[]>`select public.record_tranche_released(${t1.id}, 'tr_dup_test', ${owed}, 'payout:dup-test') as v`).then((x) => n(x[0].v));
+    expect(await Promise.all([call(), call(), call()])).toEqual([owed, owed, owed]);
+    const posts = await asService(k2.sql, (tx) => tx`select 1 from public.ledger_transactions where idempotency_key = 'payout:dup-test'`);
+    expect(posts).toHaveLength(1);
   });
 });

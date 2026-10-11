@@ -31,7 +31,7 @@ function misconfiguredApp(error: unknown) {
 /** Build the app once per process. Never rejects: bad config yields the 503 app instead. */
 async function createApp(): Promise<{ app: FastifyInstance; env: Env | null }> {
   try {
-    const env = loadEnv();
+    const env = loadEnv(process.env, { requireWebhookSecret: true });
     const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
     const app = await buildApp({ env, sql, provider: createProvider(env, sql), verify: createVerifier(env) });
     app.addHook("onClose", async () => {

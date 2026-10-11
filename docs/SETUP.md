@@ -218,7 +218,8 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 2. Fill in:
    - `DATABASE_URL`: Supabase → **Connect** → **Session pooler** (port **5432**). Render connects over IPv4, and the shared pooler is Supabase's IPv4 route.
    - `SUPABASE_URL`
-   - `STRIPE_SECRET_KEY`
+   - `STRIPE_SECRET_KEY` (the same `sk_test_…` key as Vercel)
+   - That's all. The worker doesn't receive webhooks, so it does **not** need `STRIPE_WEBHOOK_SECRET` (only the Vercel API does, and it refuses to start without it). `NODE_ENV`, `ESCROW_PROVIDER=stripe-test`, `DEPLOY_ENV=staging` and `DB_POOL_MAX` come from `render.yaml`.
 3. In the service → **Settings → Build & Deploy**, set **Auto-Deploy** to **"After CI checks pass"**.
 4. **✅ Check:** the logs show `{"msg":"worker.start",…}`, and a `worker.tick` line appears whenever there's work to do.
 
