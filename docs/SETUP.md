@@ -93,7 +93,7 @@ The tests need a Postgres server they can create and drop scratch databases on. 
 ```bash
 TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres pnpm test
 ```
-**✅ Check:** 26 tests pass. They cover:
+**✅ Check:** every test passes (the count grows with each PR; CI's API job runs the same suite). They cover:
 - the ledger always balancing
 - funded and failed flows
 - idempotency
@@ -127,12 +127,11 @@ pnpm exec supabase login                          # opens the browser once
 pnpm exec supabase link --project-ref <staging-ref>   # asks for the DB password
 pnpm exec supabase db push                        # applies supabase/migrations
 ```
-- **Staging only:** to load the test users and campaigns, run `pnpm exec supabase db push --include-seed`.
-- **Production:** never load the seed. Its users have a published password.
+- **Hosted databases (staging and production) never get the seed.** `supabase/seed.sql` is for local and CI only: its users have a published password and it includes a staff reviewer. A hosted project starts empty; you create your own account through the app's sign-up page (B4).
 - Do **not** push to prod by hand. After Part E, GitHub does it with your approval.
 
 ### B4. Make yourself a reviewer
-In **SQL Editor** on staging, after signing up through the app or Auth → Add user:
+Sign up through the app's sign-up page first. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP and, in **SQL Editor**:
 ```sql
 insert into public.staff (user_id, role)
 select id, 'admin' from auth.users where email = 'wayne.ledg@gmail.com';
@@ -192,7 +191,7 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 
 3. **Deploy**, then check:
    - `https://<your-app>.vercel.app/api/health` returns `{"ok":true,…}`
-   - `https://<your-app>.vercel.app/campaigns/nova-live-band-tour` loads the page, not a 404
+   - `https://<your-app>.vercel.app/explore` loads the page, not a 404 (deep links fall back to the app; the hosted database has no demo campaigns)
 4. Put the Vercel URL into Supabase → Authentication → **Site URL** and **Redirect URLs** (B2).
 
 ### D2. Render (worker only)
@@ -215,7 +214,7 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
      - **secret** `SUPABASE_ACCESS_TOKEN`: create at supabase.com/dashboard/account/tokens
      - **secret** `SUPABASE_DB_PASSWORD`: that project's password
      - **variable** `SUPABASE_PROJECT_REF`: that project's ref
-2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema (and, on staging, the demo data) without a local clone, go to **Actions → Deploy database migrations → Run workflow** and tick *include_seed*.
+2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema without a local clone, go to **Actions → Deploy database migrations → Run workflow**. It applies migrations only; it never loads the seed.
 3. **Branches → add rule for `main`:** require a pull request and the status checks **"Web · typecheck, copy rules, build"** and **"API · migrations, ledger, RLS, flow tests"**. These check names appear after the first CI run.
 4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, the **Deploy database migrations** workflow runs on staging, then waits for your approval before production.
 

@@ -4,10 +4,10 @@
 
 | PR | Branch | Delivers | Tasks |
 |---|---|---|---|
-| PR-A | `spec/m1-skeleton` | G1 decisions, M1 scope, design, ADR-003..006, G2 record, this plan (+ `main` merged into the v2 spec work) | — |
-| PR-B | `feat/m1-money-path` | Money path: policy keys, migrations, request context, provider adapter (sandbox + Stripe test), webhook inbox, checkout holds + claim-first idempotency, late-capture refunds, two-phase outbound, settlement wiring, reconciliation, worker | T-001 … T-010 |
-| PR-C | `feat/m1-identity-staff` | Full-account identity (attestation, consents, verified-email gate), staff API with single-operator mode, artist API, notifications, funnel events, column allowlists | T-011 … T-017 |
-| PR-D | `feat/m1-web-e2e` | Web wiring (explore, campaign, sign-up/in/verify, checkout, My backings), test-mode notice, Playwright golden journey + CI job | T-018 … T-023 |
+| PR-A (#6) | `spec/m1-skeleton` | G1 decisions, M1 scope, design, ADR-003..006, G2 record, this plan (+ `main` merged into the v2 spec work) | — |
+| PR-B (#7) | `feat/m1-money-path` | Money path: policy keys, migrations, request context, provider adapter (sandbox + Stripe test), webhook inbox, checkout holds + claim-first idempotency, late-capture refunds, two-phase outbound, settlement wiring, reconciliation, worker | T-001 … T-010 |
+| PR-C (#8) | `feat/m1-identity-staff` | Full-account identity (attestation, consents, verified-email gate), staff API with single-operator mode, artist API, notifications, funnel events, column allowlists | T-011 … T-017 |
+| PR-D (#9) | `feat/m1-web-e2e` | Web wiring (explore, campaign, sign-up/in/verify, checkout, My backings), test-mode notice, Playwright golden journey + CI job | T-018 … T-023 |
 
 ## T-000: Environment preflight
 Probed 2026-10-03 in the agent sandbox.
@@ -24,7 +24,7 @@ Probed 2026-10-03 in the agent sandbox.
 | E9 | Uptime monitor on `/api/health` | worker heartbeat paging | after deploy | ⏳ **Wayne** (design §12.4) |
 
 ## Test strategy (Enterprise, M1 slice)
-- **Money path against real Postgres** (Vitest, `apps/api/test`): every SQL function through the API or worker; concurrency (parallel backings, last unit, concurrent retries of one key); duplicate, late and out-of-order events; dead-letter and replay; many campaigns with one failing; reconciliation diffs; correlation traces. Money logic tests are written **before** the code they cover (red → green).
+- **Money path against real Postgres** (Vitest, `apps/api/test`): every SQL function through the API or worker; concurrency (parallel backings, last unit, concurrent retries of one key, crash between claim and hold and between hold and provider call); duplicate, late and out-of-order events; staff refund pending across the deadline (conservation holds, artist not paid refunded cents); dead-letter and replay; many campaigns with one failing; reconciliation diffs; correlation traces. Money logic tests are written **before** the code they cover (red → green).
 - **Shared rules** (`packages/shared/test`): policy keys and schemas; DB ⇄ code sync tests for policy-derived constraints and legal versions.
 - **Adapter contract tests:** Stripe adapter mapping on recorded Stripe payload shapes (no network).
 - **E2E** (Playwright, CI only): the golden journey (M1 exit test 7).
@@ -48,7 +48,7 @@ Probed 2026-10-03 in the agent sandbox.
 
 #### T-004: Provider adapter (sandbox + Stripe test) and fail-closed env
 **Implements:** FR-PAY-008, NFR-SEC-04, ADR-003 · **Depends on:** T-002 · **Size:** M
-**Done when:** `PaymentProvider` interface; sandbox emits events into the inbox; Stripe adapter maps payloads and error classes (contract tests); `loadEnv` refuses deployed+sandbox, non-test keys; dev routes only when sandbox and not deployed. **Visible result:** test output.
+**Done when:** `PaymentProvider` interface; sandbox emits events into the inbox; Stripe adapter maps payloads and error classes (contract tests); `loadEnv` refuses deployed+sandbox, non-test keys; dev routes only when sandbox and not deployed; `ESCROW_PROVIDER` value `stripe-dev` renamed `stripe-test`, with `stripe-dev` still accepted as an alias (env schema, adapter `name`, `/config.provider`, `.env.example`, `docs/SETUP.md` C3/D1) — design §2, §12.1. **Visible result:** test output.
 
 #### T-005: Webhook inbox + event processing
 **Implements:** FR-PAY-002, FR-PAY-003 (unmatched) · **Depends on:** T-004 · **Size:** M
@@ -56,15 +56,15 @@ Probed 2026-10-03 in the agent sandbox.
 
 #### T-006: Checkout holds + claim-first idempotent backing creation
 **Implements:** FR-PAY-001, FR-PAY-006, FR-BCK-004, FR-TAX-004 (cap) · **Depends on:** T-005 · **Size:** M
-**Done when:** stock held at checkout; last-unit race → exactly one; parallel same-key → one backing; provider failure → resume with same key; holds expire and cancel; deadline releases holds; open-checkout cap. Tests first. **Visible result:** concurrency test output.
+**Done when:** stock held at checkout; last-unit race → exactly one; parallel same-key → one backing (the second request blocks on the unique index, then replays); claim + `create_backing_hold` in one transaction (design §4.4); rule violations (`perk_sold_out`, `campaign_closed`, caps) stored as `done` with the error and replayed identically on retry; **crash-between-steps test:** (a) failure injected after the claim insert but before the hold commits → nothing persisted, a retry with the same key creates exactly one backing; (b) process stops after the hold commits but before the provider call → a retry resumes with the stored `resource_id` and gets one PaymentIntent; (c) an `in_progress` claim with no `resource_id` older than 2 minutes is re-claimed, a younger one returns 409 `in_progress`; provider failure → resume with same key; holds expire and cancel; deadline releases holds; open-checkout cap. Tests first. **Visible result:** concurrency test output.
 
 #### T-007: Capture, late capture, refunds through two-phase outbound
 **Implements:** FR-PAY-003, FR-PAY-004, FR-DSP-001 (SQL part), FR-PAY-009 (counting) · **Depends on:** T-006 · **Size:** L→ split into capture/late-capture (T-007a) and outbound ops (T-007b)
-**Done when:** captures apply only when valid; late/mismatched captures refunded in full with ledger in and out; refund op initiated before call, lookup before retry, exact amount, dead-letter at max; distinct backer counting. Tests first. **Visible result:** tests.
+**Done when:** captures apply only when valid; late/mismatched captures refunded in full with ledger in and out (deadline judged at processing time, D-001; apology reason in the refund-started notification); refund op initiated before call, lookup before retry, exact amount, dead-letter at max; distinct backer counting; **counter rule** (design §3.5): `request_backing_refund` decrements `raised_minor`/`backers_count` and returns perk units when the backing moves `held → refund_pending`, `record_refund_confirmed` changes no counters and requires `refund_pending`. Tests first. **Visible result:** tests.
 
 #### T-008: Settlement → refunds and tranche releases via outbound ops
 **Implements:** FR-PAY-005, NFR-OPS-05 · **Depends on:** T-007 · **Size:** M
-**Done when:** failed campaign refunds every backer through ops; funded campaign releases tranche 1 via payout op; payout amount asserted; one failing campaign doesn't block others; `wait_funds` doesn't consume attempts. **Visible result:** tests.
+**Done when:** revised `settle_campaign` per design §3.5 — funded branch releases only `held` backings and moves Σ `held` (= `raised_minor`) to `artist_payable`; failed branch moves `held → refund_pending` and the campaign reaches `refunded` only when nothing is `held` or `refund_pending`; failed campaign refunds every backer through ops; funded campaign releases tranche 1 via payout op; payout amount asserted; one failing campaign doesn't block others; `wait_funds` doesn't consume attempts; **test: staff refund requested on a live campaign, deadline passes before the refund confirms** → campaign settles on the remaining `held` total, the artist is credited none of the refunded cents, the refund then confirms, ledger conservation holds (every account balances; `backer_liability` returns to 0 for that backing) and recon diffs to zero; README money-path rules updated (design §3.5). **Visible result:** tests.
 
 #### T-009: Reconciliation (processor slice)
 **Implements:** FR-PAY-007, FR-PAY-009 (counters) · **Depends on:** T-008 · **Size:** M
@@ -88,15 +88,18 @@ Probed 2026-10-03 in the agent sandbox.
 #### T-016: Funnel events
 **Implements:** FR-ANL-001 (events) · **Depends on:** T-011 · **Size:** S
 #### T-017: Column allowlists + revoke client execute on workflow functions + tests
-**Implements:** NFR-SEC-01 (slice), NFR-SEC-02 (slice), FR-PRV-004 direction · **Depends on:** T-014 · **Size:** S
+**Implements:** NFR-SEC-01 (slice), NFR-SEC-02 (slice), NFR-SEC-07, FR-PRV-004 direction · **Depends on:** T-014 · **Size:** S
+**Done when:** column-set test per role; internal tables unreadable; guard test that no file in `.github/workflows/` passes `--include-seed` and no migration inserts into `public.staff` (NFR-SEC-07, design §9).
 
 ### PR-D — web + e2e
 #### T-018: Shared contracts (zod) for M1 endpoints; typed web API client
 **Implements:** G2 C11 · **Depends on:** T-013/T-014 · **Size:** S
 #### T-019: Auth in the web app (Supabase): sign-up, sign-in, verify, reset, session, guards
-**Implements:** FR-ID-001, FR-ID-005, FR-BCK-002 · **Depends on:** T-018 · **Size:** M
+**Implements:** FR-ID-001, FR-ID-005, FR-BCK-002, G2 C17 · **Depends on:** T-018 · **Size:** M
+**Done when:** the four auth pages work against Supabase Auth with `next` preserved; guards on checkout and My backings; **G2 C17:** `supabase/config.toml` `additional_redirect_urls` includes `http://127.0.0.1:5173/**` and `http://localhost:5173/**` (design §12.2), so a confirmation link carrying a `next` path redirects locally and in CI.
 #### T-020: Explore + campaign page on the API; test-mode notice; escrow copy on M1 paths
-**Implements:** FR-CMP-003, FR-CMP-008, FR-PLT-006 · **Depends on:** T-018 · **Size:** M
+**Implements:** FR-CMP-003, FR-CMP-008, FR-PLT-006, FR-BCK-004 (display) · **Depends on:** T-018 · **Size:** M
+**Done when:** explore and campaign page read the API (design §11); campaign page shows the deadline in local time with the zone and, **under 24 h, hours and minutes left**, updating each minute (FR-BCK-004); test-mode notice and FR-PLT-006 copy on M1 paths.
 #### T-021: Checkout route + confirmation; My backings on the API
 **Implements:** FR-BCK-001/002/004/005, FR-PAY-009 (fan) · **Depends on:** T-019, T-020 · **Size:** M
 #### T-022: Playwright golden journey
