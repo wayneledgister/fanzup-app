@@ -57,3 +57,80 @@ export const ids = {
   solPerkGA: "3835231c-7f19-5da7-88f7-02e8a3f255b6",
   novaArtist: "c36385da-a6c6-532b-a362-360bfbe4b9f7",
 };
+
+// ── M1 test kit ─────────────────────────────────────────────────────────
+import { randomUUID } from "node:crypto";
+import type { FastifyInstance } from "fastify";
+import { buildApp, jobDeps, type Deps } from "../src/app";
+import { loadEnv } from "../src/env";
+import { createVerifier } from "../src/lib/auth";
+import { SandboxProvider } from "../src/provider";
+import { asService, n } from "../src/db";
+import { runWorkerTick } from "../src/jobs";
+
+export async function tokenWith(sub: string, extra: Record<string, unknown> = {}) {
+  return new SignJWT({ role: "authenticated", aal: "aal1", ...extra })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(sub)
+    .setAudience("authenticated")
+    .setIssuedAt()
+    .setExpirationTime("1h")
+    .sign(new TextEncoder().encode(JWT_SECRET));
+}
+
+export interface Kit {
+  db: Awaited<ReturnType<typeof freshDb>>;
+  sql: Sql;
+  app: FastifyInstance;
+  provider: SandboxProvider;
+  deps: Deps;
+  close: () => Promise<void>;
+}
+
+export async function kit(extra: Partial<Deps> = {}, envOverrides: Record<string, string> = {}): Promise<Kit> {
+  const db = await freshDb();
+  const provider = new SandboxProvider(db.sql);
+  const env = loadEnv({ DATABASE_URL: db.url, SUPABASE_JWT_SECRET: JWT_SECRET, ESCROW_PROVIDER: "sandbox", NODE_ENV: "test", DEPLOY_ENV: "ci", ...envOverrides } as NodeJS.ProcessEnv);
+  const deps: Deps = { env, sql: db.sql, provider, verify: createVerifier(env), ...extra };
+  const app = await buildApp(deps);
+  return { db, sql: db.sql, app, provider, deps, close: async () => { await app.close(); await db.drop(); } };
+}
+
+/** Create a confirmed (or unconfirmed) auth user; the new-user trigger creates the profile. */
+export async function createUser(sql: Sql, opts: { confirmed?: boolean; name?: string } = {}) {
+  const id = randomUUID();
+  const meta = { display_name: opts.name ?? "Test Fan", adult_attested: true, terms_version: "2026-10-03-beta", privacy_version: "2026-10-03-beta" };
+  await sql.begin((tx) => tx`
+    insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+    values ('00000000-0000-0000-0000-000000000000', ${id}, 'authenticated', 'authenticated', ${`fan-${id.slice(0, 8)}@fanzup.test`},
+            ${opts.confirmed === false ? null : new Date()}, ${tx.json({ provider: "email" })}, ${tx.json(meta)}, now(), now())`);
+  return { id, auth: `Bearer ${await tokenWith(id)}` };
+}
+
+export async function back(k: Kit, auth: string, body: { campaignId: string; perkId: string; quantity?: number; source?: string }, key = `k-${randomUUID()}`) {
+  return k.app.inject({ method: "POST", url: "/api/v1/backings", headers: { authorization: auth, "idempotency-key": key }, payload: { quantity: 1, ...body } });
+}
+
+export async function pay(k: Kit, backingId: string, outcome: "succeed" | "decline" = "succeed", amountMinor?: number) {
+  return k.app.inject({ method: "POST", url: `/api/v1/dev/sandbox/pay/${backingId}`, payload: { outcome, amountMinor } });
+}
+
+/** One worker tick at `now` (defaults to real now). */
+export const tick = (k: Kit, now?: Date, recon = false) => runWorkerTick(jobDeps(k.deps), now ?? new Date(), { recon });
+
+export async function campaignEnds(sql: Sql, campaignId: string) {
+  const [c] = await asService(sql, (tx) => tx<{ ends_at: Date }[]>`select ends_at from public.campaigns where id = ${campaignId}`);
+  return c.ends_at;
+}
+export const afterDeadline = async (sql: Sql, campaignId: string) => new Date((await campaignEnds(sql, campaignId)).getTime() + 3_600_000);
+
+export async function balances(sql: Sql, campaignId: string) {
+  const rows = await asService(sql, (tx) => tx<{ kind: string; balance_minor: bigint }[]>`
+    select kind::text, balance_minor from public.ledger_balances where campaign_id = ${campaignId} or campaign_id is null`);
+  return Object.fromEntries(rows.map((r) => [r.kind, n(r.balance_minor)])) as Record<string, number>;
+}
+
+export async function one<T>(sql: Sql, q: (tx: import("../src/db").Tx) => Promise<T[]>): Promise<T> {
+  const rows = await asService(sql, q);
+  return rows[0];
+}

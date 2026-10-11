@@ -6,16 +6,29 @@ const Env = z.object({
   SUPABASE_JWT_SECRET: z.string().min(32).optional(),
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  ESCROW_PROVIDER: z.enum(["sandbox", "stripe-dev"]).default("sandbox"),
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+  /**
+   * Payment provider (ADR-003). "sandbox" = no network, local/CI only. "stripe-test" = Stripe TEST mode.
+   * "stripe-dev" is accepted as the old name for "stripe-test".
+   */
+  ESCROW_PROVIDER: z
+    .enum(["sandbox", "stripe-test", "stripe-dev"])
+    .default("sandbox")
+    .transform((v) => (v === "stripe-dev" ? "stripe-test" : v)),
+  /** local | ci | staging | production. Deployed environments fail closed (NFR-SEC-04, FR-PAY-008). */
+  DEPLOY_ENV: z.enum(["local", "ci", "staging", "production"]).optional(),
   /** Vercel Cron sends `Authorization: Bearer $CRON_SECRET` to /api/internal/tick. */
   CRON_SECRET: z.string().min(16).optional(),
   /** Connections per instance. Keep low on serverless (Vercel), higher on a long-running host. */
   DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(5),
   PORT: z.coerce.number().default(8787),
   CORS_ORIGINS: z.string().default("http://localhost:5173"),
+  /** Public web origin, used for return links (Stripe onboarding, emails). */
+  PUBLIC_WEB_URL: z.string().url().default("http://localhost:5173"),
   NODE_ENV: z.string().default("development"),
+  WORKER_INTERVAL_MS: z.coerce.number().int().min(200).default(30_000),
 });
-export type Env = z.infer<typeof Env>;
+export type Env = z.infer<typeof Env> & { deployed: boolean };
 
 /**
  * Accept the variable names the Supabase ↔ Vercel integration injects, so connecting the integration
@@ -39,11 +52,45 @@ export function sanitizePgUrl(url: string): string {
   }
 }
 
-export function loadEnv(src: NodeJS.ProcessEnv = process.env): Env {
-  const env = Env.parse(withIntegrationAliases(src));
+/**
+ * Deployed = anything that isn't a developer machine or CI (design §9, G2 condition 15). Platform signals
+ * (VERCEL_ENV, RENDER, NODE_ENV=production) win over DEPLOY_ENV: a hosted app with a stray DEPLOY_ENV=local still
+ * fails closed.
+ */
+export function isDeployed(src: NodeJS.ProcessEnv, deployEnv?: string): boolean {
+  // `vercel dev` sets VERCEL_ENV=development on a developer machine; only preview/production are hosted.
+  if (src.VERCEL_ENV === "production" || src.VERCEL_ENV === "preview" || src.RENDER || src.NODE_ENV === "production") return true;
+  return deployEnv === "staging" || deployEnv === "production";
+}
+
+export interface LoadEnvOptions {
+  /**
+   * The API process receives Stripe webhooks, so a deployed API must have STRIPE_WEBHOOK_SECRET (fail closed).
+   * The background worker never verifies webhooks and doesn't need it (render.yaml doesn't set it).
+   */
+  requireWebhookSecret?: boolean;
+}
+
+export function loadEnv(src: NodeJS.ProcessEnv = process.env, opts: LoadEnvOptions = {}): Env {
+  const parsed = Env.parse(withIntegrationAliases(src));
+  const env: Env = { ...parsed, deployed: isDeployed(src, parsed.DEPLOY_ENV) };
   if (!env.SUPABASE_URL && !env.SUPABASE_JWT_SECRET) throw new Error("Set SUPABASE_URL (JWKS) or SUPABASE_JWT_SECRET to verify users");
-  if (env.ESCROW_PROVIDER === "stripe-dev") {
-    if (!env.STRIPE_SECRET_KEY?.startsWith("sk_test_")) throw new Error("stripe-dev escrow requires a Stripe TEST key (sk_test_…)");
+  // FR-PAY-008 / NFR-SEC-04: a deployed environment never runs the sandbox, and nothing ever runs live keys
+  // (no custody configuration has been approved — E1 card B).
+  if (env.deployed && env.ESCROW_PROVIDER === "sandbox") {
+    throw new Error("ESCROW_PROVIDER: the sandbox provider can't run in a deployed environment; set ESCROW_PROVIDER=stripe-test with Stripe TEST keys");
+  }
+  if (env.STRIPE_SECRET_KEY && !/^(sk|rk)_test_/.test(env.STRIPE_SECRET_KEY)) {
+    throw new Error("STRIPE_SECRET_KEY: only Stripe TEST keys (sk_test_… / rk_test_…) are allowed until custody is approved (FR-PAY-008)");
+  }
+  if (env.ESCROW_PROVIDER === "stripe-test") {
+    if (!env.STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY: required for ESCROW_PROVIDER=stripe-test");
+    if (opts.requireWebhookSecret && env.deployed && !env.STRIPE_WEBHOOK_SECRET) {
+      throw new Error("STRIPE_WEBHOOK_SECRET: required for the API in a deployed environment");
+    }
+  }
+  if (env.STRIPE_PUBLISHABLE_KEY && !env.STRIPE_PUBLISHABLE_KEY.startsWith("pk_test_")) {
+    throw new Error("STRIPE_PUBLISHABLE_KEY: only pk_test_… keys are allowed (FR-PAY-008)");
   }
   return env;
 }

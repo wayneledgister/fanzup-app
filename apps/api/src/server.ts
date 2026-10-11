@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadEnv, type Env } from "./env";
 import { createDb } from "./db";
-import { createEscrow, createStripe } from "./escrow";
+import { createProvider } from "./provider";
 import { createVerifier } from "./lib/auth";
 import { buildApp, API_PREFIX } from "./app";
 
@@ -31,10 +31,9 @@ function misconfiguredApp(error: unknown) {
 /** Build the app once per process. Never rejects: bad config yields the 503 app instead. */
 async function createApp(): Promise<{ app: FastifyInstance; env: Env | null }> {
   try {
-    const env = loadEnv();
+    const env = loadEnv(process.env, { requireWebhookSecret: true });
     const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
-    const stripe = createStripe(env);
-    const app = await buildApp({ env, sql, stripe, escrow: createEscrow(env, stripe), verify: createVerifier(env) });
+    const app = await buildApp({ env, sql, provider: createProvider(env, sql), verify: createVerifier(env) });
     app.addHook("onClose", async () => {
       await sql.end({ timeout: 5 });
     });
