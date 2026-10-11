@@ -208,7 +208,9 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 ---
 
 ## Part E: GitHub settings (repo → Settings)
-1. **Environments:** create **`staging`** and **`production`**.
+> **How migrations reach the hosted database:** Supabase's own GitHub integration (Supabase → Project Settings → Integrations → GitHub, "Deploy to production" on `main`) applies `supabase/migrations/` when a change merges to `main`. It needs no GitHub secrets. The **Deploy database migrations** workflow below is a **manual fallback only**; it never runs on push, so the two can't race. Steps 1–2 are needed only if you want that fallback.
+
+1. **Environments (fallback only):** create **`staging`** and **`production`**.
    - On `production`, tick **Required reviewers** and add yourself. Every prod migration then waits for your click.
    - In each environment add:
      - **secret** `SUPABASE_ACCESS_TOKEN`: create at supabase.com/dashboard/account/tokens
@@ -216,7 +218,7 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
      - **variable** `SUPABASE_PROJECT_REF`: that project's ref
 2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema without a local clone, go to **Actions → Deploy database migrations → Run workflow**. It applies migrations only; it never loads the seed.
 3. **Branches → add rule for `main`:** require a pull request and the status checks **"Web · typecheck, copy rules, build"** and **"API · migrations, ledger, RLS, flow tests"**. These check names appear after the first CI run.
-4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, the **Deploy database migrations** workflow runs on staging, then waits for your approval before production.
+4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, Supabase's GitHub integration applies it to the hosted project (check Supabase → Database → Migrations). Use **Actions → Deploy database migrations → Run workflow** only if the integration is off.
 
 ---
 
