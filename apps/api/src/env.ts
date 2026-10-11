@@ -52,10 +52,14 @@ export function sanitizePgUrl(url: string): string {
   }
 }
 
-/** Deployed = anything that isn't a developer machine or CI (design §9, G2 condition 15). */
+/**
+ * Deployed = anything that isn't a developer machine or CI (design §9, G2 condition 15). Platform signals
+ * (VERCEL_ENV, RENDER, NODE_ENV=production) win over DEPLOY_ENV: a hosted app with a stray DEPLOY_ENV=local still
+ * fails closed.
+ */
 export function isDeployed(src: NodeJS.ProcessEnv, deployEnv?: string): boolean {
-  if (deployEnv === "local" || deployEnv === "ci") return false;
-  return deployEnv === "staging" || deployEnv === "production" || !!src.VERCEL_ENV || !!src.RENDER || src.NODE_ENV === "production";
+  if (src.VERCEL_ENV || src.RENDER || src.NODE_ENV === "production") return true;
+  return deployEnv === "staging" || deployEnv === "production";
 }
 
 export function loadEnv(src: NodeJS.ProcessEnv = process.env): Env {
