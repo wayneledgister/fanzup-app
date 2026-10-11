@@ -11,6 +11,7 @@ export const RULE_STATUS: Record<string, number> = {
   invalid_quantity: 400,
   self_backing: 403,
   reviewer_is_owner: 403,
+  staff_cannot_own: 403,
   refund_not_available: 409,
   evidence_not_accepted: 409,
   evidence_required: 409,

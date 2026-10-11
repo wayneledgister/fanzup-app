@@ -73,12 +73,18 @@ export interface PaymentProvider {
   readonly publishableKey: string | null;
 
   createPayment(input: CreatePaymentInput): Promise<{ paymentRef: string; clientSecret: string }>;
+  /**
+   * Find the payment attempt created for a backing whose ref we never stored (crash between createPayment and
+   * storing the ref, design §5). Stripe: `paymentIntents.search` on `metadata['backing_id']`. Null when none exists.
+   */
+  findPayment(input: { backingId: string }): Promise<{ paymentRef: string; status: string } | null>;
   /** Cancel an unpaid payment attempt so it can no longer succeed. */
   cancelPayment(paymentRef: string): Promise<"canceled" | "already_succeeded" | "already_canceled">;
   /** Processing fee for a succeeded payment (Stripe: from the charge's balance transaction). */
   paymentFee(paymentRef: string): Promise<number>;
 
-  refund(input: { paymentRef: string; amountMinor: number; idempotencyKey: string; opId: string; backingId: string; campaignId: string }): Promise<{ refundRef: string; amountMinor: number }>;
+  /** `backingId` is null for a stray-capture refund (design §3.5.1), which is keyed by the payment. */
+  refund(input: { paymentRef: string; amountMinor: number; idempotencyKey: string; opId: string; backingId: string | null; campaignId: string }): Promise<{ refundRef: string; amountMinor: number }>;
   findRefund(input: { paymentRef: string; opId: string }): Promise<{ refundRef: string; amountMinor: number; status: string } | null>;
 
   transfer(input: { campaignId: string; trancheId: string; destination: string; amountMinor: number; idempotencyKey: string; opId: string }): Promise<{ transferRef: string; amountMinor: number }>;

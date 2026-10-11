@@ -6,7 +6,8 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { asService, n, type Tx } from "../db";
 import { HttpError } from "../lib/auth";
-import { cancelAction, privileged, requireStaff } from "../staff";
+import { cancelAction, privileged, requireStaff, singleOperatorMode } from "../staff";
+import { StaffQueueType } from "@fanzup/shared/schemas";
 import { runReconciliation } from "../recon";
 import type { Deps } from "../app";
 
@@ -21,10 +22,15 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.addHook("preHandler", async (req) => {
     await requireStaff(req, d);
   });
+  /** Run a privileged action; the HTTP response carries `{ id, status, executeAfter }` only. */
+  const act = async (input: Parameters<typeof privileged>[1]) => {
+    const { result: _result, ...action } = await privileged(d, input);
+    return action;
+  };
 
   /** One table-backed worklist (FR-ADM-001 API slice). */
   app.get<{ Querystring: { type?: string } }>("/queue", async (req) => {
-    const type = req.query.type ?? null;
+    const type = req.query.type == null ? null : StaffQueueType.parse(req.query.type);
     const items = await asService(d.sql, (tx) => tx<{ type: string; id: string; subject_id: string | null; summary: string; created: Date; correlation_id: string | null }[]>`
       select * from (
         select 'review' as type, c.id, c.id as subject_id, c.title as summary, c.updated_at as created, null::text as correlation_id
@@ -37,6 +43,10 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
         union all
         select 'refunds', o.id, o.subject_id, 'Refund ' || o.status || coalesce(' (' || o.waiting || ')', ''), o.created_at, o.correlation_id
           from public.outbound_ops o where o.kind = 'refund' and o.status in ('initiated', 'sent')
+        union all
+        -- Releases waiting on the artist's payout account, funds, a recon pause or an earlier tranche (design §3.5.2).
+        select 'payouts', o.id, o.subject_id, 'Payout waiting (' || o.waiting || ')', o.created_at, o.correlation_id
+          from public.outbound_ops o where o.kind = 'payout' and o.status = 'initiated' and o.waiting is not null
         union all
         select 'dead_letters', o.id, o.subject_id, initcap(o.kind) || ' ' || o.status || ': ' || coalesce(o.last_error, ''), o.updated_at, o.correlation_id
           from public.outbound_ops o where o.status in ('dead', 'failed')
@@ -52,16 +62,22 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
         union all
         select 'scheduled', p.id, p.subject_id, p.action || ' after ' || p.execute_after, p.created_at, p.correlation_id
           from public.privileged_actions p where p.status = 'scheduled'
+        union all
+        -- Claimed but never finished (the process stopped mid-run): needs a look, never re-run automatically.
+        select 'scheduled', p.id, p.subject_id, p.action || ' stuck executing since ' || p.execute_after, p.created_at, p.correlation_id
+          from public.privileged_actions p where p.status = 'executing' and p.execute_after < now() - interval '15 minutes'
       ) q where ${type}::text is null or q.type = ${type}
       order by created limit 200`);
     return {
+      // FR-ID-007: the mode is visible to the operator; changing it is a SQL-only step in M1 (worklog deviation).
+      singleOperatorMode: await singleOperatorMode(d.sql),
       items: items.map((i) => ({ type: i.type, id: i.id, subjectId: i.subject_id, summary: i.summary, ageSeconds: Math.max(0, Math.round((Date.now() - i.created.getTime()) / 1000)), correlationId: i.correlation_id })),
     };
   });
 
   app.post<{ Params: { id: string } }>("/campaigns/:id/review", async (req) => {
     const body = z.object({ decision: z.enum(["approved", "revisions_requested"]), notes: z.string().max(4000).optional(), reason: z.string() }).parse(req.body);
-    return { action: await privileged(d, { action: "campaign.review", subjectId: id(req.params.id), reason: body.reason, params: { decision: body.decision, notes: body.notes } }) };
+    return { action: await act({ action: "campaign.review", subjectId: id(req.params.id), reason: body.reason, params: { decision: body.decision, notes: body.notes } }) };
   });
 
   app.post<{ Params: { id: string } }>("/tranches/:id/verify", async (req) => {
@@ -70,14 +86,14 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
       select case when c.status = 'funded' then public.tranche_release_amount(t.id) end as amount
         from public.campaign_tranches t join public.campaigns c on c.id = t.campaign_id where t.id = ${id(req.params.id)}`);
     if (!t) throw new HttpError(404, "not_found", "We couldn't find that milestone.");
-    return { action: await privileged(d, { action: "tranche.verify", subjectId: req.params.id, reason, amountMinor: t.amount == null ? null : n(t.amount) }) };
+    return { action: await act({ action: "tranche.verify", subjectId: req.params.id, reason, amountMinor: t.amount == null ? null : n(t.amount) }) };
   });
 
   app.post<{ Params: { id: string } }>("/backings/:id/refund", async (req) => {
     const { reason } = Reason.parse(req.body);
     const [b] = await asService(d.sql, (tx) => tx<{ amount: bigint | null }[]>`select coalesce(captured_minor, amount_minor) as amount from public.backings where id = ${id(req.params.id)}`);
     if (!b) throw new HttpError(404, "not_found", "We couldn't find that backing.");
-    return { action: await privileged(d, { action: "backing.refund", subjectId: req.params.id, reason, amountMinor: n(b.amount) }) };
+    return { action: await act({ action: "backing.refund", subjectId: req.params.id, reason, amountMinor: n(b.amount) }) };
   });
 
   app.post<{ Params: { id: string } }>("/actions/:id/cancel", async (req) => {
@@ -89,12 +105,12 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
 
   app.post<{ Params: { id: string } }>("/provider-events/:id/replay", async (req) => {
     const { reason } = Reason.parse(req.body);
-    return { action: await privileged(d, { action: "provider_event.replay", subjectId: id(req.params.id), reason }) };
+    return { action: await act({ action: "provider_event.replay", subjectId: id(req.params.id), reason }) };
   });
 
   app.post<{ Params: { id: string } }>("/outbound-ops/:id/replay", async (req) => {
     const { reason } = Reason.parse(req.body);
-    return { action: await privileged(d, { action: "outbound_op.replay", subjectId: id(req.params.id), reason }) };
+    return { action: await act({ action: "outbound_op.replay", subjectId: id(req.params.id), reason }) };
   });
 
   app.post("/recon/run", async () => {
@@ -110,7 +126,7 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
 
   app.post("/recon/override", async (req) => {
     const { reason } = Reason.parse(req.body);
-    return { action: await privileged(d, { action: "recon.override", subjectId: null, reason }) };
+    return { action: await act({ action: "recon.override", subjectId: null, reason }) };
   });
 
   /** Everything carrying one correlation id, in time order (M1 exit test 4). */
@@ -140,18 +156,9 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   });
 
   app.post("/weekly-review/signoff", async (req, reply) => {
-    const body = z.object({ weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), note: z.string().max(2000).optional(), reason: z.string().optional() }).parse(req.body);
-    const action = await privileged(d, { action: "weekly_review.signoff", subjectId: null, reason: body.reason ?? `Weekly review sign-off for ${body.weekStart}` });
-    const [{ count }] = await asService(d.sql, (tx) => tx<{ count: bigint }[]>`
-      select count(*) from public.privileged_actions where action <> 'weekly_review.signoff' and created_at >= ${body.weekStart}::date and created_at < ${body.weekStart}::date + 7`);
-    try {
-      const [row] = await asService(d.sql, (tx) => tx`
-        insert into public.review_signoffs (week_start, actor_id, note, action_count)
-        values (${body.weekStart}::date, public.ctx('actor_id')::uuid, ${body.note ?? null}, ${n(count)}) returning *`);
-      return reply.status(201).send({ signoff: row, action });
-    } catch (e) {
-      if ((e as { code?: string }).code === "23505") throw new HttpError(409, "already_signed", "That week is already signed off.");
-      throw e;
-    }
+    // A typed reason like every other privileged action (review fix 10); the executor writes the sign-off row.
+    const body = z.object({ weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), note: z.string().max(2000).optional(), reason: z.string() }).parse(req.body);
+    const { result, ...action } = await privileged(d, { action: "weekly_review.signoff", subjectId: null, reason: body.reason, params: { weekStart: body.weekStart, note: body.note ?? null } });
+    return reply.status(201).send({ signoff: result, action });
   });
 };

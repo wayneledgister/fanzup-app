@@ -15,7 +15,8 @@ export const BackCampaignRequest = z.object({
 export type BackCampaignRequest = z.infer<typeof BackCampaignRequest>;
 
 export const FunnelEventRequest = z.object({
-  name: z.enum(["perk_selected", "checkout_started"]),
+  /** Only `perk_selected` is client-side; `checkout_started` is recorded by the backing trigger (design §4.2). */
+  name: z.literal("perk_selected"),
   campaignId: z.string().uuid(),
   perkId: z.string().uuid().optional(),
   anonId: z.string().uuid(),
@@ -141,3 +142,7 @@ export const Me = z.object({
   legal: z.object({ termsVersion: z.string(), privacyVersion: z.string() }),
 });
 export type Me = z.infer<typeof Me>;
+
+/** `GET /staff/queue?type=` (design §4.2). `payouts`: releases waiting on a payout account, funds, a recon pause or an earlier tranche. */
+export const StaffQueueType = z.enum(["review", "verification", "refunds", "payouts", "unmatched", "dead_letters", "breaks", "failed_events", "scheduled"]);
+export type StaffQueueType = z.infer<typeof StaffQueueType>;
