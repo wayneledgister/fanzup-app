@@ -28,6 +28,9 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 | shared + API (baseline before M1) | `pnpm test`, local Postgres 16 | 29/29 green | 2026-10-03 |
 | shared (PR-B) | `pnpm --filter @fanzup/shared test` | 7/7 green | 2026-10-03 |
 | API (PR-B) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 61/61 green | 2026-10-03 |
+| shared (PR #7 review fixes) | `pnpm --filter @fanzup/shared test` | 7/7 green | 2026-10-11 |
+| API (PR #7 review fixes) | `pnpm --filter @fanzup/api test`, local Postgres 16 | 91/91 green (7 files) | 2026-10-11 |
+| typecheck | `pnpm -r typecheck` | clean | 2026-10-11 |
 
 ## Not run here
 - Anything needing Docker (Supabase CLI stack, e2e) — runs only in CI.
@@ -43,6 +46,21 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - T-008 ✅ settlement → refunds and tranche releases — funded (both tranches) and failed (3 backers) journeys, wait_funds/permanent classes, one failing campaign isolated, run here
 - T-009 ✅ reconciliation — zero diff after both journeys; stray provider movement → breaks + payout pause; override; business days, run here
 - T-010 ✅ worker tick + heartbeat + `/api/health` age, run here
-- Deviation D-001: design §3 split migrations as 0300 money / 0400 staff+recon; built recon tables and tranche evidence in 0300 (they belong to the money path in PR-B) and identity/staff in 0400. Spec impact: design §3 table updated.
-- Deviation D-002: `payment.failed` events don't mark the backing failed (Stripe lets the fan retry the same payment; the hold expiry cleans up). Design §5 didn't specify; no requirement impact.
-- Deviation D-003: the sandbox's "available balance" for transfers is platform-wide, like Stripe's. No requirement impact.
+- Deviation D-004 (was numbered D-001 before main's D-001 took the number): design §3 split migrations as 0300 money / 0400 staff+recon; built recon tables and tranche evidence in 0300 (they belong to the money path in PR-B) and identity/staff in 0400. Spec impact: design §3 table updated.
+- Deviation D-005: `payment.failed` events don't mark the backing failed (Stripe lets the fan retry the same payment; the hold expiry cleans up). Design §5 didn't specify; no requirement impact.
+- Deviation D-006: the sandbox's "available balance" for transfers is platform-wide, like Stripe's. No requirement impact.
+
+## 2026-10-11 · PR #7 brought up to the revised spec (PR #6 merged) + review round 1 fixes
+- Merged `main` (PR #6) into `feat/m1-money-path`; spec/doc conflicts resolved to main's text (design §3 migration table and SETUP C4 keep the as-built notes).
+- T-001 ✅ new policy keys `checkout.abandonedClaimMinutes` (2), `checkout.expiryLookupGraceMinutes` (5), `recon.inflightGraceMinutes` (30) — shared tests, run here
+- T-002 ✅ migrations edited in place (unmerged): `provider_events` `processing` + `lease_until`, `api_idempotency.claimed_at`, `backings.captured_currency`, `outbound_ops.payment_ref` — every API suite applies them, run here
+- T-004 ✅ `findPayment` (Stripe `paymentIntents.search` on metadata; sandbox lookup) + contract test on a recorded search payload; `isDeployed`: platform signals win over `DEPLOY_ENV` (test), `stripe-test` with `stripe-dev` alias — run here. Real Stripe API: **not run** (no keys)
+- T-005 ✅ atomic inbox claim (parallel-processing test: one posting, backing held); capture match by `payment_ref` first; `capture:<payment_ref>`; stray captures (`apply_stray_capture`, own refund op, `record_stray_refund_confirmed`) — second PaymentIntent, replay, campaign-only stray tests; foreign-account webhook inserted `ignored` in one statement, 200, never processed — run here
+- T-006 ✅ claim + hold in one transaction; stored rule violations; 2-minute abandoned claims; resume guard (stored `checkout_expired`); conditional step 4 + cancel; `paymentParamsFor`; tests (a)–(f) + hold dying during the provider call + null-ref expiry lookup + deadline releasing open holds — run here
+- T-007 ✅ counter rule (`leave_held_for_refund`); `record_refund_confirmed` requires `refund_pending`; lock-then-check in `apply_payment_captured`; `amount_mismatch`/`currency_mismatch`; mismatch test asserts captured 1500 / fee / refund 1500 / liability debit 1500 / confirm(1000) raises; outbound looks up before every call, keeps provider refs, amount mismatches fail + break, permanent = failed + alert only, confirmed ops never moved back (`transfer.created` race test), refund-event amount mismatch → op failed + break — run here
+- T-008 ✅ revised `settle_campaign` (+ `settled_raised_minor`/`settled_backers_count`); refund pending at the deadline: artist credited Σ held only, refund finishes, conservation + recon zero; failed branch counters fall at settlement — run here; README money-path rules added
+- T-009 ✅ liability invariant (`liability_mismatch`), `stray_capture_aged`, in-flight allowance, explicit payout-pausing kinds (design §7) — T-009 (a)–(e) + in-flight + pausing-kinds tests, run here
+- T-010 ✅ unchanged (worker order per §6; heartbeat; health)
+- Deviation D-007: migrations `…0200`/`…0300` were edited in place rather than adding a fix-up migration — PR #7 is unmerged and nothing outside local/CI has applied them. If a preview branch ever applied them, reset it.
+- Deviation D-008: the sandbox gained a `topUp()` test hook (platform money for the fees FanZuP absorbs on refunds; a platform-wide balance holding only backers' money runs short by those fees, so payouts would wait for funds). Test-only; no requirement impact.
+- Note: `settle_campaign` now raises (and the worker logs `settlement.failed` for that campaign only) if `raised_minor` ≠ Σ held — a counter drift stops settlement instead of paying a wrong amount.
