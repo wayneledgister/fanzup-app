@@ -28,6 +28,9 @@ export class HttpMockEscrow implements RegCfProvider {
 
   createIssuer: RegCfProvider["createIssuer"] = (i, idem) => this.call("POST", "/v1/issuers", i, idem);
   createOffering: RegCfProvider["createOffering"] = (i, idem) => this.call("POST", "/v1/offerings", i, idem);
+  findOffering: RegCfProvider["findOffering"] = async (q) =>
+    (await this.call<{ data: Awaited<ReturnType<RegCfProvider["updateOffering"]>>[] }>("GET", `/v1/offerings?externalId=${encodeURIComponent(q.externalId)}`)).data[0] ?? null;
+  updateOffering: RegCfProvider["updateOffering"] = (id, i, idem) => this.call("POST", `/v1/offerings/${encodeURIComponent(id)}/end-date`, i, idem);
   closeOffering: RegCfProvider["closeOffering"] = (id, idem) => this.call("POST", `/v1/offerings/${encodeURIComponent(id)}/close`, {}, idem);
   createParty: RegCfProvider["createParty"] = (i, idem) => this.call("POST", "/v1/parties", i, idem);
   setPartyKyc: RegCfProvider["setPartyKyc"] = (id, kycStatus, idem) => this.call("POST", `/v1/parties/${encodeURIComponent(id)}/kyc`, { kycStatus }, idem);

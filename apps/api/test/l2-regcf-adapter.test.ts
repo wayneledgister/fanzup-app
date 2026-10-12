@@ -35,6 +35,47 @@ describe("InProcessRegCf lookups", () => {
   });
 });
 
+describe("offering lookup and end-date update (PR #12 review round 3)", () => {
+  it("InProcessRegCf: findOffering by our Pool id; updateOffering moves the end date, replays on its key, refused once closed", async () => {
+    const engine = new MockEscrowEngine({ db: ":memory:", webhookSecret: SECRET, deliver: async () => true });
+    const rc = new InProcessRegCf(engine, SECRET);
+    expect(await rc.findOffering({ externalId: "pool-9" })).toBeNull();
+    const iss = await rc.createIssuer({ name: "Test Artist LLC", externalId: "artist-9" }, "issuer:artist-9");
+    const off = await rc.createOffering({ issuerId: iss.id, name: "Pool", targetAmount: 100_000, maxAmount: 200_000, unitPrice: 5_000, endDate: "2027-03-01T00:00:00.000Z", externalId: "pool-9" }, "offering:pool-9");
+    expect(await rc.findOffering({ externalId: "pool-9" })).toMatchObject({ id: off.id, endDate: "2027-03-01T00:00:00.000Z", status: "open" });
+    const end = "2027-04-01T00:00:00.000Z";
+    expect(await rc.updateOffering(off.id, { endDate: end }, `offering_end:pool-9:${end}`)).toMatchObject({ id: off.id, endDate: end });
+    expect(await rc.updateOffering(off.id, { endDate: end }, `offering_end:pool-9:${end}`)).toMatchObject({ endDate: end });
+    expect((await rc.findOffering({ externalId: "pool-9" }))?.endDate).toBe(end);
+    await rc.closeOffering(off.id, "close:pool-9");
+    const err = await rc.updateOffering(off.id, { endDate: "2027-05-01T00:00:00.000Z" }, "offering_end:pool-9:2027-05-01").catch((e) => e);
+    expect({ cls: err.cls, code: err.code }).toEqual({ cls: "permanent", code: "offering_not_open" });
+  });
+
+  it("HttpMockEscrow: GET /v1/offerings?externalId= and POST /v1/offerings/:id/end-date with the idempotency key", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return init.method === "GET"
+        ? new Response(JSON.stringify({ data: [{ id: "off_1", status: "open", endDate: "2027-03-01T00:00:00.000Z", externalId: "pool-1" }] }), { status: 200 })
+        : new Response(JSON.stringify({ id: "off_1", status: "open", endDate: "2027-04-01T00:00:00.000Z", externalId: "pool-1" }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const { HttpMockEscrow } = await import("../src/regcf/http");
+      const rc = new HttpMockEscrow({ baseUrl: "http://mock.local", apiKey: "test-api-key", webhookSecret: SECRET });
+      expect(await rc.findOffering({ externalId: "pool-1" })).toMatchObject({ id: "off_1" });
+      expect(await rc.updateOffering("off_1", { endDate: "2027-04-01T00:00:00.000Z" }, "offering_end:pool-1:2027-04-01T00:00:00.000Z")).toMatchObject({ endDate: "2027-04-01T00:00:00.000Z" });
+    } finally {
+      globalThis.fetch = real;
+    }
+    expect(calls[0].url).toBe("http://mock.local/v1/offerings?externalId=pool-1");
+    expect(calls[1].url).toBe("http://mock.local/v1/offerings/off_1/end-date");
+    expect(calls[1].init.headers).toMatchObject({ "x-api-key": "test-api-key", "idempotency-key": "offering_end:pool-1:2027-04-01T00:00:00.000Z" });
+    expect(JSON.parse(String(calls[1].init.body))).toEqual({ endDate: "2027-04-01T00:00:00.000Z" });
+  });
+});
+
 describe("HttpMockEscrow refundFundMove", () => {
   it("POSTs /v1/fund-moves/:id/refund with the API key and the idempotency key", async () => {
     const calls: { url: string; init: RequestInit }[] = [];

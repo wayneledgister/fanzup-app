@@ -29,6 +29,13 @@ export interface RegCfFundMove {
   status: string;
   externalId?: string;
 }
+export interface RegCfOffering {
+  id: string;
+  /** open | closed */
+  status: string;
+  endDate: string;
+  externalId: string;
+}
 export interface RegCfTrade {
   id: string;
   /** created | funding | funded | returned | refunding | refunded | cancelled */
@@ -58,6 +65,10 @@ export interface RegCfProvider {
   createIssuer(i: { name: string; entityType?: string; externalId: string }, idem: string): Promise<{ id: string }>;
   createOffering(i: { issuerId: string; name: string; targetAmount: number; maxAmount: number; unitPrice: number; endDate: string; externalId: string }, idem: string): Promise<{ id: string }>;
   closeOffering(offeringId: string, idem: string): Promise<{ id: string; status: string }>;
+  /** Look an offering up by our Pool id (sent as externalId at createOffering). Never creates anything. Null: none. */
+  findOffering(q: { externalId: string }): Promise<RegCfOffering | null>;
+  /** Move an open offering's end date (a re-planned launch deadline, L2 design §5 "Launch"; key `offering_end:<pool>:<endDate>`). */
+  updateOffering(offeringId: string, i: { endDate: string }, idem: string): Promise<RegCfOffering>;
   createParty(i: { firstName: string; lastName: string; state: string; externalId: string }, idem: string): Promise<{ id: string; kycStatus: string }>;
   setPartyKyc(partyId: string, decision: KycDecision, idem: string): Promise<{ id: string; kycStatus: string }>;
   createAccount(i: { partyId: string; externalId: string }, idem: string): Promise<{ id: string }>;

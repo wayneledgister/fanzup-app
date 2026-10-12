@@ -265,6 +265,25 @@ describe("mock escrow HTTP service", () => {
     expect(r.json()).toMatchObject({ fundMoveId: fm.id, amount: 5_000, status: "pending" });
     await app.close();
   });
+  it("finds an offering by externalId and moves its end date (PR #12 review round 3: a re-planned launch deadline)", async () => {
+    const e = new MockEscrowEngine({ db: ":memory:", webhookSecret: SECRET });
+    const { app } = buildServer(cfg, e);
+    const h = { "x-api-key": "k_test_123" };
+    const o = offering(e);
+    expect((await app.inject({ method: "GET", url: "/v1/offerings?externalId=pool-1", headers: h })).json().data[0]).toMatchObject({ id: o.id, endDate: "2027-01-01" });
+    expect((await app.inject({ method: "GET", url: "/v1/offerings?externalId=nope", headers: h })).json()).toEqual({ data: [] });
+    const end = "2027-02-15T18:00:00.000Z";
+    const u = await app.inject({ method: "POST", url: `/v1/offerings/${o.id}/end-date`, headers: { ...h, "idempotency-key": `offering_end:pool-1:${end}` }, payload: { endDate: end } });
+    expect(u.statusCode, u.body).toBe(200);
+    expect(u.json()).toMatchObject({ id: o.id, endDate: end, status: "open" });
+    expect(e.findOffering({ externalId: "pool-1" })).toMatchObject({ endDate: end });
+    const bad = await app.inject({ method: "POST", url: `/v1/offerings/${o.id}/end-date`, headers: { ...h, "idempotency-key": "offering_end:pool-1:bad" }, payload: { endDate: "soon" } });
+    expect(bad.statusCode).toBe(400);
+    e.closeOffering(o.id, k());
+    const closed = await app.inject({ method: "POST", url: `/v1/offerings/${o.id}/end-date`, headers: { ...h, "idempotency-key": "offering_end:pool-1:late" }, payload: { endDate: "2027-03-01T00:00:00.000Z" } });
+    expect(closed.json().error).toBe("offering_not_open");
+    await app.close();
+  });
   it("refuses to start in a deployed environment", async () => {
     const { configFromEnv } = await import("../src/server");
     expect(() => configFromEnv({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(/deployed/);

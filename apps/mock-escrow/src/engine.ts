@@ -183,6 +183,25 @@ export class MockEscrowEngine {
     });
   }
 
+  /** Lookup by our id (the Pool id sent as externalId at createOffering). Never creates anything. Null: no offering. */
+  findOffering(q: { externalId: string }) {
+    if (!q.externalId) throw new MockError(400, "invalid_request", "externalId is required");
+    return this.list("offering", (o) => o.externalId === q.externalId)[0] ?? null;
+  }
+
+  /**
+   * Move an open offering's end date (a launch re-planned its deadline before the offering went live; L2 design §5
+   * "Launch"). Refused once the offering is closed. Idempotent on the key like every mutating call.
+   */
+  updateOffering(offeringId: string, input: { endDate: string }, idem?: string) {
+    return this.idempotent(idem, "updateOffering", { offeringId, ...input }, () => {
+      const o = this.get("offering", offeringId);
+      if (o.status !== "open") throw new MockError(409, "offering_not_open", "The offering isn't open.");
+      if (!input.endDate || Number.isNaN(Date.parse(input.endDate))) throw new MockError(400, "invalid_request", "endDate must be an ISO date-time");
+      return this.patch("offering", offeringId, { endDate: input.endDate });
+    });
+  }
+
   closeOffering(offeringId: string, idem?: string) {
     return this.idempotent(idem, "closeOffering", { offeringId }, () => {
       const o = this.get("offering", offeringId);

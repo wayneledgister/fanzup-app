@@ -33,9 +33,16 @@ describe("Layer 2 demo seed + mock escrow fixture", () => {
   });
 
   it("ledger ⇄ provider: every Pool reconciles with no break (balances, per-transaction refs, counters, liability)", async () => {
-    const r = await reconcileL2Ledger(k, { now: new Date() });
-    // The per-tick run skips the refunded Pool with nothing open (review round 2, PR #12) …
     const [refunded] = await asService(k.sql, (tx) => tx<{ id: string }[]>`select id from public.pools where slug = 'afterhours-lp'`);
+    // The first per-tick run of the period also sweeps the closed Pools (review round 3, PR #12): all four, clean …
+    const swept = await reconcileL2Ledger(k, { now: new Date() });
+    expect(swept.sweptClosed).toBe(true);
+    expect(swept.pools.map((p) => p.poolId)).toContain(refunded.id);
+    expect(swept.pools).toHaveLength(4);
+    expect(swept.breaks).toEqual([]);
+    const r = await reconcileL2Ledger(k, { now: new Date() });
+    // … then the per-tick run skips the refunded Pool with nothing open (review round 2, PR #12) …
+    expect(r.sweptClosed).toBe(false);
     expect(r.pools).toHaveLength(3);
     expect(r.pools.map((p) => p.poolId)).not.toContain(refunded.id);
     expect(r.diffMinor).toBe(0);

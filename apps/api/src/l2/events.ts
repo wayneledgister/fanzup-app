@@ -8,7 +8,7 @@
 import { asService, n, type Sql, type Tx } from "../db";
 import { runWithCtx } from "../context";
 import type { EventRow } from "../inbox";
-import type { RegCfEvent } from "../regcf";
+import type { RegCfEvent, RegCfProvider, RegCfTransaction } from "../regcf";
 import { log, redact } from "../log";
 
 export const REGCF_PROVIDER_NAME = "mock-escrow";
@@ -153,6 +153,43 @@ export async function confirmOp(sql: Sql, op: PoolOpRef, ref: string, providerAm
   }
 }
 
+/**
+ * Record the provider's settlement of a `pool_ops` movement through the op kind's SQL confirm function (the one path for
+ * the webhook, the runner's lookup before a re-call, and recon's lookup of a `sent` op whose webhook never came — review
+ * round 3, PR #12). An amount that differs fails the op and opens `amount_mismatch` (confirmOp) and rethrows.
+ */
+export async function applyPoolOpSettled(sql: Sql, op: PoolOpRef, ref: string, amount: number, now: Date) {
+  switch (op.kind) {
+    case "refund":
+      // A stray fund move's refund op names its fund ref (design §3.1); an investment's names the investment.
+      return confirmOp(sql, op, ref, amount, (tx) =>
+        op.fund_ref
+          ? tx`select public.record_stray_fund_refund_confirmed(${op.fund_ref}, ${ref}, ${amount}, ${op.idempotency_key}, ${now})`
+          : tx`select public.record_investment_refunded(${op.subject_id}, ${ref}, ${amount}, ${op.idempotency_key}, ${now})`);
+    case "disburse":
+      return confirmOp(sql, op, ref, amount, (tx) => tx`select public.record_pool_tranche_released(${op.subject_id}, ${ref}, ${amount}, ${op.idempotency_key}, ${now})`);
+    case "payout":
+      return confirmOp(sql, op, ref, amount, (tx) => tx`select public.record_pool_payout_confirmed(${op.subject_id}, ${ref}, ${amount}, ${op.idempotency_key}, ${now})`);
+    default:
+      throw new Error(`no provider confirmation for a ${op.kind} op`);
+  }
+}
+
+/** The provider transaction kind a `pool_ops` movement creates (its `externalId` is the op id). */
+export const OP_TXN_KIND: Record<string, RegCfTransaction["kind"] | undefined> = { refund: "refund", disburse: "disbursement", payout: "payout" };
+
+/**
+ * Look up the provider movement of a `pool_ops` row (M1 rule: ask the provider before calling it again): the escrow
+ * (refund, disbursement) or collection-account (payout) transaction whose externalId is the op id. Null: none.
+ */
+export async function findPoolOpTxn(regcf: RegCfProvider, refs: { offering: string; collection: string | null }, op: { id: string; kind: string }) {
+  const kind = OP_TXN_KIND[op.kind];
+  if (!kind) return null;
+  const q = kind === "payout" ? (refs.collection ? { collectionAccountId: refs.collection } : null) : { offeringId: refs.offering };
+  if (!q) return null;
+  return (await regcf.listTransactions(q)).find((t) => t.kind === kind && t.externalId === op.id) ?? null;
+}
+
 /** The `regcf.*` branch of main's inbox `handle()` (design §5). */
 export async function handleRegCfEvent(sql: Sql, row: EventRow): Promise<Outcome> {
   const payload = row.payload as unknown as { data?: Record<string, unknown>; createdAt?: string };
@@ -181,35 +218,15 @@ export async function handleRegCfEvent(sql: Sql, row: EventRow): Promise<Outcome
       return applyFundMoveSettled(sql, { fundMoveId: String(d.fundMoveId), amount: n(d.amount as number), externalId: ext || null, offeringId: (d.offeringId as string) ?? null }, row.id, now);
     case "regcf.fund_move.returned":
       return applyFundMoveReturned(sql, { fundMoveId: String(d.fundMoveId), amount: n(d.amount as number), externalId: ext || null, offeringId: (d.offeringId as string) ?? null, returnCode: (d.returnCode as string) ?? null }, now);
-    case "regcf.refund.settled": {
-      const op = await opById(sql, ext, "refund");
-      if (!op) return "wait";
-      if (op.status === "confirmed") return "processed";
-      const amount = n(d.amount as number);
-      const ref = String(d.refundId);
-      // A stray fund move's refund op names its fund ref (design §3.1); an investment's names the investment.
-      await confirmOp(sql, op, ref, amount, (tx) =>
-        op.fund_ref
-          ? tx`select public.record_stray_fund_refund_confirmed(${op.fund_ref}, ${ref}, ${amount}, ${op.idempotency_key}, ${now})`
-          : tx`select public.record_investment_refunded(${op.subject_id}, ${ref}, ${amount}, ${op.idempotency_key}, ${now})`);
-      return "processed";
-    }
-    case "regcf.disbursement.settled": {
-      const op = await opById(sql, ext, "disburse");
-      if (!op) return "wait";
-      if (op.status === "confirmed") return "processed";
-      const amount = n(d.amount as number);
-      const ref = String(d.disbursementId);
-      await confirmOp(sql, op, ref, amount, (tx) => tx`select public.record_pool_tranche_released(${op.subject_id}, ${ref}, ${amount}, ${op.idempotency_key}, ${now})`);
-      return "processed";
-    }
+    case "regcf.refund.settled":
+    case "regcf.disbursement.settled":
     case "regcf.payout.settled": {
-      const op = await opById(sql, ext, "payout");
+      const kind = row.type === "regcf.refund.settled" ? "refund" : row.type === "regcf.disbursement.settled" ? "disburse" : "payout";
+      const op = await opById(sql, ext, kind);
       if (!op) return "wait";
       if (op.status === "confirmed") return "processed";
-      const amount = n(d.amount as number);
-      const ref = String(d.payoutId);
-      await confirmOp(sql, op, ref, amount, (tx) => tx`select public.record_pool_payout_confirmed(${op.subject_id}, ${ref}, ${amount}, ${op.idempotency_key}, ${now})`);
+      const ref = String(d.refundId ?? d.disbursementId ?? d.payoutId);
+      await applyPoolOpSettled(sql, op, ref, n(d.amount as number), now);
       return "processed";
     }
     case "regcf.deposit.settled": {

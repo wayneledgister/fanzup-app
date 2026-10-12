@@ -1,17 +1,16 @@
 /**
  * PR #12 review round 2: the `pool_op.replay` staff action (a dead or failed pool op can be retried, flag off too, and
  * shows in the M1 staff queue), the purchase guard's fresh clock (a reservation that expires during createTrade is never
- * funded), one stored launch deadline (provider end date == Pool ends_at, also on a retried launch), and investment
- * refunds by the stored fund move for the amount actually received.
+ * funded), and investment refunds by the stored fund move for the amount actually received. (The launch deadline tests
+ * moved to l2-review-round3.test.ts.)
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n } from "../src/db";
 import { invest } from "../src/l2/purchase";
-import { launchPool } from "../src/l2/service";
 import {
-  ACK, advance, afterDeadline, approvedPool, ATTEST, buy, cancel, countCalls, fundMovesAtMock, investor, invRow, l2kit, livePool, poolLedger, poolRow,
+  ACK, advance, afterDeadline, buy, cancel, countCalls, fundMovesAtMock, investor, invRow, l2kit, livePool, poolLedger,
   risingCreator, setFlag, tick, type L2Kit,
 } from "./l2-helpers";
 
@@ -125,35 +124,8 @@ describe("purchase guard clock (review round 2, finding 2)", () => {
   });
 });
 
-describe("one stored launch deadline (review round 2, finding 3)", () => {
-  let k: L2Kit;
-  beforeAll(async () => { k = await l2kit(); });
-  afterAll(async () => { await k?.close(); });
-
-  it("launch days after approval: provider endDate == Pool ends_at; a retried launch replays the same deadline", async () => {
-    const creator = await risingCreator(k, "Established");
-    const pool = await approvedPool(k, creator);
-    const d = { sql: k.sql, regcf: k.regcf };
-    const first = new Date(Date.now() + 3 * 86_400_000);
-    k.regcf.failNext("createCollectionAccount");
-    await expect(launchPool(d, creator.id, pool, ATTEST, first)).rejects.toMatchObject({ code: "provider_unavailable" });
-    const [planned] = await asService(k.sql, (tx) => tx<{ status: string; launch_ends_at: Date }[]>`select status::text, launch_ends_at from public.pools where id = ${pool}`);
-    expect(planned.status).toBe("approved");
-    // Planned from the first attempt's clock (+ duration as SQL adds days, DST included), not from the approval date.
-    const [want] = await asService(k.sql, (tx) => tx<{ t: Date }[]>`select ${first}::timestamptz + make_interval(days => 30) as t`);
-    expect(planned.launch_ends_at.getTime()).toBe(want.t.getTime());
-
-    const retry = new Date(first.getTime() + 86_400_000); // a day later: identical provider params, same deadline
-    const out = await launchPool(d, creator.id, pool, ATTEST, retry);
-    const p = await poolRow(k.sql, pool);
-    expect(p.status).toBe("live");
-    expect(p.ends_at.getTime()).toBe(planned.launch_ends_at.getTime());
-    expect(out.endsAt).toBe(p.ends_at.toISOString());
-    const offers = k.engine.list("offering", (o) => o.externalId === pool);
-    expect(offers).toHaveLength(1);
-    expect(new Date(String(offers[0].endDate)).getTime()).toBe(p.ends_at.getTime());
-  });
-});
+// Round 2 finding 3 (one stored launch deadline) is covered by l2-review-round3.test.ts "launch window ≥
+// min_offering_days": its round-2 test kept a retried launch's shortened window, which round 3 replaced.
 
 describe("refund by the stored fund move (review round 2, finding 4)", () => {
   let k: L2Kit;

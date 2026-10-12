@@ -223,10 +223,13 @@ export async function submitPool(sql: Sql, userId: string, poolId: string, other
 /**
  * Launch (design §5 "Launch"): provider issuer / offering / collection account with keys `issuer:<artist>`,
  * `offering:<pool>`, `collection:<pool>` and parameters derived only from stored rows — the offering's end date is the
- * Pool's planned deadline (`l2_plan_launch`: first launch attempt + duration, persisted before any provider call) and
- * the same value is passed to `launch_pool` as the Pool's `ends_at` — so a retried launch replays the same objects and
- * both deadlines match (round-1 review and review round 2, PR #12). `launch_pool` re-checks the cap with the
- * re-attested outside figure.
+ * Pool's planned deadline (`l2_plan_launch`, persisted before any provider call) and the same value is passed to
+ * `launch_pool` as the Pool's `ends_at`, so a retried launch replays the same objects and both deadlines match
+ * (round-1 review and review round 2, PR #12). A retry whose plan leaves less than `min_offering_days` (or has passed)
+ * gets a new plan; the offering, looked up by our Pool id first (`findOffering`), is then moved to it with
+ * `updateOffering` (key `offering_end:<pool>:<deadline>`), so every live Pool has ends_at − starts_at ≥ min_offering_days
+ * and the provider's end date is still the Pool's (review round 3). `launch_pool` re-checks the cap with the
+ * re-attested outside figure and refuses a short window (`launch_window_too_short`).
  */
 export async function launchPool(d: L2Deps, userId: string, poolId: string, body: { otherRegCfSales12mMinor: number; legalName?: string }, now = new Date()) {
   const regcf = regcfOf(d);
@@ -239,15 +242,20 @@ export async function launchPool(d: L2Deps, userId: string, poolId: string, body
   if (p.status !== "approved") throw new HttpError(409, "pool_not_approved", "A Pool must pass Form C review before it can go live.");
   if (!p.executed) throw new HttpError(409, "collection_not_executed", "The collection agreement must be executed before the Pool can go live.");
   const legalName = p.legal_name ?? body.legalName ?? `${p.artist_name} Music LLC (demo issuer)`;
-  // One stored deadline (review round 2, PR #12): planned once (launch time + duration) and persisted before any
-  // provider call; the provider's end date and the Pool's ends_at are this value, on the first try and on every retry.
+  // One stored deadline (review rounds 2–3, PR #12): planned (launch time + duration) and persisted before any provider
+  // call, re-planned only when less than min_offering_days remain; the provider's end date and the Pool's ends_at are
+  // this value, on the first try and on every retry.
   const [plan] = await asService(d.sql, (tx) => tx<{ ends: Date }[]>`select public.l2_plan_launch(${poolId}, ${userId}, ${now}) as ends`);
   const endsAt = plan.ends;
   const endDate = endsAt.toISOString();
   let refs: { issuer: string; offering: string; collection: string };
   try {
     const issuer = await regcf.createIssuer({ name: legalName, entityType: "LLC", externalId: p.artist_id }, `issuer:${p.artist_id}`);
-    const offering = await regcf.createOffering({ issuerId: issuer.id, name: p.title, targetAmount: n(p.target), maxAmount: n(p.max), unitPrice: n(p.price), endDate, externalId: poolId }, `offering:${poolId}`);
+    // Look the offering up first: an earlier attempt may have created it under an earlier plan (its end date then moves to
+    // this plan). Not found: create it (a create under the same key replays the same body, since the plan is the same).
+    const found = await regcf.findOffering({ externalId: poolId });
+    const offering = found ?? await regcf.createOffering({ issuerId: issuer.id, name: p.title, targetAmount: n(p.target), maxAmount: n(p.max), unitPrice: n(p.price), endDate, externalId: poolId }, `offering:${poolId}`);
+    if (found && Date.parse(found.endDate) !== endsAt.getTime()) await regcf.updateOffering(found.id, { endDate }, `offering_end:${poolId}:${endDate}`);
     const ca = await regcf.createCollectionAccount({ offeringId: offering.id, externalId: poolId }, `collection:${poolId}`);
     refs = { issuer: issuer.id, offering: offering.id, collection: ca.id };
   } catch (e) {

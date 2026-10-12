@@ -93,12 +93,25 @@ const EXECUTORS: Record<ActionName, Executor> = {
    * Layer 2 twin of `outbound_op.replay` (review round 2, PR #12): a `failed` or `dead` `pool_ops` row goes back to
    * `initiated` with its lease and claim cleared. `call_started_at` and the amount stay, so the runner's
    * lookup-before-call rules still apply (a disburse amount is frozen once a call started; the provider sees the op's own
-   * idempotency key again). Not a money action: like M1's replay it is never delayed and has no daily limit (a refund
-   * owed to an investor must not wait).
+   * idempotency key again; and because a call started, the runner looks the movement up at the provider before any
+   * re-call). Not a money action: like M1's replay it is never delayed and has no daily limit (a refund owed to an
+   * investor must not wait). An op the provider already moved for a different amount (failed `amount_mismatch`, or
+   * carrying the provider ref of a confirmation) is refused `replay_requires_resolution` while its `amount_mismatch`
+   * break is open or was never raised: staff resolve the break first (review round 3, PR #12).
    */
   "pool_op.replay": async (d, a) => {
     const rows = await asService(d.sql, async (tx) => {
-      const [prev] = await tx<{ status: string }[]>`select status from public.pool_ops where id = ${a.subject_id} for update`;
+      const [prev] = await tx<{ status: string; provider_ref: string | null; last_error: string | null; open_break: boolean; resolved_break: boolean }[]>`
+        select o.status, o.provider_ref, o.last_error,
+               exists (select 1 from public.pool_breaks b where b.dedupe_key = 'amount_mismatch:' || o.id::text and b.resolved_at is null) as open_break,
+               exists (select 1 from public.pool_breaks b where b.dedupe_key = 'amount_mismatch:' || o.id::text and b.resolved_at is not null) as resolved_break
+          from public.pool_ops o where o.id = ${a.subject_id} for update`;
+      if (prev && ["failed", "dead"].includes(prev.status)) {
+        const moved = prev.provider_ref != null || (prev.last_error ?? "").startsWith("amount_mismatch");
+        if (prev.open_break || (moved && !prev.resolved_break)) {
+          throw new HttpError(409, "replay_requires_resolution", "The provider already moved money for this operation. Resolve its amount-mismatch break before replaying it.");
+        }
+      }
       const r = await tx<{ id: string }[]>`
         update public.pool_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, claim_token = null, last_error = null
          where id = ${a.subject_id} and status in ('dead', 'failed') returning id`;

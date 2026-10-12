@@ -1,9 +1,13 @@
 /**
  * Layer 2 reconciliation, ledger ⇄ provider (design §5.1; AC-E1). Per Pool, at one clock `now`:
  *  - balances: ledger `pool_escrow` vs the provider's settled escrow, ledger `pool_collection` vs the provider's settled
- *    collection account, both computed from `listTransactions` minus what is IN FLIGHT (the ref of a `pool_ops` row still
- *    `sent`, or the object of a `regcf.*` event received less than `recon.inflightGraceMinutes` ago and not processed yet)
- *    → `escrow_diff`, `collection_diff`;
+ *    collection account, both computed from `listTransactions` minus what is IN FLIGHT (the ref of a `pool_ops` row
+ *    `sent` less than `recon.inflightGraceMinutes` ago, or the object of a `regcf.*` event received less than that ago
+ *    and not processed yet) → `escrow_diff`, `collection_diff`;
+ *  - lost confirmations (review round 3): a `pool_ops` row still `sent` past the grace is looked up at the provider
+ *    BEFORE the ledger is read — settled there → its confirmation is recorded through the webhook's SQL path
+ *    (`applyPoolOpSettled`, amount asserted); pending there → still in flight; not found or in another state →
+ *    `op_unconfirmed` (non-pausing; the op stays `sent`, its ref counted in matching);
  *  - per-transaction refs: every settled provider transaction must match one Pool ledger transaction with that
  *    `external_ref` and the same amount, and every ledger transaction with an `external_ref` must match a provider
  *    transaction (in-flight refs left out); a returned fund move matches an investment `returned` with that fund ref
@@ -14,10 +18,11 @@
  *  - liability: credit balance of `pool_investor_liability` == Σ `funded_received_minor` of funded + refund_pending
  *    + Σ open stray fund moves → `liability_mismatch`;
  *  - open strays unconfirmed past `recon.maxBreakAgeBusinessDays` → `stray_fund_move_aged`;
- *  - refund ops not yet `sent` more than `l2.refundDirectBusinessDays` after they were owed → `refund_overdue`
- *    (non-pausing; alert `refund.overdue` once, when the break first opens).
+ *  - refund ops not yet confirmed (`initiated`, `sent`, `failed`, `dead`) more than `l2.refundDirectBusinessDays` after
+ *    they were owed → `refund_overdue` (non-pausing; alert `refund.overdue` once, when the break first opens).
  * The per-tick run skips refunded/withdrawn Pools with nothing open (no unconfirmed op, open break, open stray, live
- * investment or balance); a staff run for one Pool always reconciles it.
+ * investment or balance), except once every `recon.closedPoolSweepHours`, when it sweeps them all (review round 3); a
+ * staff run for one Pool always reconciles it.
  * Breaks live in `pool_breaks` (never `recon_breaks`); the derived kinds above auto-resolve `cleared_by_run`; money-path
  * breaks (`unapplied_funding`, `amount_mismatch`) and the revenue kinds are left to their owners. `platform_adjustments`
  * (M1's float) never appear here: Layer 2 has its own accounts and transactions. Flag-independent (completion path).
@@ -27,8 +32,11 @@ import { asService, n, type Sql } from "../db";
 import { log, redact } from "../log";
 import { businessDaysSince } from "../recon";
 import type { RegCfProvider, RegCfTransaction } from "../regcf";
+import { applyPoolOpSettled, OP_TXN_KIND, type PoolOpRef } from "./events";
 
-const DERIVED = ["escrow_diff", "collection_diff", "unmatched_provider_txn", "unmatched_ledger_txn", "counter_mismatch", "liability_mismatch", "stray_fund_move_aged", "refund_overdue"];
+const DERIVED = ["escrow_diff", "collection_diff", "unmatched_provider_txn", "unmatched_ledger_txn", "counter_mismatch", "liability_mismatch", "stray_fund_move_aged", "refund_overdue", "op_unconfirmed"];
+/** platform_settings key holding the clock of the last per-tick sweep of closed Pools. */
+const SWEEP_KEY = "l2_recon_closed_sweep_at";
 /** Ledger kinds that carry the provider's ref of a movement in or out of a Pool's escrow or collection account. */
 const LEDGER_REF_KINDS = ["investment.funded", "investment.funded_stray", "investment.refunded", "investment.stray_refunded", "pool_tranche.released", "revenue.deposit", "distribution.paid"];
 
@@ -44,6 +52,10 @@ export interface L2ReconResult {
   inFlight: { poolId: string; ref: string; kind: string; amountMinor: number }[];
   diffMinor: number;
   breaks: (L2Break & { poolId: string })[];
+  /** `sent` ops past the grace that recon looked up and confirmed (their webhook never came). */
+  recovered: { poolId: string; opId: string; ref: string }[];
+  /** True when this per-tick run also swept the closed Pools it normally skips. */
+  sweptClosed: boolean;
 }
 
 const signed = (t: RegCfTransaction) => (t.kind === "fund_move" || t.kind === "deposit" ? t.amount : -t.amount);
@@ -51,16 +63,22 @@ const signed = (t: RegCfTransaction) => (t.kind === "fund_move" || t.kind === "d
 export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, opts: { poolId?: string; now?: Date } = {}): Promise<L2ReconResult> {
   const now = opts.now ?? new Date();
   const { sql, regcf } = d;
-  const pools = await asService(sql, (tx) => tx<{ id: string; offering: string; collection: string | null; escrow: bigint; coll: bigint; liability: bigint; raised: bigint; investors: number; units: number }[]>`
-    select id, provider_offering_ref as offering, provider_collection_ref as collection,
-           public.pool_balance('pool_escrow', id) as escrow, public.pool_balance('pool_collection', id) as coll,
-           -public.pool_balance('pool_investor_liability', id) as liability, raised_minor as raised, investors_count as investors, units_committed as units
+  // Low-frequency sweep (review round 3): once every recon.closedPoolSweepHours the per-tick run includes the closed
+  // Pools it otherwise skips, so a provider-side movement on one (that opened nothing on our side) is still found.
+  let sweptClosed = false;
+  if (!opts.poolId) {
+    const [s] = await asService(sql, (tx) => tx<{ at: string | null }[]>`select value #>> '{}' as at from public.platform_settings where key = ${SWEEP_KEY}`);
+    const last = s?.at ? Date.parse(s.at) : NaN;
+    sweptClosed = !Number.isFinite(last) || now.getTime() - last >= POLICY.recon.closedPoolSweepHours * 3_600_000 || last > now.getTime();
+  }
+  const pools = await asService(sql, (tx) => tx<{ id: string; offering: string; collection: string | null }[]>`
+    select id, provider_offering_ref as offering, provider_collection_ref as collection
       from public.pools p where provider_offering_ref is not null and (${opts.poolId ?? null}::uuid is null or id = ${opts.poolId ?? null}::uuid)
        -- Per-tick recon skips a finished Pool with nothing open (review round 2, PR #12): refunded or withdrawn, no op not
        -- yet confirmed, no open break, no open stray, no investment still holding or awaiting money, zero escrow and
        -- collection balances. Anything that touches it again (a stray fund move, a staff replay) opens one of those.
-       -- A staff run for one Pool (opts.poolId) always reconciles it.
-       and (${opts.poolId ?? null}::uuid is not null or not (
+       -- A staff run for one Pool (opts.poolId) always reconciles it; the periodic sweep includes them all.
+       and (${opts.poolId ?? null}::uuid is not null or ${sweptClosed} or not (
              p.status in ('refunded', 'withdrawn')
              and public.pool_balance('pool_escrow', p.id) = 0 and public.pool_balance('pool_collection', p.id) = 0
              and not exists (select 1 from public.pool_ops o where o.pool_id = p.id and o.status <> 'confirmed')
@@ -68,9 +86,10 @@ export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, o
              and not exists (select 1 from public.pool_stray_fund_moves s where s.pool_id = p.id and s.refunded_at is null)
              and not exists (select 1 from public.investments i where i.pool_id = p.id and i.status in ('reserved', 'funding', 'funded', 'refund_pending'))))
      order by id`);
+  const graceStart = new Date(now.getTime() - POLICY.recon.inflightGraceMinutes * 60_000);
   const inFlightRefs = new Set(
     (await asService(sql, (tx) => tx<{ ref: string }[]>`
-      select provider_ref as ref from public.pool_ops where status = 'sent' and provider_ref is not null
+      select provider_ref as ref from public.pool_ops where status = 'sent' and provider_ref is not null and sent_at > ${graceStart}
       union
       select object_ref from public.provider_events
        where provider = 'mock-escrow' and status in ('received', 'processing', 'failed') and object_ref is not null
@@ -78,15 +97,49 @@ export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, o
   );
   const out: L2PoolRecon[] = [];
   const inFlight: L2ReconResult["inFlight"] = [];
-  for (const p of pools) {
+  const recovered: L2ReconResult["recovered"] = [];
+  for (const pool of pools) {
     let txns: RegCfTransaction[];
     try {
-      txns = [...(await regcf.listTransactions({ offeringId: p.offering })), ...(p.collection ? await regcf.listTransactions({ collectionAccountId: p.collection }) : [])];
+      txns = [...(await regcf.listTransactions({ offeringId: pool.offering })), ...(pool.collection ? await regcf.listTransactions({ collectionAccountId: pool.collection }) : [])];
     } catch (e) {
-      log("warn", "l2_recon.provider_unavailable", { poolId: p.id, error: redact(String((e as Error).message ?? e)) });
+      log("warn", "l2_recon.provider_unavailable", { poolId: pool.id, error: redact(String((e as Error).message ?? e)) });
       continue;
     }
     const breaks: L2Break[] = [];
+
+    // Lost confirmations (review round 3): a `sent` op past the grace, with no young event about it, is looked up in the
+    // provider's list (its movement carries the op id as externalId) before the ledger is read.
+    const stale = await asService(sql, (tx) => tx<(PoolOpRef & { provider_ref: string | null; sent_at: Date | null })[]>`
+      select id, kind, subject_id, pool_id, fund_ref, amount_minor, idempotency_key, correlation_id, status, provider_ref, sent_at
+        from public.pool_ops where pool_id = ${pool.id} and status = 'sent' and (sent_at is null or sent_at <= ${graceStart})`);
+    for (const op of stale) {
+      if (op.provider_ref && inFlightRefs.has(op.provider_ref)) continue; // its event arrived and is still being processed
+      const t = txns.find((x) => x.kind === OP_TXN_KIND[op.kind] && (x.externalId === op.id || x.id === op.provider_ref));
+      if (t?.status === "settled") {
+        try {
+          await applyPoolOpSettled(sql, op, t.id, t.amount, now);
+          recovered.push({ poolId: pool.id, opId: op.id, ref: t.id });
+          log("warn", "pool_op.confirmation_recovered", { opId: op.id, kind: op.kind, providerRef: t.id });
+        } catch (e) {
+          // An amount mismatch has failed the op and opened `amount_mismatch` (confirmOp); anything else: next run.
+          log("warn", "pool_op.confirmation_lookup_failed", { opId: op.id, error: redact(String((e as Error).message ?? e)) });
+        }
+        continue;
+      }
+      if (t?.status === "pending") {
+        inFlightRefs.add(t.id);
+        continue;
+      }
+      breaks.push({ kind: "op_unconfirmed", dedupeKey: `op_unconfirmed:${op.id}`, amountMinor: n(op.amount_minor), refs: {
+        op_id: op.id, kind: op.kind, provider_ref: op.provider_ref, provider_status: t?.status ?? "not_found", sent_at: op.sent_at?.toISOString() ?? null,
+      } });
+    }
+
+    const [p] = await asService(sql, (tx) => tx<{ id: string; escrow: bigint; coll: bigint; liability: bigint; raised: bigint; investors: number; units: number }[]>`
+      select id, public.pool_balance('pool_escrow', id) as escrow, public.pool_balance('pool_collection', id) as coll,
+             -public.pool_balance('pool_investor_liability', id) as liability, raised_minor as raised, investors_count as investors, units_committed as units
+        from public.pools where id = ${pool.id}`);
     const settled = txns.filter((t) => t.status === "settled");
     for (const t of settled.filter((x) => inFlightRefs.has(x.id))) inFlight.push({ poolId: p.id, ref: t.id, kind: t.kind, amountMinor: signed(t) });
     const counted = settled.filter((t) => !inFlightRefs.has(t.id));
@@ -163,7 +216,7 @@ export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, o
       }
     }
     const refunds = await asService(sql, (tx) => tx<{ id: string; amount: bigint; status: string; created_at: Date }[]>`
-      select id, amount_minor as amount, status, created_at from public.pool_ops where pool_id = ${p.id} and kind = 'refund' and status in ('initiated', 'failed', 'dead')`);
+      select id, amount_minor as amount, status, created_at from public.pool_ops where pool_id = ${p.id} and kind = 'refund' and status in ('initiated', 'sent', 'failed', 'dead')`);
     for (const r of refunds) {
       if (businessDaysSince(r.created_at, now) > POLICY.l2.refundDirectBusinessDays) {
         breaks.push({ kind: "refund_overdue", dedupeKey: `refund_overdue:${r.id}`, amountMinor: n(r.amount), refs: { op_id: r.id, status: r.status, owed_since: r.created_at.toISOString() } });
@@ -189,6 +242,11 @@ export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, o
     }
     out.push(row);
   }
+  if (sweptClosed) {
+    await asService(sql, (tx) => tx`
+      insert into public.platform_settings (key, value) values (${SWEEP_KEY}, ${tx.json(now.toISOString())})
+      on conflict (key) do update set value = excluded.value, updated_at = now()`);
+  }
   const breaks = out.flatMap((r) => r.breaks.map((b) => ({ ...b, poolId: r.poolId })));
-  return { pools: out, inFlight, diffMinor: out.reduce((s, r) => s + Math.abs(r.escrow.diffMinor) + Math.abs(r.collection.diffMinor), 0), breaks };
+  return { pools: out, inFlight, diffMinor: out.reduce((s, r) => s + Math.abs(r.escrow.diffMinor) + Math.abs(r.collection.diffMinor), 0), breaks, recovered, sweptClosed };
 }

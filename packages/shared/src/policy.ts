@@ -65,10 +65,17 @@ export const POLICY = {
     materialityMinor: 100,
     maxBreakAgeBusinessDays: 1,
     /**
-     * Design §7 in-flight allowance: a provider movement tied to an outbound op still `sent`, or to a provider event we
-     * received less than this many minutes ago and haven't processed yet, is expected state, not a break.
+     * Design §7 in-flight allowance: a provider movement tied to an outbound op `sent` less than this many minutes ago,
+     * or to a provider event we received less than this many minutes ago and haven't processed yet, is expected state,
+     * not a break. A `sent` op older than this is looked up at the provider (confirmed there → recorded; not found →
+     * `op_unconfirmed` break) — PR #12 review round 3, for M1 and Layer 2.
      */
     inflightGraceMinutes: 30,
+    /**
+     * L2 design §5.1: the per-tick Layer 2 recon skips refunded/withdrawn Pools with nothing open; once every this many
+     * hours it sweeps them too (PR #12 review round 3).
+     */
+    closedPoolSweepHours: 24,
   },
   /** NFR-SEC-13, FR-TAX-004 (E1 Security). Recorded at M1; enforced at M2. */
   rateLimits: { backingPerMinute: 5, backingPerHour: 20, writesPerMinutePerUser: 60, writesPerMinutePerIp: 120 },

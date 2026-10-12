@@ -6,8 +6,11 @@
  * `where claim_token = <ours>`, so a runner that outlived its lease can't overwrite the op of the runner that re-claimed
  * it. Right before the first provider call `l2_op_start_call` (under the pool lock, claim-checked) sets
  * `call_started_at`, re-derives a disburse op's amount (frozen afterwards: `disburse_amount_changed`) and refuses while an
- * earlier tranche is unreleased. A retry calls the provider again with the same idempotency key (the op's key) and gets
- * the original object back. Refunds, disbursements and payouts are confirmed by the provider's webhook (events.ts);
+ * earlier tranche is unreleased. Once a call has started (`call_started_at` set: a retry, or a staff replay) the runner
+ * first looks the movement up at the provider (`findPoolOpTxn`, M1 rule; review round 3): settled there → confirmed
+ * through the webhook's SQL path; pending → `sent` with its ref; not found → the call is made again with the same
+ * idempotency key (the op's key), which returns the original object if the provider has it. `sent` records `sent_at`
+ * (the tick clock) for recon's in-flight grace. Refunds, disbursements and payouts are confirmed by the provider's webhook (events.ts);
  * closing the offering by the response. `disburse` waits until the `close:<pool>` op is confirmed. The Pool's
  * `disburse`/`payout` ops wait while an L2 pausing break is open (L2_PAYOUT_PAUSING_KINDS); refunds never wait.
  */
@@ -17,6 +20,7 @@ import { runWithCtx } from "../context";
 import { RegCfError, type RegCfProvider } from "../regcf";
 import { log, redact } from "../log";
 import { isPoolPayoutPaused } from "../recon";
+import { applyPoolOpSettled, findPoolOpTxn, type PoolOpRef } from "./events";
 
 export interface PoolOpRow {
   id: string;
@@ -58,9 +62,9 @@ async function defer(sql: Sql, op: PoolOpRow, why: string, seconds: number, now:
      where id = ${op.id} and status = 'initiated' and claim_token = ${op.claim_token}`);
 }
 /** The provider accepted the movement; its confirmation webhook will mark it `confirmed` (it may already have). */
-async function sent(sql: Sql, op: PoolOpRow, ref: string) {
+async function sent(sql: Sql, op: PoolOpRow, ref: string, now: Date) {
   const [r] = await asService(sql, (tx) => tx<{ id: string }[]>`
-    update public.pool_ops set status = 'sent', provider_ref = ${ref}, attempts = attempts + 1, lease_until = null, claim_token = null, last_error = null
+    update public.pool_ops set status = 'sent', provider_ref = ${ref}, sent_at = ${now}, attempts = attempts + 1, lease_until = null, claim_token = null, last_error = null
      where id = ${op.id} and status = 'initiated' and claim_token = ${op.claim_token} returning id`);
   if (!r) log("warn", "pool_op.claim_lost", { opId: op.id, kind: op.kind });
 }
@@ -97,6 +101,21 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
     if ((op.kind === "disburse" || op.kind === "payout") && (await isPoolPayoutPaused(sql, op.pool_id, now))) {
       return defer(sql, op, "waiting: recon_pause", 15 * 60, now);
     }
+    // A call may already have reached the provider (a retry or a staff replay): ask it first (M1 rule).
+    if (op.call_started_at && op.kind !== "close_offering") {
+      const prior = await findPoolOpTxn(regcf, { offering: p.offering, collection: p.collection }, op);
+      if (prior?.status === "settled") {
+        try {
+          await applyPoolOpSettled(sql, op as unknown as PoolOpRef, prior.id, prior.amount, now);
+        } catch (e) {
+          // amount_mismatch: confirmOp already failed the op and opened the break; anything else is a retry.
+          const m = (e as { code?: string; message?: string });
+          if (!(m.code === "P0001" && ["refund_amount_mismatch", "payout_amount_mismatch"].includes(String(m.message)))) throw e;
+        }
+        return;
+      }
+      if (prior?.status === "pending") return sent(sql, op, prior.id, now);
+    }
     switch (op.kind) {
       case "close_offering": {
         if ((await startCall(d, op, now)) == null) return;
@@ -125,7 +144,7 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
         const r = target.fund
           ? await regcf.refundFundMove(target.fund, { amount, externalId: op.id }, op.idempotency_key)
           : await regcf.refundTrade(target.trade!, { amount, externalId: op.id }, op.idempotency_key);
-        return sent(sql, op, r.id);
+        return sent(sql, op, r.id, now);
       }
       case "disburse": {
         // The issuer is paid only after the offering is closed at the provider (`close:<pool>` confirmed).
@@ -136,7 +155,7 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
         if (amount == null) return;
         try {
           const r = await regcf.disburseToIssuer(p.offering, { amount, externalId: op.id }, op.idempotency_key);
-          return sent(sql, op, r.id);
+          return sent(sql, op, r.id, now);
         } catch (e) {
           // The provider hasn't processed the close yet: wait, never count it as a failure.
           if (e instanceof RegCfError && e.code === "offering_not_closed") return defer(sql, op, "waiting: offering close (provider)", 5, now);
@@ -155,7 +174,7 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
         const r = await regcf.payoutFromCollection(p.collection, {
           recipientType: x.kind === "creator" ? "issuer" : (x.kind as "investor" | "platform"), recipientRef, amount, externalId: op.id,
         }, op.idempotency_key);
-        return sent(sql, op, r.id);
+        return sent(sql, op, r.id, now);
       }
     }
   } catch (e) {

@@ -63,9 +63,10 @@ export const RULE_STATUS: Record<string, number> = {
   duration_too_short: 400,
   attestation_required: 400,
   terms_changed: 409,
-  // PR #12 review round 2: the stored launch deadline (migration 0800).
+  // PR #12 review rounds 2–3: the stored launch deadline (migration 0800); a live Pool is open ≥ min_offering_days.
   launch_deadline_mismatch: 409,
-  launch_deadline_passed: 409,
+  launch_window_too_short: 409,
+  replay_requires_resolution: 409,
   issuer_cap_reached: 409,
   not_cured: 409,
   period_not_expected: 400,
