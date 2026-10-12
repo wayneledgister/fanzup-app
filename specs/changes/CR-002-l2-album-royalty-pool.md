@@ -55,4 +55,4 @@ Accept in v-now as a demo on mock rails. Keep the provider boundary shaped like 
 **Accepted (v-now, demo on mock rails): Wayne, 2026-10-03** — direct request (quoted above). Production posture unchanged: `layer2` off in production; the mock provider can't run in a deployed environment.
 
 ## Revisions
-- 2026-10-11: PR #10 review rounds 1–4 changed the requirements and design semantics (not the scope or the decision); see the post-gate delta in `specs/gates/L2-G1G2.md` and the change logs in `specs/l2/01-requirements.md` and `specs/l2/02-design.md`. Round 3 also corrected the URL-override note above (production builds ignore the `layer2` override).
+- 2026-10-11: PR #10 review rounds 1–5 changed the requirements and design semantics (not the scope or the decision); see the post-gate delta in `specs/gates/L2-G1G2.md` and the change logs in `specs/l2/01-requirements.md` and `specs/l2/02-design.md`. Round 3 also corrected the URL-override note above (production builds ignore the `layer2` override).
