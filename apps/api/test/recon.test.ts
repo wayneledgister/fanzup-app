@@ -159,3 +159,59 @@ describe("which breaks pause payouts (design §7)", () => {
     expect(n((await one(k.sql, (tx) => tx<{ c: bigint }[]>`select count(*) c from public.recon_breaks where resolved_at is null`)).c)).toBe(0);
   });
 });
+
+describe("lost confirmation of a `sent` op (follow-up found in the PR #12 L2 review, round 3)", () => {
+  const minutesLater = (m: number) => new Date(Date.now() + m * 60_000);
+  async function sentStrayRefund() {
+    const ref = `sbx_pi_lost_${randomUUID()}`;
+    const { id } = await ingestEvent(k.sql, {
+      provider: "sandbox", eventId: `evt_${randomUUID()}`, type: "payment.succeeded", livemode: false, account: null,
+      objectRef: ref, paymentRef: ref, amountMinor: 1500, currency: "usd", feeMinor: processingFeeMinor(1500), metadata: { campaign_id: LOW_ENDS }, raw: {},
+    });
+    await processEventById(k.sql, k.provider, id);
+    await runDueOps(k.sql, k.provider); // provider refunds (its refund.succeeded event is stored); op → sent
+    const op = await one(k.sql, (tx) => tx<{ id: string; status: string; provider_ref: string }[]>`select id, status, provider_ref from public.outbound_ops where payment_ref = ${ref}`);
+    expect(op.status).toBe("sent");
+    return { ref, op };
+  }
+
+  it("in flight inside recon.inflightGraceMinutes; after it, looked up with findRefund and confirmed through the SQL path", async () => {
+    const { ref, op } = await sentStrayRefund();
+    // The confirmation is lost: the event row is marked done without its effect (e.g. a processor bug or a dropped webhook).
+    await asService(k.sql, (tx) => tx`update public.provider_events set status = 'processed' where object_ref = ${op.provider_ref} and type = 'refund.succeeded'`);
+    let r = await runReconciliation(k.sql, k.provider);
+    expect(r.inFlight.map((t) => t.ref)).toContain(op.provider_ref);
+    expect(r.recovered).toEqual([]);
+    expect(of(r, "op_unconfirmed")).toEqual([]);
+
+    r = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
+    expect(r.recovered).toEqual([{ opId: op.id, ref: op.provider_ref }]);
+    expect((await one(k.sql, (tx) => tx<{ status: string }[]>`select status from public.outbound_ops where id = ${op.id}`)).status).toBe("confirmed");
+    const posted = await one(k.sql, (tx) => tx<{ c: number }[]>`select count(*)::int as c from public.ledger_transactions where idempotency_key = ${"refund:pay:" + ref}`);
+    expect(posted.c).toBe(1);
+    expect(r.breaks.filter((b) => b.campaignId === LOW_ENDS)).toEqual([]);
+    expect(r.campaigns.find((c) => c.campaignId === LOW_ENDS)?.diffMinor).toBe(0);
+  });
+
+  it("a `sent` op the provider has no record of: op_unconfirmed break (non-pausing), cleared once the op confirms", async () => {
+    const { op } = await sentStrayRefund();
+    // The provider never kept the refund: its record is gone and the op points at a ref the provider doesn't know.
+    await asService(k.sql, (tx) => tx`delete from public.provider_events where object_ref = ${op.provider_ref} and type = 'refund.succeeded'`);
+    const r = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
+    const lost = of(r, "op_unconfirmed");
+    expect(lost).toHaveLength(1);
+    expect(lost[0]).toMatchObject({ campaignId: LOW_ENDS, amountMinor: 1500, refs: { ref: op.id, provider_ref: op.provider_ref, provider_status: "not_found" } });
+    expect((PAYOUT_PAUSING_KINDS as readonly string[]).includes("op_unconfirmed")).toBe(false);
+    expect((await one(k.sql, (tx) => tx<{ status: string }[]>`select status from public.outbound_ops where id = ${op.id}`)).status).toBe("sent");
+
+    // Staff replay it (after checking the provider): the refund goes out again and confirms; the break clears.
+    await asService(k.sql, (tx) => tx`update public.outbound_ops set status = 'initiated', next_attempt_at = now() where id = ${op.id}`);
+    await runDueOps(k.sql, k.provider);
+    await processPendingEvents(k.sql, k.provider);
+    expect((await one(k.sql, (tx) => tx<{ status: string }[]>`select status from public.outbound_ops where id = ${op.id}`)).status).toBe("confirmed");
+    const after = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
+    expect(of(after, "op_unconfirmed")).toEqual([]);
+    const row = await one(k.sql, (tx) => tx<{ resolution: string }[]>`select resolution from public.recon_breaks where kind = 'op_unconfirmed'`);
+    expect(row.resolution).toBe("cleared_by_run");
+  });
+});

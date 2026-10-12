@@ -243,5 +243,21 @@ export async function confirmRefund(sql: Sql, op: Pick<OpRow, "id" | "subject_id
   });
 }
 
+/**
+ * A refund confirmation (the provider's event, or recon's lookup of a `sent` op whose event never came): post it, or —
+ * when the provider refunded a different amount than the op — fail the op and open a break, never "fix" it (design §5).
+ */
+export async function confirmRefundOrFlag(sql: Sql, op: Pick<OpRow, "id" | "kind" | "subject_id" | "campaign_id" | "amount_minor" | "idempotency_key" | "payment_ref">, refundRef: string, amountMinor: number) {
+  try {
+    await confirmRefund(sql, op, refundRef, amountMinor);
+  } catch (e) {
+    if ((e as { code?: string }).code === "P0001" && (e as { message?: string }).message === "refund_amount_mismatch") {
+      await failOpOnAmountMismatch(sql, op, refundRef, amountMinor);
+      return;
+    }
+    throw e;
+  }
+}
+
 const isRuleViolation = (e: unknown) => (e as { code?: string })?.code === "P0001";
 const errCode = (e: unknown) => (e as { message?: string; code?: string })?.code === "P0001" ? String((e as { message: string }).message) : "error";

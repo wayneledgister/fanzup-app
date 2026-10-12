@@ -7,11 +7,19 @@
  * Every provider transaction must match a ledger transaction by reference and vice versa.
  * Per campaign the run also checks the public counters and the liability invariant (design §3.5): the ledger's
  * backer_liability = Σ coalesce(captured_minor, amount_minor) over held + refund_pending backings + Σ open strays.
- * In-flight allowance: provider movements tied to a `sent` op, or to a provider event received less than
- * `recon.inflightGraceMinutes` ago and not processed yet, are expected state — reported, not breaks.
+ * In-flight allowance: provider movements tied to an op `sent` less than `recon.inflightGraceMinutes` ago (its
+ * `updated_at`: nothing else writes a `sent` op until its confirmation), or to a provider event received less than that
+ * ago and not processed yet, are expected state — reported, not breaks. A `sent` op past the grace with no young event
+ * about it is a lost confirmation (follow-up to merged M1 code, found in the PR #12 L2 review round 3): before the
+ * ledger is read it is looked up at the provider (`findRefund` / `findTransfer`) — confirmed there → recorded through
+ * the webhook's SQL path (`confirmRefundOrFlag` / `confirmPayout`, amount asserted); pending there → still in flight;
+ * not found → an `op_unconfirmed` break (non-pausing; cleared by the run once the op confirms). Its ref is counted in
+ * matching either way.
  */
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n, type Sql } from "./db";
+import { log } from "./log";
+import { confirmPayout, confirmRefundOrFlag, failOpOnAmountMismatch, type OpRow } from "./outbound";
 import type { PaymentProvider } from "./provider/types";
 
 export interface ReconResult {
@@ -25,6 +33,8 @@ export interface ReconResult {
   breaks: { kind: string; campaignId: string | null; amountMinor: number; refs: Record<string, unknown> }[];
   /** Provider movements whose confirmation is still on its way (op `sent`, or a young unprocessed event): reported, not breaks. */
   inFlight: { ref: string; campaignId: string | null; netMinor: number }[];
+  /** `sent` ops past the grace that the run looked up and confirmed (their confirmation event never came). */
+  recovered: { opId: string; ref: string }[];
 }
 
 const LEDGER_REF_KINDS = ["backing.captured", "backing.captured_unapplied", "backing.refunded", "tranche.released", "payment.captured_stray", "payment.stray_refunded"];
@@ -38,20 +48,57 @@ export const PAYOUT_PAUSING_KINDS = [
   "liability_mismatch", "stray_capture_aged",
 ] as const;
 /** Kinds a run derives itself and clears (`cleared_by_run`) when a later run no longer finds them. */
-const RUN_DERIVED_KINDS = ["campaign_diff", "unmatched_provider_txn", "unmatched_ledger_txn", "counter_mismatch", "liability_mismatch", "stray_capture_aged"];
+const RUN_DERIVED_KINDS = ["campaign_diff", "unmatched_provider_txn", "unmatched_ledger_txn", "counter_mismatch", "liability_mismatch", "stray_capture_aged", "op_unconfirmed"];
 
 export async function runReconciliation(sql: Sql, provider: PaymentProvider, now = new Date()): Promise<ReconResult> {
   const [run] = await asService(sql, (tx) => tx<{ id: string }[]>`insert into public.recon_runs (provider) values (${provider.name}) returning id`);
   try {
-    const allProviderTxns = await provider.listBalanceTransactions();
+    const graceStart = new Date(now.getTime() - POLICY.recon.inflightGraceMinutes * 60_000);
     const inFlightRefs = new Set(
       (await asService(sql, (tx) => tx<{ ref: string }[]>`
-        select provider_ref as ref from public.outbound_ops where status = 'sent' and provider_ref is not null
+        select provider_ref as ref from public.outbound_ops where status = 'sent' and provider_ref is not null and updated_at > ${graceStart}
         union
         select object_ref from public.provider_events
          where status in ('received', 'processing', 'failed') and object_ref is not null
            and received_at > now() - make_interval(mins => ${POLICY.recon.inflightGraceMinutes})`)).map((r) => r.ref),
     );
+    // Lost confirmations: look up each `sent` op past the grace BEFORE reading the ledger, so a recovered confirmation is
+    // in the ledger this run compares.
+    const breaks: ReconResult["breaks"] = [];
+    const recovered: ReconResult["recovered"] = [];
+    const stale = await asService(sql, (tx) => tx<(OpRow & { backing_payment_ref: string | null })[]>`
+      select o.*, b.payment_ref as backing_payment_ref from public.outbound_ops o left join public.backings b on b.id = o.subject_id and o.kind = 'refund'
+       where o.status = 'sent' and o.updated_at <= ${graceStart} order by o.updated_at`);
+    for (const op of stale) {
+      if (op.provider_ref && inFlightRefs.has(op.provider_ref)) continue; // its event arrived and is still being processed
+      let state: string = "not_found";
+      if (op.kind === "refund") {
+        const paymentRef = op.payment_ref ?? op.backing_payment_ref;
+        const found = paymentRef ? await provider.findRefund({ paymentRef, opId: op.id }) : null;
+        if (found?.status === "succeeded") {
+          await confirmRefundOrFlag(sql, op, found.refundRef, found.amountMinor);
+          recovered.push({ opId: op.id, ref: found.refundRef });
+          log("warn", "outbound.confirmation_recovered", { opId: op.id, kind: op.kind, providerRef: found.refundRef });
+          continue;
+        }
+        if (found && found.status !== "failed" && found.status !== "canceled") {
+          inFlightRefs.add(found.refundRef); // still pending at the provider
+          continue;
+        }
+        if (found) state = found.status;
+      } else {
+        const found = await provider.findTransfer({ campaignId: op.campaign_id, opId: op.id });
+        if (found) {
+          if (found.amountMinor !== n(op.amount_minor)) await failOpOnAmountMismatch(sql, op, found.transferRef, found.amountMinor);
+          else await confirmPayout(sql, op, found.transferRef, found.amountMinor);
+          recovered.push({ opId: op.id, ref: found.transferRef });
+          continue;
+        }
+      }
+      breaks.push({ kind: "op_unconfirmed", campaignId: op.campaign_id, amountMinor: n(op.amount_minor),
+        refs: { ref: op.id, op_kind: op.kind, provider_ref: op.provider_ref, provider_status: state } });
+    }
+    const allProviderTxns = await provider.listBalanceTransactions();
     const inFlight = allProviderTxns.filter((t) => inFlightRefs.has(t.ref)).map((t) => ({ ref: t.ref, campaignId: t.campaignId, netMinor: t.netMinor }));
     const providerTxns = allProviderTxns.filter((t) => !inFlightRefs.has(t.ref));
     const ledger = await asService(sql, (tx) => tx<{
@@ -70,7 +117,6 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
     const ledgerRefs = await asService(sql, (tx) => tx<{ external_ref: string; kind: string; campaign_id: string | null }[]>`
       select external_ref, kind, campaign_id from public.ledger_transactions where external_ref is not null and kind = any(${LEDGER_REF_KINDS})`);
 
-    const breaks: ReconResult["breaks"] = [];
     const providerByCampaign = new Map<string, number>();
     for (const t of providerTxns) {
       if (t.campaignId) providerByCampaign.set(t.campaignId, (providerByCampaign.get(t.campaignId) ?? 0) + t.netMinor);
@@ -141,7 +187,7 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
                       platform_adjustments_minor = ${platformAdjustmentsMinor}, campaigns = ${tx.json(campaigns as never)}
                 where id = ${run.id}`;
     });
-    return { runId: run.id, ledgerTotalMinor: ledgerTotal, providerTotalMinor: providerTotal, diffMinor: providerTotal - ledgerTotal, platformAdjustmentsMinor, campaigns, breaks, inFlight };
+    return { runId: run.id, ledgerTotalMinor: ledgerTotal, providerTotalMinor: providerTotal, diffMinor: providerTotal - ledgerTotal, platformAdjustmentsMinor, campaigns, breaks, inFlight, recovered };
   } catch (e) {
     await asService(sql, (tx) => tx`update public.recon_runs set status = 'failed', finished_at = now(), error = ${String((e as Error).message ?? e).slice(0, 500)} where id = ${run.id}`);
     throw e;

@@ -7,7 +7,7 @@ import { POLICY } from "@fanzup/shared/policy";
 import { asService, n, type Sql } from "./db";
 import { runWithCtx } from "./context";
 import type { NormalizedEvent, PaymentProvider } from "./provider/types";
-import { confirmPayout, confirmRefund, failOpOnAmountMismatch, type OpRow } from "./outbound";
+import { confirmPayout, confirmRefundOrFlag, type OpRow } from "./outbound";
 import { log, redact } from "./log";
 import { handleRegCfEvent } from "./l2/events";
 
@@ -162,18 +162,9 @@ async function handle(sql: Sql, provider: PaymentProvider, row: EventRow): Promi
     case "refund.succeeded": {
       const op = await opFor(sql, "refund", p, row.object_ref);
       if (!op) return "wait";
-      await runWithCtx({ correlationId: op.correlation_id, actorId: null, actorKind: "system:webhook", aal: null }, async () => {
-        try {
-          await confirmRefund(sql, op, row.object_ref!, n(p.amountMinor));
-        } catch (e) {
-          // The provider refunded a different amount than the op: fail the op and open a break, never "fix" it (design §5).
-          if ((e as { code?: string }).code === "P0001" && (e as { message?: string }).message === "refund_amount_mismatch") {
-            await failOpOnAmountMismatch(sql, op, row.object_ref!, n(p.amountMinor));
-            return;
-          }
-          throw e;
-        }
-      });
+      // A different amount than the op fails the op and opens a break, never "fixed" (design §5).
+      await runWithCtx({ correlationId: op.correlation_id, actorId: null, actorKind: "system:webhook", aal: null }, () =>
+        confirmRefundOrFlag(sql, op, row.object_ref!, n(p.amountMinor)));
       return "processed";
     }
     case "refund.failed": {
