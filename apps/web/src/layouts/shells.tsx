@@ -119,8 +119,8 @@ export function SiteFooter() {
       </Container>
       <Container size="xl" className="border-t border-line py-6">
         <p className="text-xs leading-relaxed text-muted">
-          © 2026 FanZuP LLC. Campaign backers receive perks, not securities. Any securities offerings are made only through a
-          FINRA-registered intermediary under Regulation Crowdfunding, are speculative and illiquid, and may result in total loss.
+          © 2026 FanZuP LLC. Campaign backers receive perks, not securities. A securities offering under Regulation Crowdfunding must be made
+          through a registered intermediary; none has been chosen yet. Such offerings are speculative and illiquid, and may result in total loss.
         </p>
       </Container>
     </footer>

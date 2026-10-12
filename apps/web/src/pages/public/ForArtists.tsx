@@ -180,8 +180,8 @@ export default function ForArtists() {
             ))}
           </div>
           <p className="mt-6 text-sm text-muted">
-            Pools are not available yet. When they launch they'll be offered through a registered intermediary under Regulation
-            Crowdfunding, with their own disclosures and limits.
+            Pools are not available yet. Each will have to be offered under Regulation Crowdfunding by a registered intermediary,
+            which hasn't been chosen, with its own disclosures and limits.
           </p>
         </Container>
       </section>

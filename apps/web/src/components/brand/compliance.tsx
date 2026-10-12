@@ -68,7 +68,7 @@ export function InvestmentRiskDisclosure({ lockupMonths = 12 }: { lockupMonths?:
           Units can't be resold for <span className="num">{lockupMonths}</span> months, and there is no marketplace to sell them. Plan to
           hold them until maturity.
         </li>
-        <li>Offered under Regulation Crowdfunding through our registered intermediary. Read the Form C before investing.</li>
+        <li>A Regulation Crowdfunding offering must be made through an intermediary registered with the SEC. None has been chosen yet (Intermediary: pending — L2-Q3), so this demo isn't an offer. Read the Form C before investing.</li>
       </ul>
     </Callout>
   );
@@ -98,9 +98,9 @@ export function FormCLink({ href = "#", children = "Read the Form C" }: { href?:
 export function RegulatoryFooter() {
   return (
     <p className="text-xs leading-relaxed text-muted">
-      FanZuP is a technology platform, not a broker-dealer or investment adviser, and does not give investment advice. Securities
-      offerings are made through a FINRA-registered intermediary under Regulation Crowdfunding. Investing in these offerings is
-      speculative and illiquid, and you may lose your entire investment.
+      FanZuP is a technology platform, not a broker-dealer, funding portal or investment adviser, and does not give investment advice.
+      Regulation Crowdfunding offerings must be made through an intermediary registered with the SEC; none has been chosen yet (L2-Q3). Investing in
+      these offerings is speculative and illiquid, and you may lose your entire investment.
     </p>
   );
 }
