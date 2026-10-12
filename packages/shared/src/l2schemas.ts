@@ -42,6 +42,15 @@ export const PoolDraftRequest = z.object({
 });
 export type PoolDraftRequest = z.input<typeof PoolDraftRequest>;
 
+/**
+ * Issuer attestation (design §4.1; L2-Q12): Reg CF sales in the preceding 12 months by the creator, its 227.100(c)
+ * affiliates and predecessors on other platforms. Asked at submit and re-attested at launch; self-reported, pending counsel.
+ */
+export const PoolSubmitRequest = z.object({ otherRegCfSales12mMinor: Cents.max(1e14) });
+export type PoolSubmitRequest = z.infer<typeof PoolSubmitRequest>;
+export const PoolLaunchRequest = z.object({ otherRegCfSales12mMinor: Cents.max(1e14), legalName: z.string().min(2).max(120).optional() });
+export type PoolLaunchRequest = z.infer<typeof PoolLaunchRequest>;
+
 export const StatementRequest = z.object({
   periodLabel: z.string().min(2).max(40),
   periodStart: Day,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { allocateWaterfall, canonicalJson, largestRemainder, regCfLimitMinor, riskBadge, type WaterfallInput } from "../src/l2";
 import { POLICY } from "../src/policy";
+import { PoolDraftRequest, PoolLaunchRequest, PoolSubmitRequest } from "../src/l2schemas";
 
 describe("Reg CF investor limit (17 CFR 227.100(a)(2), verified 2026-10-03)", () => {
   const L = (income: number, nw: number, accredited = false) => regCfLimitMinor({ annualIncomeMinor: income * 100, netWorthMinor: nw * 100, accredited });
@@ -80,4 +81,36 @@ describe("Waterfall (01a §4)", () => {
   });
 
   it("canonical JSON sorts keys", () => expect(canonicalJson({ b: 1, a: [{ d: 2, c: 1 }] })).toBe('{"a":[{"c":1,"d":2}],"b":1}'));
+});
+
+describe("21-day minimum offering (227.303(e)(3)(i); L2-T-020)", () => {
+  const draft = {
+    slug: "test-pool", title: "Album", tracklist: ["One"], useOfFunds: [{ label: "Mixing", amountMinor: 100_000 }], revenueTypes: ["master"],
+    fansBps: 3000, unitsTotal: 100, unitPriceMinor: 5_000, collectionMechanism: "DISTRIBUTOR_REDIRECT",
+    tranches: [{ seq: 1, pct: 50 }, { seq: 2, pct: 50 }],
+  } as const;
+  it("policy minimum is 21 days and the deadline bounds follow it", () => {
+    expect(POLICY.regCf.minOfferingDays).toBe(21);
+    expect(POLICY.l2.deadlineDays.min).toBe(POLICY.regCf.minOfferingDays);
+  });
+  it("the draft schema rejects 20 days and accepts 21", () => {
+    expect(PoolDraftRequest.safeParse({ ...draft, durationDays: 20 }).success).toBe(false);
+    expect(PoolDraftRequest.safeParse({ ...draft, durationDays: 21 }).success).toBe(true);
+  });
+  it("submit and launch bodies carry the issuer attestation (L2-Q12)", () => {
+    expect(PoolSubmitRequest.safeParse({}).success).toBe(false);
+    expect(PoolSubmitRequest.safeParse({ otherRegCfSales12mMinor: 0 }).success).toBe(true);
+    expect(PoolLaunchRequest.safeParse({ otherRegCfSales12mMinor: -1 }).success).toBe(false);
+  });
+});
+
+describe("Waterfall fans equality (L2-T-024): fan cents leave the fan class only when every holder is capped", () => {
+  it("not all capped → payouts sum to exactly the fan pool", () => {
+    for (const caps of [[50_000, 1e9, 1e9], [1, 2, 1e9], [0, 1e9, 3]]) {
+      const r = allocateWaterfall({ collectedMinor: 1_000_003, fansBps: 3000, creatorBps: 6500, platformBps: 500,
+        holdings: holdings([["a", 3, caps[0]], ["b", 3, caps[1]], ["c", 1, caps[2]]]) });
+      expect(r.allCapped).toBe(false);
+      expect(r.payouts.reduce((s, p) => s + p.amountMinor, 0)).toBe(r.fanPoolMinor);
+    }
+  });
 });

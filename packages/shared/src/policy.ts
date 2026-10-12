@@ -95,6 +95,11 @@ export const POLICY = {
     verifiedOn: "2026-10-03",
     /** Issuer cap per 12 months (227.100(a)(1)); the creator's tier cap (tiers.ts) is lower and applies first. */
     issuerCapMinor: 5_000_000_00,
+    /**
+     * 227.303(e)(3)(i): the issuer can't receive funds until at least 21 days after the offering information is
+     * posted, so a Pool's deadline is never less than 21 days after launch (PR #10 review, finding 2; L2-Q10).
+     */
+    minOfferingDays: 21,
   },
   l2: {
     /** Policy default: an unfunded Unit reservation holds the investor's limit and the Units this long. */
@@ -107,7 +112,15 @@ export const POLICY = {
     lockupMonths: 12,
     /** Policy defaults for the creator wizard (FR-L2-CR-003). */
     defaults: { returnCapBps: 15_000, maturityMonths: 60, distribution: "quarterly" as const, fansBps: 3_000, platformBps: 500 },
-    deadlineDays: { min: 14, max: 60 },
+    /** Pool deadline bounds; the minimum follows regCf.minOfferingDays. */
+    deadlineDays: { min: 21, max: 60 },
+    /**
+     * Design §4.3: a reservation whose provider call started is looked up at the provider (findTrade/getTrade) only
+     * this long after it expired or the investor asked to cancel, so an in-progress purchase request finishes first.
+     */
+    expiryLookupGraceMinutes: 5,
+    /** Design §5.2 (227.304(d) timing): a refund op not yet sent this many business days after it was owed opens refund_overdue. */
+    refundDirectBusinessDays: 5,
     /** Royalty periods follow the distribution schedule; a period's cash is due this long after it ends (01b §5). */
     periodMonths: 3,
     settlementDueDays: 45,
