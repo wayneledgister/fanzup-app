@@ -34,7 +34,14 @@ export type ActionName =
   | "campaign.review" | "tranche.verify" | "backing.refund" | "recon.override" | "provider_event.replay" | "outbound_op.replay" | "weekly_review.signoff"
   // Layer 2 (CR-002)
   | "pool.review" | "pool.collection_execute" | "investor.kyc_decide" | "pool_tranche.verify" | "pool.distribution_commit" | "pool.collection_state"
-  | "pool.deposit_simulate" | "flag.set" | "pool_op.replay";
+  | "pool.deposit_simulate" | "flag.set" | "pool_op.replay" | "pool_break.resolve";
+
+/**
+ * Layer 2 break kinds only staff close (`pool_break.resolve`, review round 3 follow-up): money-path breaks raised by the
+ * money functions. Kinds recon derives clear themselves (`cleared_by_run`) and the revenue kinds are resolved by their
+ * owners (a shortfall when collected), so staff can't close those.
+ */
+export const STAFF_RESOLVED_POOL_BREAK_KINDS = ["amount_mismatch", "unapplied_funding"] as const;
 
 /** Actions that move money (delay + daily limits apply while single-operator mode is on). */
 const MONEY_ACTIONS = new Set<ActionName>(["tranche.verify", "backing.refund", "pool_tranche.verify", "pool.distribution_commit"]);
@@ -97,12 +104,15 @@ const EXECUTORS: Record<ActionName, Executor> = {
    * re-call). Not a money action: like M1's replay it is never delayed and has no daily limit (a refund owed to an
    * investor must not wait). An op the provider already moved for a different amount (failed `amount_mismatch`, or
    * carrying the provider ref of a confirmation) is refused `replay_requires_resolution` while its `amount_mismatch`
-   * break is open or was never raised: staff resolve the break first (review round 3, PR #12).
+   * break is open or was never raised: staff resolve the break first (`pool_break.resolve`; review round 3, PR #12).
+   * A `sent` op is replayable only while recon has an open `op_unconfirmed` break on it (the provider has no record of
+   * the movement after the in-flight grace); the runner looks it up again before any call.
    */
   "pool_op.replay": async (d, a) => {
     const rows = await asService(d.sql, async (tx) => {
-      const [prev] = await tx<{ status: string; provider_ref: string | null; last_error: string | null; open_break: boolean; resolved_break: boolean }[]>`
+      const [prev] = await tx<{ status: string; provider_ref: string | null; last_error: string | null; open_break: boolean; resolved_break: boolean; unconfirmed: boolean }[]>`
         select o.status, o.provider_ref, o.last_error,
+               exists (select 1 from public.pool_breaks b where b.dedupe_key = 'op_unconfirmed:' || o.id::text and b.resolved_at is null) as unconfirmed,
                exists (select 1 from public.pool_breaks b where b.dedupe_key = 'amount_mismatch:' || o.id::text and b.resolved_at is null) as open_break,
                exists (select 1 from public.pool_breaks b where b.dedupe_key = 'amount_mismatch:' || o.id::text and b.resolved_at is not null) as resolved_break
           from public.pool_ops o where o.id = ${a.subject_id} for update`;
@@ -114,7 +124,7 @@ const EXECUTORS: Record<ActionName, Executor> = {
       }
       const r = await tx<{ id: string }[]>`
         update public.pool_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, claim_token = null, last_error = null
-         where id = ${a.subject_id} and status in ('dead', 'failed') returning id`;
+         where id = ${a.subject_id} and (status in ('dead', 'failed') or (status = 'sent' and ${prev?.unconfirmed ?? false})) returning id`;
       if (r.length) {
         await tx`insert into public.audit_events (action, entity, entity_id, data)
                  values ('pool_op.replayed', 'pool_op', ${a.subject_id}, ${tx.json({ from_status: prev.status, privileged_action_id: a.id })})`;
@@ -122,6 +132,27 @@ const EXECUTORS: Record<ActionName, Executor> = {
       return r;
     });
     if (!rows.length) throw new HttpError(409, "not_replayable", "Only dead-lettered or failed operations can be replayed.");
+  },
+  /**
+   * Close a staff-resolved Layer 2 break (review round 3 follow-up, PR #12): only an open `amount_mismatch` or
+   * `unapplied_funding` break (STAFF_RESOLVED_POOL_BREAK_KINDS); derived kinds are refused `break_not_staff_resolved`.
+   * Not a money action (it moves no money and posts nothing): never delayed, no daily limit, flag-free. The typed reason
+   * is the resolution; audit `pool_break.resolved`. Resolving an op's `amount_mismatch` is what lets `pool_op.replay` run.
+   */
+  "pool_break.resolve": async (d, a, now) => {
+    await asService(d.sql, async (tx) => {
+      const [b] = await tx<{ id: string; kind: string; pool_id: string; resolved_at: Date | null; dedupe_key: string }[]>`
+        select id, kind, pool_id, resolved_at, dedupe_key from public.pool_breaks where id = ${a.subject_id} for update`;
+      if (!b) throw new HttpError(404, "not_found", "We couldn't find that item.");
+      if (b.resolved_at) throw new HttpError(409, "break_not_open", "This break is already resolved.");
+      if (!(STAFF_RESOLVED_POOL_BREAK_KINDS as readonly string[]).includes(b.kind)) {
+        throw new HttpError(409, "break_not_staff_resolved", "Reconciliation clears this kind of break itself once the cause is fixed.");
+      }
+      await tx`update public.pool_breaks set resolved_at = ${now}, resolution = ${"staff: " + a.reason} where id = ${b.id} and resolved_at is null`;
+      await tx`insert into public.audit_events (actor_id, action, entity, entity_id, data)
+               values (${a.actor_id}, 'pool_break.resolved', 'pool_break', ${b.id},
+                       ${tx.json({ kind: b.kind, pool_id: b.pool_id, dedupe_key: b.dedupe_key, privileged_action_id: a.id })})`;
+    });
   },
   // The sign-off row is written by the executor, so it exists only if the action executed (PR #8 review fix 10).
   "weekly_review.signoff": async (d, a) => {
@@ -204,6 +235,7 @@ async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | n
     "pool.collection_state": "public.pools p join public.artists a on a.id = p.artist_id where p.id = $1",
     "pool_tranche.verify": "public.pool_tranches t join public.pools p on p.id = t.pool_id join public.artists a on a.id = p.artist_id where t.id = $1",
     "pool_op.replay": "public.pool_ops o join public.pools p on p.id = o.pool_id join public.artists a on a.id = p.artist_id where o.id = $1",
+    "pool_break.resolve": "public.pool_breaks b join public.pools p on p.id = b.pool_id join public.artists a on a.id = p.artist_id where b.id = $1",
     // Staff can't decide their own KYC: the "owner" of an investor subject is the investor.
     "investor.kyc_decide": "(select $1::uuid as owner_id) a",
   };

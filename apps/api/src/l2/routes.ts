@@ -177,6 +177,12 @@ export const l2StaffReadRoutes = (d: Deps): FastifyPluginAsync => async (app) =>
     const { result: _r, ...action } = await privileged(d, { action: "pool_op.replay", subjectId: uuid(req.params.id, "operation"), reason });
     return { action };
   });
+  /** Resolve a staff-resolved Pool break (`amount_mismatch`, `unapplied_funding`; review round 3 follow-up). Flag-free. */
+  app.post<{ Params: { id: string } }>("/pool-breaks/:id/resolve", async (req) => {
+    const { reason } = Reason.parse(req.body);
+    const { result: _r, ...action } = await privileged(d, { action: "pool_break.resolve", subjectId: uuid(req.params.id, "break"), reason });
+    return { action };
+  });
 };
 
 /** Staff actions that start something new, mounted at /api/v1/staff/l2. Entry paths: flag on. */

@@ -67,6 +67,8 @@ export const RULE_STATUS: Record<string, number> = {
   launch_deadline_mismatch: 409,
   launch_window_too_short: 409,
   replay_requires_resolution: 409,
+  break_not_open: 409,
+  break_not_staff_resolved: 409,
   issuer_cap_reached: 409,
   not_cured: 409,
   period_not_expected: 400,

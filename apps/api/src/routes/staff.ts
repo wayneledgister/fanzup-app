@@ -56,6 +56,13 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
         select 'pool_dead_letters', o.id, o.pool_id, 'Pool ' || replace(o.kind, '_', ' ') || ' ' || o.status || ': ' || coalesce(o.last_error, ''), o.updated_at, o.correlation_id
           from public.pool_ops o where o.status in ('dead', 'failed')
         union all
+        -- Open Layer 2 breaks (review round 3 follow-up). amount_mismatch / unapplied_funding are closed with
+        -- POST /staff/l2/pool-breaks/:id/resolve; the other kinds clear when recon no longer finds them.
+        select 'pool_breaks', b.id, b.pool_id,
+               b.kind || ' ' || b.amount_minor || case when b.kind in ('amount_mismatch', 'unapplied_funding') then ' (staff resolve)' else ' (clears on recon)' end,
+               b.opened_at, null
+          from public.pool_breaks b where b.resolved_at is null
+        union all
         select 'unmatched', e.id, null, e.type || ' ' || coalesce(e.object_ref, ''), e.received_at, e.correlation_id
           from public.provider_events e where e.status = 'unmatched'
         union all

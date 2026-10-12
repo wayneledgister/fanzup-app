@@ -13,7 +13,7 @@ import { launchPool, reconcileL2Ledger } from "../src/l2/service";
 import { RegCfError } from "../src/regcf/types";
 import {
   advance, afterDeadline, approvedPool, ATTEST, buy, cancel, countCalls, investor, invRow, l2kit, livePool, openBreaks, poolLedger, poolRow,
-  risingCreator, tick, WEBHOOK_SECRET, type L2Kit,
+  risingCreator, setFlag, tick, WEBHOOK_SECRET, type L2Kit,
 } from "./l2-helpers";
 
 const DAY = 86_400_000;
@@ -25,6 +25,12 @@ const refundOp = async (k: L2Kit, inv: string) =>
     select id, status, provider_ref, sent_at, call_started_at, amount_minor, last_error from public.pool_ops where subject_id = ${inv} and kind = 'refund'`))[0];
 const replay = (k: L2Kit, opId: string, reason = "Provider outage is over; retry the refund") =>
   k.app.inject({ method: "POST", url: `/api/v1/staff/l2/pool-ops/${opId}/replay`, headers: { authorization: k.staff }, payload: { reason } });
+const resolveBreak = (k: L2Kit, breakId: string, reason = "Provider record checked; the full amount moved") =>
+  k.app.inject({ method: "POST", url: `/api/v1/staff/l2/pool-breaks/${breakId}/resolve`, headers: { authorization: k.staff }, payload: { reason } });
+const breakId = async (k: L2Kit, dedupeKey: string) =>
+  (await asService(k.sql, (tx) => tx<{ id: string }[]>`select id from public.pool_breaks where dedupe_key = ${dedupeKey} and resolved_at is null`))[0]?.id;
+const queue = async (k: L2Kit, type: string) =>
+  (await k.app.inject({ method: "GET", url: `/api/v1/staff/queue?type=${type}`, headers: { authorization: k.staff } })).json().items as { type: string; id: string; summary: string }[];
 
 /** Drop the provider's webhooks of these types (delivered as far as the provider knows; the API never sees them). */
 function dropWebhooks(k: L2Kit, types: string[]) {
@@ -208,6 +214,21 @@ describe("lost confirmation webhook → recon recovers or flags it (review round
     const overdue = await reconcileL2Ledger(k, { now: new Date(k.clock.getTime() + 14 * DAY) });
     expect(overdue.breaks.filter((b) => b.poolId === pool).map((b) => b.kind).sort()).toEqual(["op_unconfirmed", "refund_overdue"]);
     expect(overdue.breaks.find((b) => b.kind === "refund_overdue" && b.poolId === pool)?.refs).toMatchObject({ op_id: op.id, status: "sent" });
+
+    // Derived kinds are recon's to clear: staff can't resolve them.
+    const derived = await resolveBreak(k, await breakId(k, `op_unconfirmed:${op.id}`));
+    expect(derived.statusCode).toBe(409);
+    expect(derived.json().error).toBe("break_not_staff_resolved");
+    // The `sent` op with an open op_unconfirmed break is replayable: the runner looks it up (nothing), calls again, and
+    // the refund confirms; recon then clears both breaks.
+    const r2 = await replay(k, op.id, "Provider has no record of this refund; send it again");
+    expect(r2.statusCode, r2.body).toBe(200);
+    await advance(k, 3);
+    expect((await refundOp(k, inv)).status).toBe("confirmed");
+    expect((await invRow(k.sql, inv)).status).toBe("refunded");
+    const clean = await reconcileL2Ledger(k, { poolId: pool, now: k.clock });
+    expect(clean.breaks).toEqual([]);
+    expect((await openBreaks(k.sql, pool)).map((b) => b.kind)).toEqual([]);
   });
 });
 
@@ -241,8 +262,24 @@ describe("pool_op.replay after an amount mismatch; lookup before any re-call (re
     expect(refused.json().error).toBe("replay_requires_resolution");
     expect((await refundOp(k, inv)).status).toBe("failed");
 
-    // Staff resolve the break (the provider's own record shows the full $100 moved); replay is then allowed.
-    await asService(k.sql, (tx) => tx`update public.pool_breaks set resolved_at = now(), resolution = 'test: provider record shows the full amount' where dedupe_key = ${"amount_mismatch:" + failed.id} and resolved_at is null`);
+    // The break is in the staff queue; staff resolve it through the endpoint (the provider's own record shows the full
+    // $100 moved); replay is then allowed.
+    const bid = await breakId(k, `amount_mismatch:${failed.id}`);
+    expect(await queue(k, "pool_breaks")).toEqual(expect.arrayContaining([expect.objectContaining({ id: bid, summary: expect.stringContaining("amount_mismatch") })]));
+    await setFlag(k.sql, false); // flag-free, like the replay it unblocks
+    const res = await resolveBreak(k, bid);
+    await setFlag(k.sql, true);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().action).toMatchObject({ status: "executed" }); // not a money action: never delayed
+    const [closed] = await asService(k.sql, (tx) => tx<{ resolved_at: Date | null; resolution: string }[]>`select resolved_at, resolution from public.pool_breaks where id = ${bid}`);
+    expect(closed.resolved_at).not.toBeNull();
+    expect(closed.resolution).toBe("staff: Provider record checked; the full amount moved");
+    const [audit] = await asService(k.sql, (tx) => tx<{ data: { kind: string } }[]>`select data from public.audit_events where action = 'pool_break.resolved' and entity_id = ${bid}`);
+    expect(audit.data.kind).toBe("amount_mismatch");
+    expect((await queue(k, "pool_breaks")).map((i) => i.id)).not.toContain(bid);
+    const again = await resolveBreak(k, bid);
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe("break_not_open");
     const calls = countCalls(k, ["refundFundMove", "refundTrade", "listTransactions"]);
     const ok = await replay(k, failed.id, "Provider record shows the full refund; confirm it");
     expect(ok.statusCode, ok.body).toBe(200);
