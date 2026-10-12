@@ -1,23 +1,32 @@
 /**
- * Layer 2 HTTP routes (design §9). Every plugin is behind the server-side `layer2` gate (gate.ts): 404
- * `layer2_disabled` unless the mock provider is configured and the DB flag is on.
+ * Layer 2 HTTP routes (design §9). Flag scope (design §2; round 3 finding 4, round 5 findings 3, 4):
+ *  - ENTRY routes (fan and creator routes, staff actions that start something new, the dev clock) sit behind `l2Gate`:
+ *    404 `layer2_disabled` unless the mock provider is configured AND the DB flag is on;
+ *  - COMPLETION routes sit behind `l2MockGate` (provider configured, flag not required): the investor's own
+ *    `GET /investments/:id` and `POST /investments/:id/cancel` (the 227.304(a) right), staff `GET queue`,
+ *    `GET pools`, `GET pools/:id/money`, `GET pools/:id/form-c`, `GET investors`, `POST pools/:id/recon` and
+ *    `POST pools/:id/collection-state`, and the signed `regcf` webhook (stored before processing, processed only through
+ *    main's claimed inbox).
+ * The flag switch itself (`POST /staff/flags/layer2`) lives in the M1 staff plugin, outside both gates (staff + aal2 +
+ * privileged(), `provider_missing` without REGCF_PROVIDER=mock).
  */
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-import { CertificationRequest, InvestRequest, KycStartRequest, PoolDraftRequest, StatementRequest } from "@fanzup/shared/l2schemas";
+import { CertificationRequest, InvestRequest, KycStartRequest, PoolDraftRequest, PoolLaunchRequest, PoolSubmitRequest, StatementRequest } from "@fanzup/shared/l2schemas";
 import { asService, n } from "../db";
 import { HttpError, optionalUser, requireUser, requireVerifiedUser } from "../lib/auth";
 import type { Claims } from "../db";
 import { privileged, requireStaff } from "../staff";
+import { currentCtx } from "../context";
 import { runWorkerTick } from "../jobs";
 import { jobDeps, type Deps } from "../app";
 import { ingestRegCfEvent } from "./events";
 import { processEventById } from "../inbox";
 import { log } from "../log";
-import { l2Gate, l2On, regcfOf } from "./gate";
+import { l2Gate, l2MockGate, regcfOf } from "./gate";
 import {
-  addStatement, certify, commitDistribution, computeDistribution, createPoolDraft, investorMe, invest, launchPool, ownPool, reconcileL2Ledger, startKyc,
-  submitPool, updatePoolDraft,
+  addStatement, certify, computeDistribution, createPoolDraft, investorMe, invest, launchPool, periodWindows, reconcileL2Ledger, startKyc,
+  submitPool, updatePoolDraft, ownPool,
 } from "./service";
 import { creatorPool, creatorPools, formCDocument, investmentsFor, listPools, poolDetail, staffMoney, staffPools, staffQueue } from "./views";
 
@@ -28,7 +37,7 @@ const uuid = (v: string, what = "item") => {
 };
 const Reason = z.object({ reason: z.string() });
 
-/** Fan + public routes, mounted at /api/v1. */
+/** Fan + public routes, mounted at /api/v1. Entry paths: flag on. */
 export const l2FanRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.addHook("preHandler", l2Gate(d));
 
@@ -65,19 +74,8 @@ export const l2FanRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     const [{ missing }] = await asService(d.sql, (tx) => tx<{ missing: string[] }[]>`select public.missing_acceptances(${u.sub}) as missing`);
     if (missing.length) throw new HttpError(403, "acceptance_required", "Please review and accept the current terms first.");
     const r = await invest(d, u.sub, uuid(req.params.id, "Pool"), key, InvestRequest.parse(req.body));
-    return reply.status(r.status).send(r.body);
-  });
-  app.get<{ Params: { id: string } }>("/investments/:id", async (req) => {
-    const u = await requireUser(req, d.verify);
-    const [inv] = await investmentsFor(d.sql, u.sub, uuid(req.params.id, "investment"));
-    if (!inv) throw new HttpError(404, "investment_not_found", "We couldn't find that investment.");
-    return inv;
-  });
-  app.post<{ Params: { id: string } }>("/investments/:id/cancel", async (req) => {
-    const u = await requireUser(req, d.verify);
-    await asService(d.sql, (tx) => tx`select public.cancel_investment(${uuid(req.params.id, "investment")}, ${u.sub})`);
-    const [inv] = await investmentsFor(d.sql, u.sub, req.params.id);
-    return inv;
+    // A stored 4xx (rule violation, or the resume guard's terminal answer) replays with the same body.
+    return reply.status(r.status).send(r.status >= 400 ? { ...r.body, correlationId: currentCtx()?.correlationId ?? req.id } : r.body);
   });
   app.get("/portfolio", async (req) => {
     const u = await requireUser(req, d.verify);
@@ -86,7 +84,28 @@ export const l2FanRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   });
 };
 
-/** Creator routes, mounted at /api/v1/creator. */
+/**
+ * The investor's own investment and the cancel right (227.304(a)), mounted at /api/v1. Completion paths: they work with
+ * the flag off (design §2, round 5 finding 3). `POST …/cancel` → 200 `{ result: 'cancelled' | 'cancel_pending', investment }`.
+ */
+export const l2InvestorRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
+  app.addHook("preHandler", l2MockGate(d));
+  app.get<{ Params: { id: string } }>("/investments/:id", async (req) => {
+    const u = await requireUser(req, d.verify);
+    const [inv] = await investmentsFor(d.sql, u.sub, uuid(req.params.id, "investment"));
+    if (!inv) throw new HttpError(404, "investment_not_found", "We couldn't find that investment.");
+    return inv;
+  });
+  app.post<{ Params: { id: string } }>("/investments/:id/cancel", async (req) => {
+    const u = await requireUser(req, d.verify);
+    const id = uuid(req.params.id, "investment");
+    const [r] = await asService(d.sql, (tx) => tx<{ result: string }[]>`select public.cancel_investment(${id}, ${u.sub}, ${new Date()}) as result`);
+    const [investment] = await investmentsFor(d.sql, u.sub, id);
+    return { result: r.result, investment };
+  });
+};
+
+/** Creator routes, mounted at /api/v1/creator. Entry paths: flag on. */
 export const l2CreatorRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.addHook("preHandler", l2Gate(d));
   app.addHook("preHandler", async (req) => {
@@ -97,24 +116,34 @@ export const l2CreatorRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.get("/pools", async (req) => creatorPools(d.sql, user(req)));
   app.post("/pools", async (req, reply) => reply.status(201).send(await createPoolDraft(d.sql, user(req), PoolDraftRequest.parse(req.body) as never)));
   app.get<{ Params: { id: string } }>("/pools/:id", async (req) => creatorPool(d.sql, user(req), uuid(req.params.id, "Pool")));
+  app.get<{ Params: { id: string } }>("/pools/:id/periods", async (req) => {
+    const id = uuid(req.params.id, "Pool");
+    await ownPool(d.sql, user(req), id);
+    return { periods: await periodWindows(d.sql, id) };
+  });
   app.patch<{ Params: { id: string } }>("/pools/:id", async (req) => updatePoolDraft(d.sql, user(req), uuid(req.params.id, "Pool"), PoolDraftRequest.parse(req.body) as never));
-  app.post<{ Params: { id: string } }>("/pools/:id/submit", async (req) => submitPool(d.sql, user(req), uuid(req.params.id, "Pool")));
-  app.post<{ Params: { id: string } }>("/pools/:id/launch", async (req) => launchPool(d, user(req), uuid(req.params.id, "Pool")));
+  app.post<{ Params: { id: string } }>("/pools/:id/submit", async (req) =>
+    submitPool(d.sql, user(req), uuid(req.params.id, "Pool"), PoolSubmitRequest.parse(req.body ?? {}).otherRegCfSales12mMinor));
+  app.post<{ Params: { id: string } }>("/pools/:id/launch", async (req) => launchPool(d, user(req), uuid(req.params.id, "Pool"), PoolLaunchRequest.parse(req.body ?? {})));
   app.post<{ Params: { id: string } }>("/pools/:id/statements", async (req, reply) =>
     reply.status(201).send(await addStatement(d.sql, user(req), uuid(req.params.id, "Pool"), StatementRequest.parse(req.body))));
   app.post<{ Params: { id: string } }>("/pool-tranches/:id/evidence", async (req, reply) => {
     const b = z.object({ notes: z.string().min(10).max(4000), links: z.array(z.string().url().startsWith("https://")).max(10).default([]) }).parse(req.body);
-    const [r] = await asService(d.sql, (tx) => tx<{ id: string }[]>`select public.submit_pool_tranche_evidence(${uuid(req.params.id, "milestone")}, ${user(req)}, ${b.notes}, ${b.links}) as id`);
+    const [r] = await asService(d.sql, (tx) => tx<{ id: string }[]>`
+      select public.submit_pool_tranche_evidence(${uuid(req.params.id, "milestone")}, ${user(req)}, ${b.notes}, ${b.links}, ${new Date()}) as id`);
     return reply.status(201).send({ evidenceId: r.id });
   });
 };
 
-/** Staff routes, mounted at /api/v1/staff/l2. Every state change goes through privileged(). */
-export const l2StaffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
+/**
+ * Staff routes that watch and reconcile money already in flight, mounted at /api/v1/staff/l2. Completion paths:
+ * REGCF_PROVIDER=mock + staff/aal2, flag not required. State changes go through privileged().
+ */
+export const l2StaffReadRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.addHook("preHandler", async (req) => {
     await requireStaff(req, d);
   });
-  app.addHook("preHandler", l2Gate(d));
+  app.addHook("preHandler", l2MockGate(d));
 
   app.get("/queue", async () => staffQueue(d.sql));
   app.get("/pools", async () => staffPools(d.sql));
@@ -131,6 +160,25 @@ export const l2StaffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
         from public.investor_profiles ip join public.profiles pr on pr.id = ip.user_id order by (ip.kyc_status = 'manual_review') desc, updated desc limit 200`);
     return { investors: rows.map((r) => ({ userId: r.user_id, name: r.name, kycStatus: r.kyc_status, state: r.state, certified: r.certified, accredited: r.accredited, updatedAt: r.updated.toISOString() })) };
   });
+  app.post<{ Params: { id: string } }>("/pools/:id/recon", async (req) => {
+    const id = uuid(req.params.id, "Pool");
+    const now = new Date();
+    const [r] = await asService(d.sql, (tx) => tx<{ r: unknown }[]>`select public.reconcile_pool_revenue(${id}, ${now}) as r`);
+    const ledger = await reconcileL2Ledger({ sql: d.sql, regcf: regcfOf(d) }, { poolId: id, now });
+    return { revenue: r.r, ledger };
+  });
+  app.post<{ Params: { id: string } }>("/pools/:id/collection-state", async (req) => {
+    const b = z.object({ to: z.enum(["REMEDIATION", "CHARGED_OFF", "COLLECTING"]), reason: z.string() }).parse(req.body);
+    return { action: await privileged(d, { action: "pool.collection_state", subjectId: uuid(req.params.id, "Pool"), reason: b.reason, params: { to: b.to } }) };
+  });
+};
+
+/** Staff actions that start something new, mounted at /api/v1/staff/l2. Entry paths: flag on. */
+export const l2StaffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
+  app.addHook("preHandler", async (req) => {
+    await requireStaff(req, d);
+  });
+  app.addHook("preHandler", l2Gate(d));
 
   app.post<{ Params: { id: string } }>("/pools/:id/review", async (req) => {
     const b = z.object({ decision: z.enum(["approved", "revisions_requested"]), notes: z.string().max(4000).optional(), reason: z.string() }).parse(req.body);
@@ -152,23 +200,12 @@ export const l2StaffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     if (!t) throw new HttpError(404, "not_found", "We couldn't find that milestone.");
     return { action: await privileged(d, { action: "pool_tranche.verify", subjectId: req.params.id, reason, amountMinor: t.amount == null ? null : n(t.amount) }) };
   });
-  app.post<{ Params: { id: string } }>("/pools/:id/recon", async (req) => {
-    const id = uuid(req.params.id, "Pool");
-    const [r] = await asService(d.sql, (tx) => tx<{ r: unknown }[]>`select public.reconcile_pool_revenue(${id}) as r`);
-    const ledger = await reconcileL2Ledger(d, id);
-    return { revenue: r.r, ledger };
-  });
-  /** Mock-only trigger: a distributor/lockbox settlement lands in the Pool's collection account (01b §3). */
+  /** Mock-only trigger: a distributor/lockbox settlement lands in the Pool's collection account (01b §3). A staff action. */
   app.post<{ Params: { id: string } }>("/pools/:id/deposits", async (req) => {
-    const regcf = regcfOf(d);
-    if (!regcf.simulateDeposit) throw new HttpError(404, "not_available", "Deposits can only be simulated with the mock provider.");
-    const b = z.object({ amountMinor: z.number().int().positive(), reference: z.string().min(2).max(40), reason: z.string().optional() }).parse(req.body);
-    const [p] = await asService(d.sql, (tx) => tx<{ collection: string | null }[]>`select provider_collection_ref as collection from public.pools where id = ${uuid(req.params.id, "Pool")}`);
-    if (!p?.collection) throw new HttpError(409, "no_collection_account", "This Pool has no collection account yet.");
-    const key = String(req.headers["idempotency-key"] ?? `deposit:${req.params.id}:${b.reference}:${b.amountMinor}`);
-    const dep = await regcf.simulateDeposit(p.collection, { amount: b.amountMinor, reference: b.reference, externalId: req.params.id }, key);
-    await asService(d.sql, (tx) => tx`insert into public.audit_events (action, entity, entity_id, data) values ('revenue.deposit_simulated', 'pool', ${req.params.id}, ${tx.json({ amount_minor: b.amountMinor, reference: b.reference })})`);
-    return { depositId: dep.id, status: "pending" };
+    if (!regcfOf(d).simulateDeposit) throw new HttpError(404, "not_available", "Deposits can only be simulated with the mock provider.");
+    const b = z.object({ amountMinor: z.number().int().positive(), reference: z.string().min(2).max(40), reason: z.string().default("Simulated royalty deposit (mock)") }).parse(req.body);
+    const action = await privileged(d, { action: "pool.deposit_simulate", subjectId: uuid(req.params.id, "Pool"), reason: b.reason, params: { amountMinor: b.amountMinor, reference: b.reference } });
+    return { action, depositId: (action.result as { depositId?: string } | undefined)?.depositId ?? null, status: "pending" };
   });
   app.post<{ Params: { id: string } }>("/pools/:id/distributions/dry-run", async (req) => {
     const b = z.object({ label: z.string().min(2).max(40) }).parse(req.body);
@@ -177,18 +214,24 @@ export const l2StaffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.post<{ Params: { id: string } }>("/pools/:id/distributions/commit", async (req) => {
     const b = z.object({ label: z.string().min(2).max(40), hash: z.string().regex(/^[0-9a-f]{64}$/), reason: z.string() }).parse(req.body);
     const run = await computeDistribution(d.sql, uuid(req.params.id, "Pool"), b.label);
+    // A stale dry-run is refused at request time, before any action is recorded or scheduled (round-1 review, PR #12).
+    if (run.hash !== b.hash) {
+      const [prior] = await asService(d.sql, (tx) => tx<{ id: string }[]>`select id from public.distribution_runs where pool_id = ${req.params.id} and label = ${b.label} and input_hash = ${b.hash}`);
+      if (prior) return { action: null, runId: prior.id, replayed: true };
+      throw new HttpError(409, "run_stale", "Collected revenue or holdings changed since the dry-run. Run the dry-run again.");
+    }
     return { action: await privileged(d, { action: "pool.distribution_commit", subjectId: req.params.id, reason: b.reason, amountMinor: run.allocation.runTotalMinor, params: { label: b.label, hash: b.hash } }) };
-  });
-  app.post<{ Params: { id: string } }>("/pools/:id/collection-state", async (req) => {
-    const b = z.object({ to: z.enum(["REMEDIATION", "CHARGED_OFF", "COLLECTING"]), reason: z.string() }).parse(req.body);
-    return { action: await privileged(d, { action: "pool.collection_state", subjectId: uuid(req.params.id, "Pool"), reason: b.reason, params: { to: b.to } }) };
   });
 };
 
-/** Signed provider webhooks, mounted at /api/v1/webhooks (raw-body parser registered by the parent plugin). */
+/**
+ * Signed provider webhooks, mounted at /api/v1/webhooks (raw-body parser registered by the parent plugin). Runs with the
+ * flag off. The event is stored before any processing; processing goes through main's claimed inbox (inline attempt
+ * here, the worker otherwise).
+ */
 export function registerRegCfWebhook(app: Parameters<FastifyPluginAsync>[0], d: Deps) {
   app.post("/regcf", async (req, reply) => {
-    if (!d.regcf) return reply.status(404).send();
+    if (!d.regcf) return reply.status(404).send({ error: "layer2_disabled" });
     let evt;
     try {
       evt = d.regcf.parseWebhook((req.body as Buffer).toString("utf8"), req.headers["x-mock-escrow-signature"] as string | undefined);
@@ -196,7 +239,6 @@ export function registerRegCfWebhook(app: Parameters<FastifyPluginAsync>[0], d: 
       log("warn", "webhook.regcf_bad_signature");
       return reply.status(400).send({ error: "bad_signature" });
     }
-    if (!(await l2On(d))) return reply.status(404).send({ error: "layer2_disabled" });
     const { id, inserted } = await ingestRegCfEvent(d.sql, evt);
     // Stored before processing (FR-PAY-002). Processing failures never fail the delivery; the worker retries.
     if (inserted) await processEventById(d.sql, d.provider, id).catch(() => undefined);
@@ -204,14 +246,15 @@ export function registerRegCfWebhook(app: Parameters<FastifyPluginAsync>[0], d: 
   });
 }
 
-/** Dev-only (mock provider, never deployed): move the provider clock and run one worker tick at the same offset. */
+/** Dev-only (mock provider, never deployed): move the provider clock and run one worker tick at the provider's clock. */
 export const l2DevRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.addHook("preHandler", l2Gate(d));
   app.post("/advance", async (req) => {
     const b = z.object({ seconds: z.number().min(0).max(10 * 365 * 86_400).default(5) }).parse(req.body ?? {});
     const provider = regcfOf(d);
-    const mock = provider.advance ? await provider.advance(b.seconds) : null;
-    const tick = await runWorkerTick(jobDeps(d), new Date(Date.now() + b.seconds * 1000));
+    const mock = provider.advance ? ((await provider.advance(b.seconds)) as { now?: string } | null) : null;
+    const at = mock?.now ? new Date(mock.now) : new Date(Date.now() + b.seconds * 1000);
+    const tick = await runWorkerTick(jobDeps(d), at);
     return { provider: mock, tick };
   });
 };

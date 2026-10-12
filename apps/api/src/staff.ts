@@ -33,10 +33,16 @@ export async function singleOperatorMode(sql: Sql): Promise<boolean> {
 export type ActionName =
   | "campaign.review" | "tranche.verify" | "backing.refund" | "recon.override" | "provider_event.replay" | "outbound_op.replay" | "weekly_review.signoff"
   // Layer 2 (CR-002)
-  | "pool.review" | "pool.collection_execute" | "investor.kyc_decide" | "pool_tranche.verify" | "pool.distribution_commit" | "pool.collection_state" | "flag.set";
+  | "pool.review" | "pool.collection_execute" | "investor.kyc_decide" | "pool_tranche.verify" | "pool.distribution_commit" | "pool.collection_state"
+  | "pool.deposit_simulate" | "flag.set";
 
 /** Actions that move money (delay + daily limits apply while single-operator mode is on). */
 const MONEY_ACTIONS = new Set<ActionName>(["tranche.verify", "backing.refund", "pool_tranche.verify", "pool.distribution_commit"]);
+/**
+ * Count-limited per UTC day in single-operator mode, each against `dailyLimits.verifications` (round-1 review, PR #12:
+ * Layer 2 milestone verifications and distribution commits get the same daily limit as M1 milestone verifications).
+ */
+const COUNT_LIMITED = new Set<ActionName>(["tranche.verify", "pool_tranche.verify", "pool.distribution_commit"]);
 
 interface ActionRow {
   id: string;
@@ -53,7 +59,8 @@ interface ActionRow {
 }
 
 type ActionDeps = Pick<Deps, "sql" | "provider"> & { regcf?: Deps["regcf"] };
-type Executor = (d: ActionDeps, a: ActionRow) => Promise<unknown>;
+/** `now` is the clock of the request (immediate) or the worker tick (delayed), passed to every L2 money function. */
+type Executor = (d: ActionDeps, a: ActionRow, now: Date) => Promise<unknown>;
 
 const EXECUTORS: Record<ActionName, Executor> = {
   "campaign.review": async (d, a) => {
@@ -99,12 +106,12 @@ const EXECUTORS: Record<ActionName, Executor> = {
     }
   },
   // ── Layer 2 (CR-002). Reviewer ≠ owner is enforced here (campaignOwner) and again in SQL. ──
-  "pool.review": async (d, a) => {
+  "pool.review": async (d, a, now) => {
     const p = a.params as { decision: string; notes?: string };
-    await asService(d.sql, (tx) => tx`select public.review_pool(${a.subject_id}, ${a.actor_id}, ${p.decision}, ${p.notes ?? null})`);
+    await asService(d.sql, (tx) => tx`select public.review_pool(${a.subject_id}, ${a.actor_id}, ${p.decision}, ${p.notes ?? null}, ${now})`);
   },
-  "pool.collection_execute": async (d, a) => {
-    await asService(d.sql, (tx) => tx`select public.execute_collection_mechanism(${a.subject_id}, ${a.actor_id}, ${tx.json(((a.params as { details?: unknown }).details ?? {}) as never)})`);
+  "pool.collection_execute": async (d, a, now) => {
+    await asService(d.sql, (tx) => tx`select public.execute_collection_mechanism(${a.subject_id}, ${a.actor_id}, ${tx.json(((a.params as { details?: unknown }).details ?? {}) as never)}, ${now})`);
   },
   "investor.kyc_decide": async (d, a) => {
     const decision = (a.params as { decision: "approved" | "rejected" }).decision;
@@ -117,15 +124,31 @@ const EXECUTORS: Record<ActionName, Executor> = {
       await tx`insert into public.outbox (topic, payload) values ('l2.notify', ${tx.json({ template: "kyc_result", user_id: a.subject_id, status: decision })})`;
     });
   },
-  "pool_tranche.verify": async (d, a) => {
-    await asService(d.sql, (tx) => tx`select public.verify_pool_tranche(${a.subject_id}, ${a.actor_id})`);
+  "pool_tranche.verify": async (d, a, now) => {
+    await asService(d.sql, (tx) => tx`select public.verify_pool_tranche(${a.subject_id}, ${a.actor_id}, ${now})`);
   },
-  "pool.distribution_commit": async (d, a) => {
+  "pool.distribution_commit": async (d, a, now) => {
     const p = a.params as { label: string; hash: string };
-    await commitDistribution(d.sql, a.subject_id!, p.label, p.hash, a.actor_id);
+    return commitDistribution(d.sql, a.subject_id!, p.label, p.hash, a.actor_id, now);
   },
-  "pool.collection_state": async (d, a) => {
-    await asService(d.sql, (tx) => tx`select public.set_collection_state(${a.subject_id}, ${a.actor_id}, ${(a.params as { to: string }).to}::public.collection_state, ${a.reason})`);
+  // Runs with the flag off (design §2, §6): staff can still move a Pool already in DEFAULT or REMEDIATION.
+  "pool.collection_state": async (d, a, now) => {
+    await asService(d.sql, (tx) => tx`select public.set_collection_state(${a.subject_id}, ${a.actor_id}, ${(a.params as { to: string }).to}::public.collection_state, ${a.reason}, ${now})`);
+  },
+  // Mock-only test trigger (design §5 key table): one deposit per staff action, key `deposit:<privileged_action_id>` —
+  // never derived from amount and reference, so two real deposits with the same figures are never merged and a retried
+  // action never deposits twice. An entry path: refused while the flag is off.
+  "pool.deposit_simulate": async (d, a) => {
+    const p = a.params as { amountMinor: number; reference: string };
+    if (!d.regcf?.simulateDeposit) throw new HttpError(404, "not_available", "Deposits can only be simulated with the mock provider.");
+    const [pool] = await asService(d.sql, (tx) => tx<{ collection: string | null; on: boolean }[]>`
+      select provider_collection_ref as collection, public.l2_enabled() as on from public.pools where id = ${a.subject_id}`);
+    if (!pool?.on) throw new HttpError(404, "layer2_disabled", "Investing isn't open yet.");
+    if (!pool.collection) throw new HttpError(409, "no_collection_account", "This Pool has no collection account yet.");
+    const dep = await d.regcf.simulateDeposit(pool.collection, { amount: p.amountMinor, reference: p.reference, externalId: a.subject_id! }, `deposit:${a.id}`);
+    await asService(d.sql, (tx) => tx`insert into public.audit_events (action, entity, entity_id, data)
+                                      values ('revenue.deposit_simulated', 'pool', ${a.subject_id}, ${tx.json({ amount_minor: p.amountMinor, reference: p.reference, deposit_ref: dep.id })})`);
+    return { depositId: dep.id };
   },
   "flag.set": async (d, a) => {
     const p = a.params as { flag: string; on: boolean };
@@ -186,7 +209,7 @@ export async function privileged(
   const reason = typeof input.reason === "string" ? input.reason.trim() : "";
   if (reason.length < 10) throw new HttpError(400, "reason_required", "Type a reason of at least 10 characters. It goes in the audit log and your weekly review.");
   if ((await campaignOwner(d.sql, input.action, input.subjectId)) === c.actorId) {
-    throw new HttpError(403, "reviewer_is_owner", "You can't act on a campaign you own.");
+    throw new HttpError(403, "reviewer_is_owner", "You can't approve, verify or decide something you own or are the subject of.");
   }
 
   const single = await singleOperatorMode(d.sql);
@@ -199,16 +222,16 @@ export async function privileged(
   const [row] = await asService(d.sql, async (tx) => {
     if (money) {
       await tx`select pg_advisory_xact_lock(hashtext(${"privileged_actions:" + input.action}))`;
-      const [day] = await tx<{ refunds: bigint; verifications: bigint }[]>`
+      const [day] = await tx<{ refunds: bigint; same: bigint }[]>`
         select coalesce(sum(amount_minor) filter (where action = 'backing.refund'), 0) as refunds,
-               count(*) filter (where action = 'tranche.verify') as verifications
+               count(*) filter (where action = ${input.action}) as same
           from public.privileged_actions
          where status in ('scheduled', 'executing', 'executed') and created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'`;
       if (input.action === "backing.refund" && n(day.refunds) + (amount ?? 0) > POLICY.singleOperator.dailyLimits.refundsMinor) {
         throw new HttpError(409, "daily_limit", "This would pass today's refund limit for single-operator mode. It resets at midnight UTC.");
       }
-      if (input.action === "tranche.verify" && n(day.verifications) >= POLICY.singleOperator.dailyLimits.verifications) {
-        throw new HttpError(409, "daily_limit", "Today's verification limit for single-operator mode is reached. It resets at midnight UTC.");
+      if (COUNT_LIMITED.has(input.action) && n(day.same) >= POLICY.singleOperator.dailyLimits.verifications) {
+        throw new HttpError(409, "daily_limit", "Today's limit for this action in single-operator mode is reached. It resets at midnight UTC.");
       }
     }
     // A delayed staff refund must not run at or after the campaign's deadline (design §9; review round 2).
@@ -244,10 +267,10 @@ function errorCode(e: unknown): string {
 }
 
 /** Run an action this process has claimed (`status = 'executing'`). */
-async function execute(d: ActionDeps, a: ActionRow): Promise<ActionResult> {
+async function execute(d: ActionDeps, a: ActionRow, now = new Date()): Promise<ActionResult> {
   let result: unknown;
   try {
-    result = await EXECUTORS[a.action](d, a);
+    result = await EXECUTORS[a.action](d, a, now);
   } catch (e) {
     const msg = redact(String((e as { detail?: string; message?: string }).detail ?? (e as Error).message ?? e));
     await asService(d.sql, async (tx) => {
@@ -286,7 +309,7 @@ export async function executeDueActions(d: ActionDeps, now = new Date()) {
   for (const a of due) {
     await runWithCtx({ correlationId: a.correlation_id, actorId: a.actor_id, actorKind: "staff", aal: a.aal }, async () => {
       try {
-        await execute(d, a);
+        await execute(d, a, now);
       } catch (e) {
         log("alert", "staff_action.failed", { actionId: a.id, action: a.action, error: redact(String((e as Error).message ?? e)) });
       }

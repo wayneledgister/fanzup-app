@@ -22,7 +22,7 @@ import { artistRoutes } from "./routes/artist";
 import { staffRoutes } from "./routes/staff";
 import { executeDueActions } from "./staff";
 import type { RegCfProvider } from "./regcf";
-import { l2CreatorRoutes, l2DevRoutes, l2FanRoutes, l2StaffRoutes } from "./l2/routes";
+import { l2CreatorRoutes, l2DevRoutes, l2FanRoutes, l2InvestorRoutes, l2StaffReadRoutes, l2StaffRoutes } from "./l2/routes";
 import { l2On } from "./l2/gate";
 import { l2Tick } from "./l2/service";
 
@@ -141,9 +141,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   await app.register(artistRoutes(deps), { prefix: `${API_PREFIX}/v1/artist` });
   await app.register(staffRoutes(deps), { prefix: `${API_PREFIX}/v1/staff` });
   await app.register(internalRoutes(deps), { prefix: `${API_PREFIX}/internal` });
-  // Layer 2 (CR-002): every route is behind the server-side layer2 gate.
+  // Layer 2 (CR-002; design §2, §9): entry routes behind the server-side layer2 gate (provider + flag); completion
+  // routes (investor cancel / own investment, staff money view / recon / collection state) need the mock provider only.
   await app.register(l2FanRoutes(deps), { prefix: `${API_PREFIX}/v1` });
+  await app.register(l2InvestorRoutes(deps), { prefix: `${API_PREFIX}/v1` });
   await app.register(l2CreatorRoutes(deps), { prefix: `${API_PREFIX}/v1/creator` });
+  await app.register(l2StaffReadRoutes(deps), { prefix: `${API_PREFIX}/v1/staff/l2` });
   await app.register(l2StaffRoutes(deps), { prefix: `${API_PREFIX}/v1/staff/l2` });
   if (!deps.env.deployed && deps.regcf && deps.env.NODE_ENV !== "production") {
     await app.register(l2DevRoutes(deps), { prefix: `${API_PREFIX}/v1/dev/l2` });

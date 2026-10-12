@@ -39,6 +39,8 @@ export const PublicConfig = z.object({
   stripePublishableKey: z.string().nullable(),
   /** Current Terms/Privacy versions; the sign-up form sends these (design §3.7). */
   legal: z.object({ termsVersion: z.string(), privacyVersion: z.string() }),
+  /** The server's view of feature flags (FR-PLT-001; L2 design §2). Layer 2 is on only with the mock provider + DB flag. */
+  flags: z.object({ layer2: z.boolean() }).optional(),
 });
 export type PublicConfig = z.infer<typeof PublicConfig>;
 

@@ -161,6 +161,24 @@ export function businessDaysSince(from: Date, now = new Date()): number {
   return days;
 }
 
+/**
+ * Layer 2 pause rule (L2 design §5.1; kept apart from M1's list so Layer 2 activity can't pause an M1 payout — gate
+ * condition 1). An open one of these on a Pool, material or aged, pauses THAT Pool's `disburse` and `payout` ops;
+ * refunds never pause. `counter_mismatch`, `revenue_shortfall`, `revenue_overage` and `refund_overdue` never pause.
+ */
+export const L2_PAYOUT_PAUSING_KINDS = [
+  "escrow_diff", "collection_diff", "unmatched_provider_txn", "unmatched_ledger_txn", "unapplied_funding",
+  "liability_mismatch", "amount_mismatch", "stray_fund_move_aged",
+] as const;
+
+/** Is this Pool's money out (disbursements, distribution payouts) paused by an open material or aged L2 break? */
+export async function isPoolPayoutPaused(sql: Sql, poolId: string, now = new Date()): Promise<boolean> {
+  const rows = await asService(sql, (tx) => tx<{ amount_minor: bigint; opened_at: Date }[]>`
+    select amount_minor, opened_at from public.pool_breaks
+     where pool_id = ${poolId} and resolved_at is null and kind = any(${L2_PAYOUT_PAUSING_KINDS as unknown as string[]})`);
+  return rows.some((r) => Math.abs(n(r.amount_minor)) > POLICY.recon.materialityMinor || businessDaysSince(r.opened_at, now) > POLICY.recon.maxBreakAgeBusinessDays);
+}
+
 /** Payouts pause on any open money break (PAYOUT_PAUSING_KINDS) that is material or aged; refunds never pause. */
 export async function isPayoutPaused(sql: Sql, now = new Date()): Promise<boolean> {
   const rows = await asService(sql, (tx) => tx<{ amount_minor: bigint; opened_at: Date; override_until: string | null }[]>`
