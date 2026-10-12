@@ -4,8 +4,9 @@ Direct-to-fan funding for independent artists. *Fund the culture. Own the future
 
 | Path | What | Hosted on |
 |---|---|---|
-| `apps/web` | React app (Brand v2.0, 93 routes) | Vercel service `web` at `/` |
+| `apps/web` | React app (Brand v2.0, 102 routes) | Vercel service `web` at `/` |
 | `apps/api` | Fastify API: backings, escrow orchestration, settlement, refunds, milestone releases | Vercel service `api` at `/api`; worker on Render ([ADR-002](docs/adr/ADR-002-hosting.md)) |
+| `apps/mock-escrow` | Mock Reg CF escrow/offering provider (TransactAPI-shaped) for the Layer 2 demo — local and CI only ([ADR-007](docs/adr/ADR-007-regcf-provider-and-mock-escrow.md)) | never deployed |
 | `packages/shared` | Rules shared by web and API: creator tiers (PRD 01 §6.3), policy defaults, money, campaign state machine, request schemas | — |
 | `supabase/` | Postgres schema: double-entry ledger, RLS, money functions, seed | Supabase |
 
@@ -25,7 +26,7 @@ pnpm dev:api                     # http://localhost:8787/api  (or `npx vercel de
 pnpm --filter @fanzup/api worker # settlement + outbox worker
 pnpm test                        # needs TEST_DATABASE_URL (see SETUP.md A6)
 pnpm typecheck && pnpm lint:copy
-pnpm e2e                         # golden journey; needs the local stack running (see .github/workflows/ci.yml job e2e)
+pnpm e2e                         # golden + Layer 2 journeys; needs the local stack + mock escrow (see .github/workflows/ci.yml job e2e)
 ```
 
 ## Money-path rules (enforced in the database, tested in CI)
@@ -42,4 +43,34 @@ pnpm e2e                         # golden journey; needs the local stack running
 - Milestone payouts release strictly in order, and each transfer sends exactly what the ledger will accept at confirmation: a tranche's payout is created only after every earlier tranche is released, and its amount is re-checked against the ledger right before the transfer and never changed after the first call.
 
 ## Feature flags
-`layer2` (Reg CF investing) and `postBeta` (soft transfers, holder votes) are off by default. With Layer 2 (CR-002; built in the stacked PRs #11–#13, production-build rule tracked as L2-T-012), `layer2` is a server flag: the API serves Layer 2 data only when the database flag is on and it runs with the mock Reg CF provider (local/CI only), and a production web build shows Layer 2 screens only when the server reports `flags.layer2` — it ignores `VITE_FLAG_LAYER2` and `?flags=layer2`. In the dev server (`pnpm dev`), `VITE_FLAG_LAYER2=true` or `?flags=layer2` reveal the Layer 2 mock-only screens for review, never Layer 2 data. `postBeta` is a client flag: `VITE_FLAG_POSTBETA=true` or `?flags=postBeta` turn it on for review.
+`layer2` (Reg CF investing) and `postBeta` (soft transfers, holder votes) are off by default. With Layer 2 (CR-002; built in PRs #11–#13; production-build rule L2-T-012, unit-tested in `apps/web/test/flags.test.ts`), `layer2` is a server flag: the API serves Layer 2 data only when the database flag is on and it runs with the mock Reg CF provider (local/CI only), and a production web build shows Layer 2 screens only when the server reports `flags.layer2` — it ignores `VITE_FLAG_LAYER2` and `?flags=layer2`. In the dev server (`pnpm dev`), `VITE_FLAG_LAYER2=true` or `?flags=layer2` reveal the Layer 2 mock-only screens for review, never Layer 2 data. `postBeta` is a client flag: `VITE_FLAG_POSTBETA=true` or `?flags=postBeta` turn it on for review.
+
+**`layer2` is enforced on the server** (CR-002, FR-PLT-001 slice; L2 design §2): every Layer 2 **entry** route (fan and creator routes, staff actions that start something new, the demo clock) answers 404 `layer2_disabled` unless the API runs with `REGCF_PROVIDER=mock` **and** the database flag `flag.layer2` is on. **Completion** routes need only the mock provider, so money already in flight finishes with the flag off: an investor's own `GET /investments/:id` and cancel, the staff money view, queue, recon, collection state, `pool_op.replay` and `pool_break.resolve`, and the signed webhook. `GET /v1/config` reports both (`flags.layer2`, `flags.layer2Completion`); with the flag off the web app still renders `/investments/:id` as a cancel-only view and the staff Pool pages, on the server's completion signal only. `REGCF_PROVIDER=mock` is refused in any deployed environment, so Layer 2 can't be on in production and the completion signal is never sent there. Staff change the DB flag with `POST /api/v1/staff/flags/layer2` (audited); the local seed turns it on.
+
+## Layer 2 demo: album royalty Pool on mock rails (CR-002)
+A creator offers fans a share of an album's royalties for **Units** (Reg CF revenue-share Pool): Form C review, mock KYC/AML, Reg CF limits, escrow with target-or-refund, milestone releases, royalty statements reconciled to cash, and a deterministic Waterfall. **Demo only — not an offer of securities. Mock escrow and data.** Specs: [`specs/l2/`](specs/l2/), [CR-002](specs/changes/CR-002-l2-album-royalty-pool.md).
+
+```bash
+# once: apps/api/.env needs REGCF_PROVIDER=mock (see apps/api/.env.example); the web needs VITE_SUPABASE_URL/ANON_KEY
+pnpm db:start && pnpm db:reset        # migrations + seed.sql + seed_layer2.sql (local only)
+pnpm dev                              # web :5173, API :8787, mock escrow :8790 (loads fixtures matching the seed)
+pnpm dev:worker                       # settlement, provider operations, royalty reconciliation (or use the demo clock)
+pnpm demo:reset                       # start over: reset the DB and the mock escrow together
+```
+Seeded logins (local only; password in the header of `supabase/seed.sql`):
+| Who | Email | State |
+|---|---|---|
+| Creator, Rising | `nova@fanzup.test` | *Night Bloom* live and filling; *Demo Tape EP* ended at the cap |
+| Creator, Rising | `sol@fanzup.test` | *Sol Sessions Vol. 1* funded, two quarters distributed |
+| Creator, Starter | `lowends@fanzup.test` | can't create Pools (tier rule) |
+| Fan, verified | `fan@fanzup.test` (Jordan) | $7,500 limit, $2,000 used; holdings in Sol Sessions and a refunded Pool |
+| Fan, verified | `ava@fanzup.test` | $3,000 limit, $2,000 used |
+| Fan, accredited | `ben@fanzup.test` | no limit; at the cap in Demo Tape EP |
+| Fan, KYC rejected / manual review / not started | `cleo@` / `dev@` / `eli@fanzup.test` | |
+| Staff | `reviewer@fanzup.test` (M1 seed) | needs a TOTP code: the staff screens walk you through enrolling an authenticator |
+
+Walkthrough: `/creator/pools/new` (as Nova; the offering runs 21–60 days, 21 by default; submitting asks for other Reg CF sales in the last 12 months — self-reported, pending counsel, L2-Q12) → `/admin/pools` (as the reviewer: approve the Form C, execute the collection agreement) → creator launches (re-confirms the attestation) → `/pools` → invest as Eli (mock KYC: last name `KYCFAIL` is rejected, `AMLHOLD` goes to manual review; a whole-dollar amount ending in 13 is returned by the bank) → the confirmation shows amount, price, Units, issuer and the cancel-by time → on `/admin/pools/:id`, **Demo clock → Run past the offering deadline** → creator adds a royalty statement for a period of the Pool's schedule → staff send matching cash, reconcile, dry-run and commit a distribution (the committed run shows the dry-run's hash) → `/portfolio`.
+
+What the screens always say (Brand §7.4, D-2, D-4): every Layer 2 page carries the banner "Demo — not an offer of securities. Mock escrow and data."; the strongest collection badge always sits next to "Your claim is unsecured"; the Pool page, the documents step and the Form C view show "Intermediary: pending — L2-Q3" (no intermediary is engaged, and no copy may say one is — `lint:copy` enforces it). `pnpm lint:copy` also renders every Layer 2 notice template and the mock Form C and fails if any lacks the D-2 sentence.
+
+Cancelling: an investor can cancel until 48 hours before the deadline, from the confirmation page, the holding page or `/investments/:id`. A cancel while the payment is still moving shows "Cancellation received — we'll refund your payment in full as soon as it arrives" (`cancel_pending`). Staff tools on `/admin/pools/:id`: ledger in each account's natural sign (negatives highlighted), replay a failed pool operation, resolve an amount-mismatch or unapplied-funding break, move a Pool in default to remediation and back to collecting once cured, dry-run/commit on funded and matured Pools.

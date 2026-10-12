@@ -6,11 +6,9 @@
  */
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { ArrowLeft, Building2, Landmark, Lock, SearchX, ShieldCheck, Undo2 } from "lucide-react";
-import { Badge, Button, Callout, Container, EmptyState, KeyValue, ProgressBar, Stepper } from "@/components/brand";
-import { formatMoney } from "@/lib/format";
-import type { Pool } from "@/lib/mock";
-import { COLLECTION_INFO } from "./data";
+import { ArrowLeft, Landmark, Lock, SearchX, ShieldCheck, Undo2 } from "lucide-react";
+import { Button, Callout, Container, EmptyState, ProgressBar, Stepper } from "@/components/brand";
+import { formatUsd } from "@/lib/format";
 
 /* ── KYC wizard frame ───────────────────────────────────── */
 
@@ -68,54 +66,17 @@ export function WizardFooter({ backTo, backLabel = "Back", children }: { backTo?
   );
 }
 
-/* ── Pool terms ─────────────────────────────────────────── */
-
-export function CollectionBadge({ collection }: { collection: Pool["collection"] }) {
-  const info = COLLECTION_INFO[collection];
-  return <Badge tone={info.tone}>{info.label}</Badge>;
-}
-
-export function PoolTerms({ pool, className }: { pool: Pool; className?: string }) {
-  return (
-    <dl className={className}>
-      <KeyValue k="Revenue share" v={<span className="num">{pool.revenueSharePct}% of covered revenue</span>} />
-      <KeyValue k="Return cap" v={<span className="num">{pool.returnCapMultiple}× what you paid</span>} />
-      <KeyValue k="Maturity" v={<span className="num">{pool.maturityYears} years</span>} />
-      <KeyValue k="Distributions" v={pool.distribution} />
-      <KeyValue k="Unit price" v={<span className="num">{formatMoney(pool.unitPriceMinor)}</span>} />
-      <KeyValue k="Collection" v={<CollectionBadge collection={pool.collection} />} />
-    </dl>
-  );
-}
-
-/** Raised vs target for a Pool (investors, not backers). */
-export function OfferingProgress({ pool, daysLeft }: { pool: Pool; daysLeft: number }) {
-  const pct = Math.round((pool.raisedMinor / pool.targetMinor) * 100);
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="num text-lg font-medium text-fg">{formatMoney(pool.raisedMinor)}</span>
-        <span className="num text-sm text-muted">{pct}% of target</span>
-      </div>
-      <ProgressBar value={pool.raisedMinor} max={pool.targetMinor} tone="info" label="Offering progress" />
-      <div className="flex justify-between gap-2 text-xs text-muted">
-        <span>
-          of <span className="num">{formatMoney(pool.targetMinor)}</span> target · <span className="num">{pool.investors.toLocaleString()}</span> investors
-        </span>
-        <span className="num">{daysLeft > 0 ? `${daysLeft}d left` : "Closed"}</span>
-      </div>
-    </div>
-  );
-}
-
 /* ── Layer 2 disclosures not covered by compliance.tsx ──── */
 
-/** Reg CF offering escrow (distinct from Layer 1 EscrowNotice, which says "not an investment"). */
+/**
+ * Reg CF offering escrow (distinct from Layer 1 EscrowNotice, which says "not an investment"). In this demo the escrow
+ * account is the mock provider's; no intermediary or escrow agent is engaged (L2-Q3, D-4).
+ */
 export function OfferingEscrowNotice() {
   return (
     <Callout tone="info" icon={<Landmark />} title="Held in escrow until the offering closes">
-      Your money is held by the intermediary's escrow agent — not by FanZuP and not by the artist. If the offering doesn't reach its
-      target by the deadline, or you cancel in time, it's returned to you.
+      Investor money waits in the offering's escrow account — not with FanZuP and not with the artist. In this demo that account is simulated. If the offering
+      doesn't reach its target by the deadline, or you cancel in time, it's returned to you in full.
     </Callout>
   );
 }
@@ -131,16 +92,6 @@ export function CancellationNotice({ cancelBy }: { cancelBy?: string }) {
         "Until then you can cancel and get your money back in full. "
       )}
       If the offering terms change materially, you'll be asked to reconfirm — if you don't, your investment is cancelled and refunded.
-    </Callout>
-  );
-}
-
-export function IntermediaryDisclosure() {
-  return (
-    <Callout tone="info" icon={<Building2 />} title="Who you're investing through">
-      This offering is made under Regulation Crowdfunding through our FINRA-registered intermediary, which hosts the Form C and runs
-      the offering. FanZuP provides the technology. Neither FanZuP nor the intermediary gives investment advice or recommends this
-      offering.
     </Callout>
   );
 }
@@ -163,9 +114,9 @@ export function LimitMeter({ limit, used, extra = 0 }: { limit: number; used: nu
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2 text-sm">
         <span className="text-muted">
-          <span className="num text-fg">{formatMoney(used + extra)}</span> used of <span className="num">{formatMoney(limit)}</span>
+          <span className="num text-fg">{formatUsd(used + extra)}</span> used of <span className="num">{formatUsd(limit)}</span>
         </span>
-        <span className="num text-fg">{formatMoney(remaining)} left</span>
+        <span className="num text-fg">{formatUsd(remaining)} left</span>
       </div>
       <ProgressBar value={used + extra} max={limit} tone={used + extra > limit ? "gold" : "info"} label="Reg CF limit used" />
     </div>

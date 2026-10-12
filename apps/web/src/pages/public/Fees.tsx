@@ -93,9 +93,9 @@ export default function Fees() {
               <h2 className="text-xl font-semibold">Investment Pools (Regulation Crowdfunding)</h2>
             </div>
             <p className="text-sm text-muted">
-              Pools are offered through a FINRA-registered intermediary, which charges its own fee separate from FanZuP's. Every fee for a
-              Pool — FanZuP's, the intermediary's, any referral compensation and card processing — is disclosed in that Pool's Form C
-              before it opens.
+              Pools would be offered through a registered intermediary (not chosen yet), which would charge its own fee separate from
+              FanZuP's. Every fee for a Pool — FanZuP's, the intermediary fee, any referral compensation and card processing — is disclosed
+              in that Pool's Form C before it opens.
             </p>
           </Card>
         </section>

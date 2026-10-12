@@ -1,7 +1,8 @@
 /** Helpers for the golden journey: API calls as artist/staff, Mailpit, TOTP. No secrets: local/CI seed accounts only. */
 import { createClient } from "@supabase/supabase-js";
 import { authenticator } from "otplib";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 
@@ -38,12 +39,16 @@ export async function seedSignIn(email: string, credential = SEED_PASSWORD) { //
   return data.session.access_token;
 }
 
+/** TOTP secrets enrolled during this test run, shared across spec files (a verified factor's secret can't be read back). */
+const totpCache = (email: string) => join(tmpdir(), `fanzup-e2e-totp-${email.replace(/[^a-z0-9]/gi, "_")}.json`);
+
 /** Local/CI stack's service-role key (`supabase status`), used only to clear the seed reviewer's old TOTP factors. */
 export const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
 /**
  * Staff session at aal2: enrol a TOTP factor and verify a code — the real Supabase MFA flow.
  *
+ * Within one run the factor's secret is cached in a temp file so several spec files reuse it.
  * Retry-safe (PR #9 review finding 4): a previous attempt (a Playwright retry, or an earlier local run) leaves a
  * verified factor whose secret is gone, and a verified factor can only be removed by the user at aal2 — which needs
  * that secret. So factors left over from earlier runs are deleted through the Auth admin API (local/CI stack only;
@@ -54,6 +59,20 @@ export async function staffToken(email: string) {
   const { data: signedIn, error } = await sb.auth.signInWithPassword({ email, password: SEED_PASSWORD });
   if (error || !signedIn.user) throw new Error(`staff sign-in failed: ${error?.message}`);
   const { data: existing } = await sb.auth.mfa.listFactors();
+  const known = existing?.totp.find((f) => f.status === "verified");
+  if (known && existsSync(totpCache(email))) {
+    const { factorId, secret } = JSON.parse(readFileSync(totpCache(email), "utf8"));
+    if (factorId === known.id) {
+      // A code can't be reused within its 30-second step; wait for the next one if needed.
+      const v = await sb.auth.mfa.challengeAndVerify({ factorId, code: authenticator.generate(secret) });
+      if (v.error) {
+        await new Promise((r) => setTimeout(r, authenticator.timeRemaining() * 1000 + 500));
+        const v2 = await sb.auth.mfa.challengeAndVerify({ factorId, code: authenticator.generate(secret) });
+        if (v2.error) throw new Error(`TOTP verify failed: ${v2.error.message}`);
+      }
+      return (await sb.auth.getSession()).data.session!.access_token;
+    }
+  }
   for (const f of existing?.all ?? []) if (f.status !== "verified") await sb.auth.mfa.unenroll({ factorId: f.id });
   const verified = existing?.all.filter((f) => f.status === "verified") ?? [];
   if (verified.length) {
@@ -72,8 +91,20 @@ export async function staffToken(email: string) {
   const secret = enrolled.data.totp.secret;
   const v = await sb.auth.mfa.challengeAndVerify({ factorId: enrolled.data.id, code: authenticator.generate(secret) });
   if (v.error) throw new Error(`TOTP verify failed: ${v.error.message}`);
+  writeFileSync(totpCache(email), JSON.stringify({ factorId: enrolled.data.id, secret }));
   const { data } = await sb.auth.getSession();
   return data.session!.access_token;
+}
+
+/**
+ * A fresh TOTP code for a staff user whose factor `staffToken()` enrolled in this run (secret cached per run), for a
+ * browser sign-in that must reach aal2. Waits for the next 30-second step when the current code was just used.
+ */
+export async function staffTotpCode(email: string, opts: { fresh?: boolean } = {}) {
+  if (!existsSync(totpCache(email))) throw new Error(`no TOTP secret cached for ${email}: call staffToken() first`);
+  const { secret } = JSON.parse(readFileSync(totpCache(email), "utf8")) as { secret: string };
+  if (opts.fresh) await new Promise((r) => setTimeout(r, authenticator.timeRemaining() * 1000 + 500));
+  return authenticator.generate(secret);
 }
 
 /** The newest email to `to` in Mailpit, as text + html. */

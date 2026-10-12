@@ -105,13 +105,19 @@ export async function investmentsFor(sql: Sql, userId: string, investmentId?: st
          where d.investment_id = any(${rows.map((r) => r.id)}::uuid[]) order by r.committed_at`)
     : [];
   const cutoffMs = POLICY.l2.cancelCutoffHours * 3_600_000;
+  const now = Date.now();
+  // The cancel right lasts until the cut-off; once now ≥ cut-off `canCancelUntil` is null (PR #13 review round 2, finding 3).
+  const cancelOpenUntil = (r: InvRow) =>
+    r.pool_status === "live" && r.ends_at && !r.cancel_requested_at && ["reserved", "funding", "funded"].includes(r.status) && r.ends_at.getTime() - cutoffMs > now
+      ? new Date(r.ends_at.getTime() - cutoffMs).toISOString()
+      : null;
   return rows.map((r) => ({
     id: r.id, poolId: r.pool_id, poolSlug: r.slug, poolTitle: r.title, artistDisplay: r.artist_display, units: r.units, unitPriceMinor: n(r.unit_price_minor),
     amountMinor: n(r.amount_minor), status: r.status as never, statusReason: r.status_reason, createdAt: r.created_at.toISOString(), fundedAt: iso(r.funded_at),
     issuedAt: iso(r.issued_at), lockupEndsAt: iso(r.lockup_ends_at), capMinor: n(r.cap_minor), distributedMinor: n(r.distributed_minor), receivedMinor: n(r.received),
     refundedAt: iso(r.refunded_at), poolStatus: r.pool_status as never, poolEndsAt: iso(r.ends_at), maturesAt: iso(r.matures_at),
     collectionState: r.collection_state as never, riskBadge: r.risk_badge as never,
-    canCancelUntil: r.pool_status === "live" && r.ends_at && !r.cancel_requested_at && ["reserved", "funding", "funded"].includes(r.status) ? new Date(r.ends_at.getTime() - cutoffMs).toISOString() : null,
+    canCancelUntil: cancelOpenUntil(r),
     cancelRequestedAt: iso(r.cancel_requested_at),
     cancelBy: r.ends_at ? new Date(r.ends_at.getTime() - cutoffMs).toISOString() : null,
     issuerName: r.issuer_name,

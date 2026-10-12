@@ -1,7 +1,7 @@
 /**
  * Mock escrow HTTP service (ADR-007). Local development and CI only — refuses to start in a deployed environment.
  *   POST/GET /v1/...   TransactAPI-shaped resources (x-api-key; Idempotency-Key on every POST)
- *   /admin/...         clock (advance), reset, fixtures, state, webhook log (x-api-key)
+ *   /admin/...         clock (advance), async-step delays, reset, fixtures, state, webhook log (x-api-key)
  * Webhooks are signed (signing.ts) and POSTed to MOCK_ESCROW_WEBHOOK_URL with retries.
  */
 import { readFileSync, mkdirSync } from "node:fs";
@@ -106,6 +106,7 @@ export function buildServer(cfg: ServerConfig, engine?: MockEscrowEngine) {
 
   app.post("/admin/advance", async (req) => eng.advance(Number(body<{ seconds?: number }>(req).seconds ?? 0)));
   app.post("/admin/tick", async () => eng.tick());
+  app.post("/admin/delays", async (req) => ({ delays: eng.setDelays(body<Record<string, number>>(req)) }));
   app.post<{ Params: { id: string } }>("/admin/refunds/:id/fail", async (req) => eng.failRefund(req.params.id, body<{ returnCode?: string }>(req).returnCode));
   app.post("/admin/reset", async (req) => {
     eng.reset();

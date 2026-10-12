@@ -65,7 +65,7 @@ Legend — **Keep**: port from Fan Profile Setup, reskin. **Build**: placeholder
 | Route | Source | Action | Notes |
 |---|---|---|---|
 | `/campaign/{basics,details,perks,preview,success,live}` | FPS | Keep | **First build = reward campaign ("Fund My Show", Mechanism 05):** perks only, target-or-refund escrow, optional milestone release. No share of proceeds anywhere in this flow. |
-| Revenue-share Pool creation (deal terms, units, return cap, maturity) | FanZuP `CreatorApp` create-pool modal step 2–3 | Rebuild · Gate | Separate `layer2` path off the same wizard; Form C review step; interception mechanism required (PRD 01 §6.5). |
+| Revenue-share Pool creation (deal terms, units, return cap, maturity) | FanZuP `CreatorApp` create-pool modal step 2–3 | Rebuild · Gate | Separate `layer2` path off the same wizard; Form C review step; interception mechanism required (PRD 01 §6.5). **Built on real data (mock rails) by CR-002:** `/creator/pools`, `/creator/pools/new`, `/creator/pools/:id`. |
 | AI compliance assistant / visual asset auditor / legal doc generator / reward contract simulator / licensing vault | FanZuP | Drop | Not in any PRD. Revisit via sdd-change if wanted. |
 | `/campaign-detail` | FPS `CampaignDetailPage` | Keep | Escrow + auto-refund disclosure visible (Brand §7.3). Layer 2 detail adds illiquidity / principal-at-risk / unsecured-claim block (PRD 01 §11). |
 
@@ -79,8 +79,8 @@ Legend — **Keep**: port from Fan Profile Setup, reskin. **Build**: placeholder
 ### Investment (Layer 2 — `layer2`)
 | Route | Source | Action | Notes |
 |---|---|---|---|
-| `/investment/documents`, `/investment/confirmation` | FPS | Keep · Gate | Transactional Reg CF limit check, risk acknowledgment, Form C link, state eligibility. |
-| Holdings / portfolio | FanZuP `FanApp` dashboard | Rebuild · Gate | "Your Pools": units held, amount backed, distributions received, return-cap progress, maturity, lock-up end date. No "accrued yield", no ranking. |
+| `/investment/documents`, `/investment/confirmation` | FPS | Keep · Gate | Transactional Reg CF limit check, risk acknowledgment, Form C link, state eligibility. **CR-002: on the API** (`/invest/:id/*`, `/pools`, `/pools/:id`, `/pools/:id/form-c`, `/investor/certification`). |
+| Holdings / portfolio | FanZuP `FanApp` dashboard | Rebuild · Gate | "Your Pools": units held, amount backed, distributions received, return-cap progress, maturity, lock-up end date. No "accrued yield", no ranking. **CR-002: on the API** (`/portfolio`, `/portfolio/:poolId`). |
 
 ### Creator dashboard
 | Route | Source | Action | Notes |

@@ -3,7 +3,7 @@
  *  - ENTRY routes (fan and creator routes, staff actions that start something new, the dev clock) sit behind `l2Gate`:
  *    404 `layer2_disabled` unless the mock provider is configured AND the DB flag is on;
  *  - COMPLETION routes sit behind `l2MockGate` (provider configured, flag not required): the investor's own
- *    `GET /investments/:id` and `POST /investments/:id/cancel` (the 227.304(a) right), staff `GET queue`,
+ *    `GET /investments`, `GET /investments/:id` and `POST /investments/:id/cancel` (the 227.304(a) right), staff `GET queue`,
  *    `GET pools`, `GET pools/:id/money`, `GET pools/:id/form-c`, `GET investors`, `POST pools/:id/recon`,
  *    `POST pools/:id/collection-state`, `POST pool-ops/:id/replay` and `POST pool-breaks/:id/resolve`, and the signed
  *    `regcf` webhook (stored before processing, processed only through main's claimed inbox).
@@ -90,6 +90,12 @@ export const l2FanRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
  */
 export const l2InvestorRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.addHook("preHandler", l2MockGate(d));
+  // The investor's own investments (newest first), so the flag-off cancel-only list can find an open one (PR #13 review
+  // round 2, finding 2). The same rows as GET /portfolio's `investments`, without the entry-path investor profile.
+  app.get("/investments", async (req) => {
+    const u = await requireUser(req, d.verify);
+    return { investments: await investmentsFor(d.sql, u.sub) };
+  });
   app.get<{ Params: { id: string } }>("/investments/:id", async (req) => {
     const u = await requireUser(req, d.verify);
     const [inv] = await investmentsFor(d.sql, u.sub, uuid(req.params.id, "investment"));
@@ -268,5 +274,12 @@ export const l2DevRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     const at = mock?.now ? new Date(mock.now) : new Date(Date.now() + b.seconds * 1000);
     const tick = await runWorkerTick(jobDeps(d), at);
     return { provider: mock, tick };
+  });
+  // Mock-only test hook: hold later fund moves pending (e2e cancel_pending; PR #13 review round 2, finding 6).
+  app.post("/delays", async (req) => {
+    const b = z.object({ fund: z.number().int().min(0).max(30 * 86_400) }).partial().strict().parse(req.body ?? {});
+    const provider = regcfOf(d);
+    if (!provider.setDelays) throw new HttpError(404, "not_found", "This provider has no test delays.");
+    return provider.setDelays(b);
   });
 };

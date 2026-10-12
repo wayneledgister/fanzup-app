@@ -113,6 +113,20 @@ export class MockEscrowEngine {
     return { jobs, delivered, now: new Date(this.now()).toISOString() };
   }
 
+  /**
+   * Test hook (admin `POST /admin/delays`): change the virtual delay of LATER async steps — e.g. hold new fund moves
+   * pending for an hour so a cancel deterministically lands while the payment is moving (PR #13 review round 2,
+   * finding 6). Already-scheduled jobs keep their due time. Returns the delays now in force.
+   */
+  setDelays(d: Partial<typeof DEFAULT_DELAYS>) {
+    for (const [k, v] of Object.entries(d)) {
+      if (!(k in DEFAULT_DELAYS)) throw new MockError(400, "invalid_request", `unknown delay ${k}`);
+      if (!Number.isFinite(v) || (v as number) < 0 || (v as number) > 30 * 86_400) throw new MockError(400, "invalid_request", `${k} must be 0–30 days in seconds`);
+    }
+    this.delays = { ...this.delays, ...d };
+    return { ...this.delays };
+  }
+
   // ── Storage helpers ───────────────────────────────────────────────────
   private put(type: string, obj: Obj) {
     if (obj.createdAt === undefined) obj.createdAt = new Date(this.now()).toISOString();
@@ -562,6 +576,7 @@ export class MockEscrowEngine {
   // ── Admin ─────────────────────────────────────────────────────────────
   reset() {
     this.db.exec("delete from objects; delete from idempotency; delete from jobs; delete from webhooks; delete from meta;");
+    this.delays = { ...DEFAULT_DELAYS, ...this.opts.delays };
   }
   isEmpty() {
     return !(this.db.prepare("select 1 as x from objects limit 1").get() as { x: number } | undefined);

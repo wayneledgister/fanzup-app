@@ -130,7 +130,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     testMode: deps.provider.testMode,
     stripePublishableKey: deps.provider.publishableKey,
     // FR-PLT-001: the server's view of the flags (the web app's ?flags= override reveals mock-only screens, never data).
-    flags: { layer2: await l2On(deps).catch(() => false) },
+    // `layer2Completion` (L2 design §2, L2-T-038): the completion routes (an investor's own investment + cancel) answer
+    // because the mock provider is configured, whatever the DB flag says. Never true in a deployed environment.
+    flags: { layer2: await l2On(deps).catch(() => false), layer2Completion: !!deps.regcf && !deps.env.deployed },
     legal: { termsVersion: POLICY.legal.termsVersion, privacyVersion: POLICY.legal.privacyVersion },
   }));
 

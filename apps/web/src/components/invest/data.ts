@@ -55,8 +55,8 @@ export const COLLECTION_INFO: Record<Collection, { label: string; tone: "success
   "Distributor redirect": {
     label: "Distributor redirect",
     tone: "success",
-    short: "More secure — the distributor pays the Pool's share directly.",
-    long: "The artist's distributor sends the Pool's share of revenue straight to the Pool's collection account before the artist is paid. Payouts don't depend on the artist sending money on, which makes this the most secure collection method we support.",
+    short: "The distributor pays the Pool's share directly. Your claim is still unsecured.",
+    long: "The artist's distributor sends the Pool's share of revenue straight to the Pool's collection account before the artist is paid. Payouts don't depend on the artist sending money on, which makes this the strongest collection method we support. It doesn't make the claim secured: there's no collateral.",
   },
   Lockbox: {
     label: "Lockbox account",

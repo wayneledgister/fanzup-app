@@ -43,7 +43,7 @@ describe("layer2 flag and environment (FR-PLT-001 slice; L2 gate condition 7)", 
       expect(r.json().error).toBe("layer2_disabled");
     }
     await expect(asService(k.sql, (tx) => tx`select * from public.reserve_investment(${fan.id}, ${randomUUID()}, 1, 'x', ${new Date()})`)).rejects.toThrow("layer2_disabled");
-    expect((await k.app.inject({ method: "GET", url: "/api/v1/config" })).json().flags).toEqual({ layer2: false });
+    expect((await k.app.inject({ method: "GET", url: "/api/v1/config" })).json().flags).toEqual({ layer2: false, layer2Completion: true });
     // Completion routes answer with the flag off (staff watch money in flight).
     expect((await k.app.inject({ method: "GET", url: "/api/v1/staff/l2/queue", headers: { authorization: k.staff } })).statusCode).toBe(200);
   });
@@ -51,7 +51,7 @@ describe("layer2 flag and environment (FR-PLT-001 slice; L2 gate condition 7)", 
   it("staff turn the flag on through an audited privileged action", async () => {
     const r = await k.app.inject({ method: "POST", url: "/api/v1/staff/flags/layer2", headers: { authorization: k.staff }, payload: { on: true, reason: "Local demo of the album royalty Pool" } });
     expect(r.json().action.status, r.body).toBe("executed");
-    expect((await k.app.inject({ method: "GET", url: "/api/v1/config" })).json().flags).toEqual({ layer2: true });
+    expect((await k.app.inject({ method: "GET", url: "/api/v1/config" })).json().flags).toEqual({ layer2: true, layer2Completion: true });
     const [a] = await asService(k.sql, (tx) => tx<{ action: string }[]>`select action from public.audit_events where action like 'staff.flag.set%' order by id desc limit 1`);
     expect(a.action).toBe("staff.flag.set.executed");
     expect((await k.app.inject({ method: "GET", url: "/api/v1/pools" })).statusCode).toBe(200);
@@ -63,8 +63,11 @@ describe("layer2 flag and environment (FR-PLT-001 slice; L2 gate condition 7)", 
     try {
       await setFlag(plain.sql, true);
       expect((await plain.app.inject({ method: "GET", url: "/api/v1/pools" })).statusCode).toBe(404);
+      // No provider: no completion signal either (the web never renders the cancel-only view).
+      expect((await plain.app.inject({ method: "GET", url: "/api/v1/config" })).json().flags).toEqual({ layer2: false, layer2Completion: false });
       const fan = await createUser(plain.sql);
       expect((await plain.app.inject({ method: "POST", url: `/api/v1/investments/${randomUUID()}/cancel`, headers: { authorization: fan.auth } })).json().error).toBe("layer2_disabled");
+      expect((await plain.app.inject({ method: "GET", url: "/api/v1/investments", headers: { authorization: fan.auth } })).json().error).toBe("layer2_disabled");
       const staff = await import("./helpers").then((h) => h.tokenWith(ids.reviewer, { aal: "aal2" }));
       const on = await plain.app.inject({ method: "POST", url: "/api/v1/staff/flags/layer2", headers: { authorization: `Bearer ${staff}` }, payload: { on: true, reason: "Trying without a provider" } });
       expect(on.json().error).toBe("provider_missing");
@@ -110,6 +113,13 @@ describe("flag off: money already in flight finishes, investors keep the cancel 
     const c4 = await cancel(k, f4, inv4.id);
     expect(c4.json()).toMatchObject({ result: "cancel_pending", investment: { status: "reserved" } });
     expect((await k.app.inject({ method: "GET", url: `/api/v1/investments/${inv4.id}`, headers: { authorization: f4.auth } })).json().cancelRequestedAt).not.toBeNull();
+    // The cancel-only list (review round 2, finding 2): the investor's own investments, with the flag off.
+    const list5 = await k.app.inject({ method: "GET", url: "/api/v1/investments", headers: { authorization: f5.auth } });
+    expect(list5.statusCode, list5.body).toBe(200);
+    expect(list5.json().investments).toHaveLength(1);
+    expect(list5.json().investments[0].canCancelUntil).not.toBeNull();
+    const list4 = (await k.app.inject({ method: "GET", url: "/api/v1/investments", headers: { authorization: f4.auth } })).json().investments;
+    expect(list4.map((i: { id: string }) => i.id)).toEqual([inv4.id]);
 
     // The pending fund move's webhook is stored and applied; the cancel-pending reservation is resolved by the lookup.
     await advance(k, 3);

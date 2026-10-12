@@ -56,6 +56,7 @@ export class HttpMockEscrow implements RegCfProvider {
   payoutFromCollection: RegCfProvider["payoutFromCollection"] = (id, i, idem) => this.call("POST", `/v1/collection-accounts/${encodeURIComponent(id)}/payouts`, i, idem);
   simulateDeposit: NonNullable<RegCfProvider["simulateDeposit"]> = (id, i, idem) => this.call("POST", `/v1/collection-accounts/${encodeURIComponent(id)}/deposits`, i, idem);
   advance: NonNullable<RegCfProvider["advance"]> = (seconds) => this.call("POST", "/admin/advance", { seconds });
+  setDelays: NonNullable<RegCfProvider["setDelays"]> = (delays) => this.call("POST", "/admin/delays", delays);
 
   parseWebhook(rawBody: string, signature: string | undefined): RegCfEvent {
     return parseSigned(this.cfg.webhookSecret, rawBody, signature);
