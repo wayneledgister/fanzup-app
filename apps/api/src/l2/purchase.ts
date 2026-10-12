@@ -146,8 +146,18 @@ const storeOutcomeTx = (tx: Tx, key: string, status: number, body: InvestSuccess
 const storeOutcome = (sql: Sql, key: string, status: number, body: InvestSuccess | InvestError) =>
   asService(sql, (tx) => storeOutcomeTx(tx, key, status, body));
 
-export async function invest(d: L2Deps, userId: string, poolId: string, key: string, body: InvestRequest, now = new Date()): Promise<InvestOutcome> {
+/**
+ * `now` is the request's clock (reservation, claim). Each guard pass takes a FRESH clock, `max(now, clock())`, and uses
+ * that one value for every SQL call and lookup it gates, so a reservation that expired while createTrade was in flight
+ * is seen as dead by the guard before fundTrade and goes to case (e) (review round 2, PR #12). `clock` is injectable for
+ * tests.
+ */
+export async function invest(d: L2Deps, userId: string, poolId: string, key: string, body: InvestRequest, now = new Date(), clock: () => Date = () => new Date()): Promise<InvestOutcome> {
   const regcf = regcfOf(d);
+  const fresh = () => {
+    const c = clock();
+    return c.getTime() > now.getTime() ? c : now;
+  };
   const hash = createHash("sha256").update(JSON.stringify({ u: userId, poolId, body })).digest("hex");
   const k = `investments:${userId}:${key}`;
 
@@ -187,8 +197,9 @@ export async function invest(d: L2Deps, userId: string, poolId: string, key: str
 
   // ── 2. Resume guard before every provider call ────────────────────────
   for (let pass = 0; pass < 4; pass++) {
+    const at = fresh();
     const i = await loadInvestment(d.sql, invId);
-    const v = guard(i, now);
+    const v = guard(i, at);
     if (v.kind === "done") {
       await storeOutcome(d.sql, k, v.status, v.body);
       return { status: v.status, body: v.body };
@@ -196,7 +207,7 @@ export async function invest(d: L2Deps, userId: string, poolId: string, key: str
     if (v.kind === "lookup") {
       let found: { fundMove: boolean };
       try {
-        found = await lookupReservation(d.sql, regcf, invId, now);
+        found = await lookupReservation(d.sql, regcf, invId, at);
       } catch (e) {
         throw providerDown(e);
       }
@@ -205,16 +216,18 @@ export async function invest(d: L2Deps, userId: string, poolId: string, key: str
       return { status: 409, body };
     }
     // (c) Live reservation: commit the call-started marker first (conditional; re-run the guard if it didn't apply).
-    const [s] = await asService(d.sql, (tx) => tx<{ r: string }[]>`select public.l2_start_provider_call(${invId}, ${now}) as r`);
+    const [s] = await asService(d.sql, (tx) => tx<{ r: string }[]>`select public.l2_start_provider_call(${invId}, ${at}) as r`);
     if (s.r !== "started") continue;
     if (!i.offering || !i.account) throw new HttpError(409, "provider_not_ready", "This Pool or your investor account isn't set up at the escrow provider yet.");
     try {
       const params = { offeringId: i.offering, accountId: i.account, units: i.units, unitPrice: n(i.unit_price), amount: n(i.amount), externalId: invId };
       const trade = await regcf.createTrade(params, `trade:${invId}`);
-      // The guard runs again between the calls: a reservation that died after createTrade is looked up and voided, never funded.
-      if (guard(await loadInvestment(d.sql, invId), now).kind !== "call") continue;
+      // The guard runs again between the calls, at a fresh clock: a reservation that died during createTrade (by time or
+      // state) is looked up and voided on the next pass, never funded.
+      const atFund = fresh();
+      if (guard(await loadInvestment(d.sql, invId), atFund).kind !== "call") continue;
       const fund = await regcf.fundTrade(trade.id, { amount: n(i.amount), externalId: invId }, `fund:${invId}`);
-      const [m] = await asService(d.sql, (tx) => tx<{ r: string }[]>`select public.mark_investment_funding(${invId}, ${trade.id}, ${fund.id}, ${now}) as r`);
+      const [m] = await asService(d.sql, (tx) => tx<{ r: string }[]>`select public.mark_investment_funding(${invId}, ${trade.id}, ${fund.id}, ${atFund}) as r`);
       if (m.r === "dead") {
         const body = EXPIRED(true);
         await storeOutcome(d.sql, k, 409, body);

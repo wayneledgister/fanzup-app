@@ -108,14 +108,17 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
         return;
       }
       case "refund": {
-        // A stray fund move is refunded by its own fund ref (design §3.1); an investment by its trade.
+        // A stray fund move is refunded by its own fund ref (design §3.1). An investment whose fund ref is stored is
+        // refunded by that fund move for the amount actually received (`funded_received_minor`, which the op carries), so a
+        // received amount that differs from the trade amount is still returned in full (review round 2, PR #12); only
+        // an investment with a trade and no fund ref falls back to the trade.
         let target: { fund?: string; trade?: string };
         if (op.fund_ref) target = { fund: op.fund_ref };
         else {
           const [i] = await asService(sql, (tx) => tx<{ trade: string | null; fund: string | null }[]>`
             select provider_trade_ref as trade, provider_fund_ref as fund from public.investments where id = ${op.subject_id}`);
           if (!i?.trade && !i?.fund) throw new RegCfError("retry", "no_trade", "Investment has no provider trade yet");
-          target = i.trade ? { trade: i.trade } : { fund: i.fund! };
+          target = i.fund ? { fund: i.fund } : { trade: i.trade! };
         }
         const amount = await startCall(d, op, now);
         if (amount == null) return;

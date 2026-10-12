@@ -51,6 +51,11 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
         select 'dead_letters', o.id, o.subject_id, initcap(o.kind) || ' ' || o.status || ': ' || coalesce(o.last_error, ''), o.updated_at, o.correlation_id
           from public.outbound_ops o where o.status in ('dead', 'failed')
         union all
+        -- Layer 2 money ops that need a person (review round 2, PR #12): replay with POST /staff/l2/pool-ops/:id/replay.
+        -- Listed whatever the layer2 flag says: money already owed is a completion path.
+        select 'pool_dead_letters', o.id, o.pool_id, 'Pool ' || replace(o.kind, '_', ' ') || ' ' || o.status || ': ' || coalesce(o.last_error, ''), o.updated_at, o.correlation_id
+          from public.pool_ops o where o.status in ('dead', 'failed')
+        union all
         select 'unmatched', e.id, null, e.type || ' ' || coalesce(e.object_ref, ''), e.received_at, e.correlation_id
           from public.provider_events e where e.status = 'unmatched'
         union all

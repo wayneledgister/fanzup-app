@@ -4,8 +4,8 @@
  *    404 `layer2_disabled` unless the mock provider is configured AND the DB flag is on;
  *  - COMPLETION routes sit behind `l2MockGate` (provider configured, flag not required): the investor's own
  *    `GET /investments/:id` and `POST /investments/:id/cancel` (the 227.304(a) right), staff `GET queue`,
- *    `GET pools`, `GET pools/:id/money`, `GET pools/:id/form-c`, `GET investors`, `POST pools/:id/recon` and
- *    `POST pools/:id/collection-state`, and the signed `regcf` webhook (stored before processing, processed only through
+ *    `GET pools`, `GET pools/:id/money`, `GET pools/:id/form-c`, `GET investors`, `POST pools/:id/recon`,
+ *    `POST pools/:id/collection-state` and `POST pool-ops/:id/replay`, and the signed `regcf` webhook (stored before processing, processed only through
  *    main's claimed inbox).
  * The flag switch itself (`POST /staff/flags/layer2`) lives in the M1 staff plugin, outside both gates (staff + aal2 +
  * privileged(), `provider_missing` without REGCF_PROVIDER=mock).
@@ -170,6 +170,12 @@ export const l2StaffReadRoutes = (d: Deps): FastifyPluginAsync => async (app) =>
   app.post<{ Params: { id: string } }>("/pools/:id/collection-state", async (req) => {
     const b = z.object({ to: z.enum(["REMEDIATION", "CHARGED_OFF", "COLLECTING"]), reason: z.string() }).parse(req.body);
     return { action: await privileged(d, { action: "pool.collection_state", subjectId: uuid(req.params.id, "Pool"), reason: b.reason, params: { to: b.to } }) };
+  });
+  /** Re-queue a `failed`/`dead` pool op (review round 2, PR #12): money already owed must be retryable with the flag off. */
+  app.post<{ Params: { id: string } }>("/pool-ops/:id/replay", async (req) => {
+    const { reason } = Reason.parse(req.body);
+    const { result: _r, ...action } = await privileged(d, { action: "pool_op.replay", subjectId: uuid(req.params.id, "operation"), reason });
+    return { action };
   });
 };
 

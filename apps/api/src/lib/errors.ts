@@ -63,6 +63,9 @@ export const RULE_STATUS: Record<string, number> = {
   duration_too_short: 400,
   attestation_required: 400,
   terms_changed: 409,
+  // PR #12 review round 2: the stored launch deadline (migration 0800).
+  launch_deadline_mismatch: 409,
+  launch_deadline_passed: 409,
   issuer_cap_reached: 409,
   not_cured: 409,
   period_not_expected: 400,

@@ -34,7 +34,7 @@ export type ActionName =
   | "campaign.review" | "tranche.verify" | "backing.refund" | "recon.override" | "provider_event.replay" | "outbound_op.replay" | "weekly_review.signoff"
   // Layer 2 (CR-002)
   | "pool.review" | "pool.collection_execute" | "investor.kyc_decide" | "pool_tranche.verify" | "pool.distribution_commit" | "pool.collection_state"
-  | "pool.deposit_simulate" | "flag.set";
+  | "pool.deposit_simulate" | "flag.set" | "pool_op.replay";
 
 /** Actions that move money (delay + daily limits apply while single-operator mode is on). */
 const MONEY_ACTIONS = new Set<ActionName>(["tranche.verify", "backing.refund", "pool_tranche.verify", "pool.distribution_commit"]);
@@ -88,6 +88,27 @@ const EXECUTORS: Record<ActionName, Executor> = {
       update public.outbound_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, last_error = null
        where id = ${a.subject_id} and status in ('dead', 'failed') returning id`);
     if (!r) throw new HttpError(409, "not_replayable", "Only dead-lettered or failed operations can be replayed.");
+  },
+  /**
+   * Layer 2 twin of `outbound_op.replay` (review round 2, PR #12): a `failed` or `dead` `pool_ops` row goes back to
+   * `initiated` with its lease and claim cleared. `call_started_at` and the amount stay, so the runner's
+   * lookup-before-call rules still apply (a disburse amount is frozen once a call started; the provider sees the op's own
+   * idempotency key again). Not a money action: like M1's replay it is never delayed and has no daily limit (a refund
+   * owed to an investor must not wait).
+   */
+  "pool_op.replay": async (d, a) => {
+    const rows = await asService(d.sql, async (tx) => {
+      const [prev] = await tx<{ status: string }[]>`select status from public.pool_ops where id = ${a.subject_id} for update`;
+      const r = await tx<{ id: string }[]>`
+        update public.pool_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, claim_token = null, last_error = null
+         where id = ${a.subject_id} and status in ('dead', 'failed') returning id`;
+      if (r.length) {
+        await tx`insert into public.audit_events (action, entity, entity_id, data)
+                 values ('pool_op.replayed', 'pool_op', ${a.subject_id}, ${tx.json({ from_status: prev.status, privileged_action_id: a.id })})`;
+      }
+      return r;
+    });
+    if (!rows.length) throw new HttpError(409, "not_replayable", "Only dead-lettered or failed operations can be replayed.");
   },
   // The sign-off row is written by the executor, so it exists only if the action executed (PR #8 review fix 10).
   "weekly_review.signoff": async (d, a) => {
@@ -169,6 +190,7 @@ async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | n
     "pool.distribution_commit": "public.pools p join public.artists a on a.id = p.artist_id where p.id = $1",
     "pool.collection_state": "public.pools p join public.artists a on a.id = p.artist_id where p.id = $1",
     "pool_tranche.verify": "public.pool_tranches t join public.pools p on p.id = t.pool_id join public.artists a on a.id = p.artist_id where t.id = $1",
+    "pool_op.replay": "public.pool_ops o join public.pools p on p.id = o.pool_id join public.artists a on a.id = p.artist_id where o.id = $1",
     // Staff can't decide their own KYC: the "owner" of an investor subject is the investor.
     "investor.kyc_decide": "(select $1::uuid as owner_id) a",
   };

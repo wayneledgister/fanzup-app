@@ -269,6 +269,18 @@ export class MockEscrowEngine {
     return t ? this.getTrade(t.id) : null;
   }
 
+  /**
+   * Test hook (no HTTP route): the bank delivers a different amount than the trade asked for, so a still-pending fund
+   * move settles for `amount` (design §3.1 amount mismatch; PR #12 review round 2). Real providers do this; the mock's
+   * fundTrade never does on its own.
+   */
+  setPendingFundMoveAmount(fundMoveId: string, amount: number) {
+    const fm = this.get("fundMove", fundMoveId);
+    if (fm.status !== "pending") throw new MockError(409, "fund_move_state", `Only a pending fund move can change amount (it is ${fm.status}).`);
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw new MockError(400, "invalid_request", "amount must be a positive integer (cents)");
+    return this.patch("fundMove", fundMoveId, { amount });
+  }
+
   /** Void a trade that has no fund move (design §4.3). Refused `trade_funded` once a fund move exists. */
   cancelTrade(tradeId: string, idem?: string) {
     return this.idempotent(idem, "cancelTrade", { tradeId }, () => {

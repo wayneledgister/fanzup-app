@@ -222,23 +222,28 @@ export async function submitPool(sql: Sql, userId: string, poolId: string, other
 
 /**
  * Launch (design §5 "Launch"): provider issuer / offering / collection account with keys `issuer:<artist>`,
- * `offering:<pool>`, `collection:<pool>` and parameters derived only from stored rows — the offering's end date comes
- * from the approval date + the Pool's duration, never from the request time — so a retried launch replays the same
- * objects (round-1 review, PR #12). Then `launch_pool` re-checks the cap with the re-attested outside figure.
+ * `offering:<pool>`, `collection:<pool>` and parameters derived only from stored rows — the offering's end date is the
+ * Pool's planned deadline (`l2_plan_launch`: first launch attempt + duration, persisted before any provider call) and
+ * the same value is passed to `launch_pool` as the Pool's `ends_at` — so a retried launch replays the same objects and
+ * both deadlines match (round-1 review and review round 2, PR #12). `launch_pool` re-checks the cap with the
+ * re-attested outside figure.
  */
 export async function launchPool(d: L2Deps, userId: string, poolId: string, body: { otherRegCfSales12mMinor: number; legalName?: string }, now = new Date()) {
   const regcf = regcfOf(d);
   await ownPool(d.sql, userId, poolId);
-  const [p] = await asService(d.sql, (tx) => tx<{ status: string; title: string; artist_id: string; artist_name: string; target: bigint; max: bigint; price: bigint; days: number; executed: boolean; approved_at: Date | null; legal_name: string | null }[]>`
+  const [p] = await asService(d.sql, (tx) => tx<{ status: string; title: string; artist_id: string; artist_name: string; target: bigint; max: bigint; price: bigint; days: number; executed: boolean; legal_name: string | null }[]>`
     select p.status::text, p.title, p.artist_id, a.name as artist_name, p.target_minor as target, p.max_minor as max, p.unit_price_minor as price, p.duration_days as days,
            exists (select 1 from public.collection_mechanisms m where m.pool_id = p.id and m.status = 'executed') as executed,
-           (select max(r.created_at) from public.pool_reviews r where r.pool_id = p.id and r.decision = 'approved') as approved_at,
            (select i.legal_name from public.issuers i where i.artist_id = p.artist_id) as legal_name
       from public.pools p join public.artists a on a.id = p.artist_id where p.id = ${poolId}`);
   if (p.status !== "approved") throw new HttpError(409, "pool_not_approved", "A Pool must pass Form C review before it can go live.");
   if (!p.executed) throw new HttpError(409, "collection_not_executed", "The collection agreement must be executed before the Pool can go live.");
   const legalName = p.legal_name ?? body.legalName ?? `${p.artist_name} Music LLC (demo issuer)`;
-  const endDate = new Date((p.approved_at ?? now).getTime() + p.days * 86_400_000).toISOString().slice(0, 10);
+  // One stored deadline (review round 2, PR #12): planned once (launch time + duration) and persisted before any
+  // provider call; the provider's end date and the Pool's ends_at are this value, on the first try and on every retry.
+  const [plan] = await asService(d.sql, (tx) => tx<{ ends: Date }[]>`select public.l2_plan_launch(${poolId}, ${userId}, ${now}) as ends`);
+  const endsAt = plan.ends;
+  const endDate = endsAt.toISOString();
   let refs: { issuer: string; offering: string; collection: string };
   try {
     const issuer = await regcf.createIssuer({ name: legalName, entityType: "LLC", externalId: p.artist_id }, `issuer:${p.artist_id}`);
@@ -249,7 +254,7 @@ export async function launchPool(d: L2Deps, userId: string, poolId: string, body
     throw providerDown(e);
   }
   const [r] = await asService(d.sql, (tx) => tx<{ ends: Date }[]>`
-    select public.launch_pool(${poolId}, ${userId}, ${refs.issuer}, ${refs.offering}, ${refs.collection}, ${legalName}, ${body.otherRegCfSales12mMinor}, ${now}) as ends`);
+    select public.launch_pool(${poolId}, ${userId}, ${refs.issuer}, ${refs.offering}, ${refs.collection}, ${legalName}, ${body.otherRegCfSales12mMinor}, ${now}, ${endsAt}) as ends`);
   return { status: "live", endsAt: r.ends.toISOString() };
 }
 

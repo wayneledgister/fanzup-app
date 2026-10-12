@@ -15,7 +15,9 @@
  *    + Σ open stray fund moves → `liability_mismatch`;
  *  - open strays unconfirmed past `recon.maxBreakAgeBusinessDays` → `stray_fund_move_aged`;
  *  - refund ops not yet `sent` more than `l2.refundDirectBusinessDays` after they were owed → `refund_overdue`
- *    (non-pausing; alert `refund.overdue`).
+ *    (non-pausing; alert `refund.overdue` once, when the break first opens).
+ * The per-tick run skips refunded/withdrawn Pools with nothing open (no unconfirmed op, open break, open stray, live
+ * investment or balance); a staff run for one Pool always reconciles it.
  * Breaks live in `pool_breaks` (never `recon_breaks`); the derived kinds above auto-resolve `cleared_by_run`; money-path
  * breaks (`unapplied_funding`, `amount_mismatch`) and the revenue kinds are left to their owners. `platform_adjustments`
  * (M1's float) never appear here: Layer 2 has its own accounts and transactions. Flag-independent (completion path).
@@ -53,7 +55,18 @@ export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, o
     select id, provider_offering_ref as offering, provider_collection_ref as collection,
            public.pool_balance('pool_escrow', id) as escrow, public.pool_balance('pool_collection', id) as coll,
            -public.pool_balance('pool_investor_liability', id) as liability, raised_minor as raised, investors_count as investors, units_committed as units
-      from public.pools where provider_offering_ref is not null and (${opts.poolId ?? null}::uuid is null or id = ${opts.poolId ?? null}::uuid)
+      from public.pools p where provider_offering_ref is not null and (${opts.poolId ?? null}::uuid is null or id = ${opts.poolId ?? null}::uuid)
+       -- Per-tick recon skips a finished Pool with nothing open (review round 2, PR #12): refunded or withdrawn, no op not
+       -- yet confirmed, no open break, no open stray, no investment still holding or awaiting money, zero escrow and
+       -- collection balances. Anything that touches it again (a stray fund move, a staff replay) opens one of those.
+       -- A staff run for one Pool (opts.poolId) always reconciles it.
+       and (${opts.poolId ?? null}::uuid is not null or not (
+             p.status in ('refunded', 'withdrawn')
+             and public.pool_balance('pool_escrow', p.id) = 0 and public.pool_balance('pool_collection', p.id) = 0
+             and not exists (select 1 from public.pool_ops o where o.pool_id = p.id and o.status <> 'confirmed')
+             and not exists (select 1 from public.pool_breaks b where b.pool_id = p.id and b.resolved_at is null)
+             and not exists (select 1 from public.pool_stray_fund_moves s where s.pool_id = p.id and s.refunded_at is null)
+             and not exists (select 1 from public.investments i where i.pool_id = p.id and i.status in ('reserved', 'funding', 'funded', 'refund_pending'))))
      order by id`);
   const inFlightRefs = new Set(
     (await asService(sql, (tx) => tx<{ ref: string }[]>`
@@ -154,19 +167,26 @@ export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, o
     for (const r of refunds) {
       if (businessDaysSince(r.created_at, now) > POLICY.l2.refundDirectBusinessDays) {
         breaks.push({ kind: "refund_overdue", dedupeKey: `refund_overdue:${r.id}`, amountMinor: n(r.amount), refs: { op_id: r.id, status: r.status, owed_since: r.created_at.toISOString() } });
-        log("alert", "refund.overdue", { poolId: p.id, opId: r.id, status: r.status });
       }
     }
 
-    await asService(sql, async (tx) => {
+    const opened = await asService(sql, async (tx) => {
+      const fresh: L2Break[] = [];
       for (const b of breaks) {
-        await tx`insert into public.pool_breaks (pool_id, kind, dedupe_key, amount_minor, refs, opened_at)
+        const [r] = await tx<{ inserted: boolean }[]>`insert into public.pool_breaks (pool_id, kind, dedupe_key, amount_minor, refs, opened_at)
                  values (${p.id}, ${b.kind}, ${b.dedupeKey}, ${b.amountMinor}, ${tx.json(b.refs as never)}, ${now})
-                 on conflict (dedupe_key) where resolved_at is null do update set amount_minor = excluded.amount_minor, refs = excluded.refs`;
+                 on conflict (dedupe_key) where resolved_at is null do update set amount_minor = excluded.amount_minor, refs = excluded.refs
+                 returning (xmax = 0) as inserted`;
+        if (r?.inserted) fresh.push(b);
       }
       await tx`update public.pool_breaks set resolved_at = ${now}, resolution = 'cleared_by_run'
                 where pool_id = ${p.id} and resolved_at is null and kind = any(${DERIVED}) and not (dedupe_key = any(${breaks.map((b) => b.dedupeKey)}))`;
+      return fresh;
     });
+    // Alert once, when the overdue-refund break first opens, not on every tick it stays open (review round 2, PR #12).
+    for (const b of opened.filter((x) => x.kind === "refund_overdue")) {
+      log("alert", "refund.overdue", { poolId: p.id, opId: b.refs.op_id, status: b.refs.status });
+    }
     out.push(row);
   }
   const breaks = out.flatMap((r) => r.breaks.map((b) => ({ ...b, poolId: r.poolId })));
