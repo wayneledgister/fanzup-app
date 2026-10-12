@@ -19,7 +19,8 @@
     "jose": "^6.0.0",
     "postgres": "^3.4.7",
     "stripe": "^18.3.0",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "@fanzup/mock-escrow": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
