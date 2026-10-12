@@ -327,6 +327,25 @@ export class MockEscrowEngine {
     });
   }
 
+  /**
+   * Refund one settled fund move in full, addressed by the fund move (design §3.1: a stray fund move — a second fund move
+   * for a trade, or one naming no live investment — is refunded by its own ref, never through the trade).
+   */
+  refundFundMove(fundMoveId: string, input: { amount: number; externalId: string }, idem?: string) {
+    return this.idempotent(idem, "refundFundMove", { fundMoveId, ...input }, () => {
+      const fm = this.get("fundMove", fundMoveId);
+      if (fm.status !== "settled") throw new MockError(409, "fund_move_state", `Only a settled fund move can be refunded (it is ${fm.status}).`);
+      if (input.amount !== Number(fm.amount)) throw new MockError(400, "invalid_request", "Refunds return the full fund move amount.");
+      if (this.list("refund", (r) => r.fundMoveId === fundMoveId && r.status !== "failed").length) {
+        throw new MockError(409, "already_refunded", "This fund move already has a refund.");
+      }
+      if (this.escrowBalance(String(fm.offeringId)) < input.amount) throw new MockError(409, "insufficient_escrow", "Not enough held in escrow.");
+      const r = this.put("refund", { id: this.newId("RF"), tradeId: fm.tradeId, fundMoveId, offeringId: fm.offeringId, amount: input.amount, externalId: input.externalId, status: "pending" });
+      this.schedule("refund.settle", this.delays.refund, { refundId: r.id });
+      return r;
+    });
+  }
+
   disburseToIssuer(offeringId: string, input: { amount: number; externalId: string }, idem?: string) {
     return this.idempotent(idem, "disburse", { offeringId, ...input }, () => {
       const o = this.get("offering", offeringId);
@@ -425,8 +444,10 @@ export class MockEscrowEngine {
         const r = this.get("refund", p.refundId);
         if (r.status !== "pending") return;
         this.patch("refund", r.id, { status: "settled", settledAt: at });
-        this.patch("trade", String(r.tradeId), { status: "refunded" });
-        this.emit("refund.settled", { refundId: r.id, tradeId: r.tradeId, offeringId: r.offeringId, amount: r.amount, externalId: r.externalId });
+        // A fund-move refund of a stray (not the trade's own fund move) leaves the trade as it is.
+        const trade = r.tradeId ? this.get("trade", String(r.tradeId)) : null;
+        if (trade && (!r.fundMoveId || trade.fundMoveId === r.fundMoveId)) this.patch("trade", trade.id, { status: "refunded" });
+        this.emit("refund.settled", { refundId: r.id, tradeId: r.tradeId, fundMoveId: r.fundMoveId ?? trade?.fundMoveId ?? null, offeringId: r.offeringId, amount: r.amount, externalId: r.externalId });
         return;
       }
       case "disbursement.settle": {

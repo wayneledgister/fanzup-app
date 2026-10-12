@@ -73,6 +73,8 @@ export interface RegCfProvider {
   /** Every escrow (offering) or collection-account movement, for per-transaction ref matching (design §5.1). */
   listTransactions(q: { offeringId: string; since?: string } | { collectionAccountId: string; since?: string }): Promise<RegCfTransaction[]>;
   refundTrade(tradeId: string, i: { amount: number; externalId: string }, idem: string): Promise<{ id: string }>;
+  /** Refund one settled fund move in full, by its ref (design §3.1: stray fund moves are refunded by fund ref, key `refund:fund:<ref>`). */
+  refundFundMove(fundMoveId: string, i: { amount: number; externalId: string }, idem: string): Promise<{ id: string }>;
   disburseToIssuer(offeringId: string, i: { amount: number; externalId: string }, idem: string): Promise<{ id: string }>;
   getEscrow(offeringId: string): Promise<{ balance: number; status: string }>;
   createCollectionAccount(i: { offeringId: string; externalId: string }, idem: string): Promise<{ id: string }>;

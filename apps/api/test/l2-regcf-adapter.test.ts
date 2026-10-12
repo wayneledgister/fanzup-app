@@ -27,5 +27,32 @@ describe("InProcessRegCf lookups", () => {
     expect((await rc.getTrade(t2.id)).fundMoves.map((f) => f.id)).toEqual([fm.id]);
     await rc.advance!(3);
     expect((await rc.listTransactions({ offeringId: off.id })).map((x) => [x.id, x.kind, x.status, x.amount, x.externalId])).toEqual([[fm.id, "fund_move", "settled", 10_000, "inv-2"]]);
+    // Fund-move-level refund (design §3.1, stray refunds by fund ref).
+    const rf = await rc.refundFundMove(fm.id, { amount: 10_000, externalId: "op-1" }, `refund:fund:${fm.id}`);
+    expect((await rc.refundFundMove(fm.id, { amount: 10_000, externalId: "op-1" }, `refund:fund:${fm.id}`)).id).toBe(rf.id);
+    const twice = await rc.refundFundMove(fm.id, { amount: 10_000, externalId: "op-2" }, "refund:fund:other").catch((e) => e);
+    expect({ cls: twice.cls, code: twice.code }).toEqual({ cls: "permanent", code: "already_refunded" });
+  });
+});
+
+describe("HttpMockEscrow refundFundMove", () => {
+  it("POSTs /v1/fund-moves/:id/refund with the API key and the idempotency key", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ id: "RF_1", fundMoveId: "FM_1", amount: 500, status: "pending" }), { status: 201 });
+    }) as typeof fetch;
+    try {
+      const { HttpMockEscrow } = await import("../src/regcf/http");
+      const rc = new HttpMockEscrow({ baseUrl: "http://mock.local/", apiKey: "test-api-key", webhookSecret: SECRET });
+      expect(await rc.refundFundMove("FM_1", { amount: 500, externalId: "op-1" }, "refund:fund:FM_1")).toMatchObject({ id: "RF_1" });
+    } finally {
+      globalThis.fetch = real;
+    }
+    expect(calls[0].url).toBe("http://mock.local/v1/fund-moves/FM_1/refund");
+    expect(calls[0].init.method).toBe("POST");
+    expect(calls[0].init.headers).toMatchObject({ "x-api-key": "test-api-key", "idempotency-key": "refund:fund:FM_1" });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ amount: 500, externalId: "op-1" });
   });
 });

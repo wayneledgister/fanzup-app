@@ -47,6 +47,7 @@ export class InProcessRegCf implements RegCfProvider {
   cancelTrade: RegCfProvider["cancelTrade"] = (id, idem) => this.run("cancelTrade", () => this.e().cancelTrade(id, idem) as unknown as { id: string; status: string });
   listTransactions: RegCfProvider["listTransactions"] = (q) => this.run("listTransactions", () => this.e().listTransactions(q).data);
   refundTrade: RegCfProvider["refundTrade"] = (id, i, idem) => this.run("refundTrade", () => this.e().refundTrade(id, i, idem));
+  refundFundMove: RegCfProvider["refundFundMove"] = (id, i, idem) => this.run("refundFundMove", () => this.e().refundFundMove(id, i, idem));
   disburseToIssuer: RegCfProvider["disburseToIssuer"] = (id, i, idem) => this.run("disburse", () => this.e().disburseToIssuer(id, i, idem));
   getEscrow: RegCfProvider["getEscrow"] = (id) => this.run("getEscrow", () => this.e().getEscrow(id) as { balance: number; status: string });
   createCollectionAccount: RegCfProvider["createCollectionAccount"] = (i, idem) => this.run("createCollectionAccount", () => this.e().createCollectionAccount(i, idem));

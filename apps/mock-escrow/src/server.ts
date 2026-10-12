@@ -93,6 +93,7 @@ export function buildServer(cfg: ServerConfig, engine?: MockEscrowEngine) {
     eng.listTransactions({ collectionAccountId: req.params.id, since: req.query.since }));
   app.post<{ Params: { id: string } }>("/v1/trades/:id/fund", async (req, reply) => reply.status(201).send(eng.fundTrade(req.params.id, body(req), idem(req))));
   app.post<{ Params: { id: string } }>("/v1/trades/:id/refund", async (req, reply) => reply.status(201).send(eng.refundTrade(req.params.id, body(req), idem(req))));
+  app.post<{ Params: { id: string } }>("/v1/fund-moves/:id/refund", async (req, reply) => reply.status(201).send(eng.refundFundMove(req.params.id, body(req), idem(req))));
   app.post("/v1/collection-accounts", async (req, reply) => reply.status(201).send(eng.createCollectionAccount(body(req), idem(req))));
   app.get<{ Params: { id: string } }>("/v1/collection-accounts/:id", async (req) => eng.getCollectionAccount(req.params.id));
   app.post<{ Params: { id: string } }>("/v1/collection-accounts/:id/deposits", async (req, reply) => reply.status(201).send(eng.simulateDeposit(req.params.id, body(req), idem(req))));

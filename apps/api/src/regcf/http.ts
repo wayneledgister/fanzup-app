@@ -45,6 +45,7 @@ export class HttpMockEscrow implements RegCfProvider {
     return (await this.call<{ data: Awaited<ReturnType<RegCfProvider["listTransactions"]>> }>("GET", `${base}/transactions${since}`)).data;
   };
   refundTrade: RegCfProvider["refundTrade"] = (id, i, idem) => this.call("POST", `/v1/trades/${encodeURIComponent(id)}/refund`, i, idem);
+  refundFundMove: RegCfProvider["refundFundMove"] = (id, i, idem) => this.call("POST", `/v1/fund-moves/${encodeURIComponent(id)}/refund`, i, idem);
   disburseToIssuer: RegCfProvider["disburseToIssuer"] = (id, i, idem) => this.call("POST", `/v1/offerings/${encodeURIComponent(id)}/disbursements`, i, idem);
   getEscrow: RegCfProvider["getEscrow"] = (id) => this.call("GET", `/v1/offerings/${encodeURIComponent(id)}/escrow`);
   createCollectionAccount: RegCfProvider["createCollectionAccount"] = (i, idem) => this.call("POST", "/v1/collection-accounts", i, idem);
