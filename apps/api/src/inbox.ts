@@ -6,9 +6,10 @@
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n, type Sql } from "./db";
 import { runWithCtx } from "./context";
-import type { NormalizedEvent, PaymentProvider } from "./provider/types";
-import { confirmPayout, confirmRefund, failOpOnAmountMismatch, type OpRow } from "./outbound";
+import { attemptOf, type NormalizedEvent, type PaymentProvider } from "./provider/types";
+import { confirmPayout, confirmRefundOrFlag, recordFailedMovement, type OpRow } from "./outbound";
 import { log, redact } from "./log";
+import { handleRegCfEvent } from "./l2/events";
 
 /** How long an event for an object we can't see yet keeps retrying before it's "unmatched" (design §5). */
 const GRACE_MS = 10 * 60_000;
@@ -140,6 +141,7 @@ async function opFor(sql: Sql, kind: "refund" | "payout", p: EventPayload, objec
 
 async function handle(sql: Sql, provider: PaymentProvider, row: EventRow): Promise<Outcome> {
   const p = row.payload;
+  if (row.type.startsWith("regcf.")) return handleRegCfEvent(sql, row);
   switch (p.type) {
     case "payment.succeeded":
       return handleCapture(sql, provider, row);
@@ -160,27 +162,20 @@ async function handle(sql: Sql, provider: PaymentProvider, row: EventRow): Promi
     case "refund.succeeded": {
       const op = await opFor(sql, "refund", p, row.object_ref);
       if (!op) return "wait";
-      await runWithCtx({ correlationId: op.correlation_id, actorId: null, actorKind: "system:webhook", aal: null }, async () => {
-        try {
-          await confirmRefund(sql, op, row.object_ref!, n(p.amountMinor));
-        } catch (e) {
-          // The provider refunded a different amount than the op: fail the op and open a break, never "fix" it (design §5).
-          if ((e as { code?: string }).code === "P0001" && (e as { message?: string }).message === "refund_amount_mismatch") {
-            await failOpOnAmountMismatch(sql, op, row.object_ref!, n(p.amountMinor));
-            return;
-          }
-          throw e;
-        }
-      });
+      // A different amount than the op fails the op and opens a break, never "fixed" (design §5).
+      await runWithCtx({ correlationId: op.correlation_id, actorId: null, actorKind: "system:webhook", aal: null }, () =>
+        confirmRefundOrFlag(sql, op, row.object_ref!, n(p.amountMinor)));
       return "processed";
     }
     case "refund.failed": {
       const op = await opFor(sql, "refund", p, row.object_ref);
       if (!op) return "unmatched";
+      // Op `failed` + alert, the failed ref recorded with its generation (never re-adopted); a report about an earlier
+      // generation than the op's current one changes nothing (design §5 "Attempt generations").
       await runWithCtx({ correlationId: op.correlation_id, actorId: null, actorKind: "system:webhook", aal: null }, () =>
-        asService(sql, (tx) => tx`update public.outbound_ops set status = 'failed', last_error = ${"refund failed: " + (p.failureCode ?? "unknown")} where id = ${op.id} and status <> 'confirmed'`),
-      );
-      log("alert", "refund.failed", { opId: op.id, code: p.failureCode });
+        recordFailedMovement(sql, op, {
+          gen: attemptOf(p.metadata), ref: row.object_ref ?? "", status: "failed", via: "webhook", lastError: "refund failed: " + (p.failureCode ?? "unknown"),
+        }));
       return "processed";
     }
     case "transfer.created": {

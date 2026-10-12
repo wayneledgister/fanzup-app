@@ -8,7 +8,8 @@
  *  - state changes that a real provider makes later (KYC decision, ACH settlement, refunds, disbursements, deposits,
  *    payouts) are scheduled jobs on a virtual clock and announced by signed webhooks;
  *  - deterministic triggers: party last name KYCFAIL → KYC rejected, AMLHOLD → manual review; a fund move whose
- *    whole-dollar amount ends in 13 (e.g. $113.00, $2,013.50) is returned (R01).
+ *    whole-dollar amount ends in 13 (e.g. $113.00, $2,013.50) is returned (R01); `failRefund` (admin
+ *    `POST /admin/refunds/:id/fail`) makes a pending refund fail at the bank (`refund.failed`, nothing leaves escrow).
  * Storage: node:sqlite (file in the service, ":memory:" in tests). Used by the HTTP server and in-process by API tests.
  */
 import { createHash, randomUUID } from "node:crypto";
@@ -46,7 +47,7 @@ type Obj = Record<string, unknown> & { id: string };
 export interface ProviderTxn {
   id: string;
   kind: "fund_move" | "refund" | "disbursement" | "deposit" | "payout";
-  /** pending | settled | returned (fund moves only) */
+  /** pending | settled | returned (fund moves only) | failed (refunds only) */
   status: string;
   amount: number;
   externalId: string | null;
@@ -183,6 +184,25 @@ export class MockEscrowEngine {
     });
   }
 
+  /** Lookup by our id (the Pool id sent as externalId at createOffering). Never creates anything. Null: no offering. */
+  findOffering(q: { externalId: string }) {
+    if (!q.externalId) throw new MockError(400, "invalid_request", "externalId is required");
+    return this.list("offering", (o) => o.externalId === q.externalId)[0] ?? null;
+  }
+
+  /**
+   * Move an open offering's end date (a launch re-planned its deadline before the offering went live; L2 design §5
+   * "Launch"). Refused once the offering is closed. Idempotent on the key like every mutating call.
+   */
+  updateOffering(offeringId: string, input: { endDate: string }, idem?: string) {
+    return this.idempotent(idem, "updateOffering", { offeringId, ...input }, () => {
+      const o = this.get("offering", offeringId);
+      if (o.status !== "open") throw new MockError(409, "offering_not_open", "The offering isn't open.");
+      if (!input.endDate || Number.isNaN(Date.parse(input.endDate))) throw new MockError(400, "invalid_request", "endDate must be an ISO date-time");
+      return this.patch("offering", offeringId, { endDate: input.endDate });
+    });
+  }
+
   closeOffering(offeringId: string, idem?: string) {
     return this.idempotent(idem, "closeOffering", { offeringId }, () => {
       const o = this.get("offering", offeringId);
@@ -269,6 +289,18 @@ export class MockEscrowEngine {
     return t ? this.getTrade(t.id) : null;
   }
 
+  /**
+   * Test hook (no HTTP route): the bank delivers a different amount than the trade asked for, so a still-pending fund
+   * move settles for `amount` (design §3.1 amount mismatch; PR #12 review round 2). Real providers do this; the mock's
+   * fundTrade never does on its own.
+   */
+  setPendingFundMoveAmount(fundMoveId: string, amount: number) {
+    const fm = this.get("fundMove", fundMoveId);
+    if (fm.status !== "pending") throw new MockError(409, "fund_move_state", `Only a pending fund move can change amount (it is ${fm.status}).`);
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw new MockError(400, "invalid_request", "amount must be a positive integer (cents)");
+    return this.patch("fundMove", fundMoveId, { amount });
+  }
+
   /** Void a trade that has no fund move (design §4.3). Refused `trade_funded` once a fund move exists. */
   cancelTrade(tradeId: string, idem?: string) {
     return this.idempotent(idem, "cancelTrade", { tradeId }, () => {
@@ -325,6 +357,42 @@ export class MockEscrowEngine {
       this.schedule("refund.settle", this.delays.refund, { refundId: r.id });
       return r;
     });
+  }
+
+  /**
+   * Refund one settled fund move in full, addressed by the fund move (design §3.1: a stray fund move — a second fund move
+   * for a trade, or one naming no live investment — is refunded by its own ref, never through the trade).
+   */
+  refundFundMove(fundMoveId: string, input: { amount: number; externalId: string }, idem?: string) {
+    return this.idempotent(idem, "refundFundMove", { fundMoveId, ...input }, () => {
+      const fm = this.get("fundMove", fundMoveId);
+      if (fm.status !== "settled") throw new MockError(409, "fund_move_state", `Only a settled fund move can be refunded (it is ${fm.status}).`);
+      if (input.amount !== Number(fm.amount)) throw new MockError(400, "invalid_request", "Refunds return the full fund move amount.");
+      if (this.list("refund", (r) => r.fundMoveId === fundMoveId && r.status !== "failed").length) {
+        throw new MockError(409, "already_refunded", "This fund move already has a refund.");
+      }
+      if (this.escrowBalance(String(fm.offeringId)) < input.amount) throw new MockError(409, "insufficient_escrow", "Not enough held in escrow.");
+      const r = this.put("refund", { id: this.newId("RF"), tradeId: fm.tradeId, fundMoveId, offeringId: fm.offeringId, amount: input.amount, externalId: input.externalId, status: "pending" });
+      this.schedule("refund.settle", this.delays.refund, { refundId: r.id });
+      return r;
+    });
+  }
+
+  /**
+   * Test trigger (admin): a PENDING refund fails at the bank (e.g. the investor's account was closed). Nothing leaves
+   * escrow; a trade refund puts the trade back to `funded` so it can be refunded again (under a NEW idempotency key — the
+   * old key keeps returning this failed refund); `refund.failed` is announced. Idempotent: a failed refund stays failed.
+   */
+  failRefund(refundId: string, returnCode = "R02") {
+    const r = this.get("refund", refundId);
+    if (r.status === "failed") return r;
+    if (r.status !== "pending") throw new MockError(409, "refund_state", `Only a pending refund can fail (it is ${r.status}).`);
+    const at = new Date(this.now()).toISOString();
+    const failed = this.patch("refund", r.id, { status: "failed", returnCode, settledAt: at });
+    const trade = r.tradeId ? this.get("trade", String(r.tradeId)) : null;
+    if (trade && trade.status === "refunding") this.patch("trade", trade.id, { status: "funded" });
+    this.emit("refund.failed", { refundId: r.id, tradeId: r.tradeId, fundMoveId: r.fundMoveId ?? null, offeringId: r.offeringId, amount: r.amount, externalId: r.externalId, returnCode });
+    return failed;
   }
 
   disburseToIssuer(offeringId: string, input: { amount: number; externalId: string }, idem?: string) {
@@ -425,8 +493,10 @@ export class MockEscrowEngine {
         const r = this.get("refund", p.refundId);
         if (r.status !== "pending") return;
         this.patch("refund", r.id, { status: "settled", settledAt: at });
-        this.patch("trade", String(r.tradeId), { status: "refunded" });
-        this.emit("refund.settled", { refundId: r.id, tradeId: r.tradeId, offeringId: r.offeringId, amount: r.amount, externalId: r.externalId });
+        // A fund-move refund of a stray (not the trade's own fund move) leaves the trade as it is.
+        const trade = r.tradeId ? this.get("trade", String(r.tradeId)) : null;
+        if (trade && (!r.fundMoveId || trade.fundMoveId === r.fundMoveId)) this.patch("trade", trade.id, { status: "refunded" });
+        this.emit("refund.settled", { refundId: r.id, tradeId: r.tradeId, fundMoveId: r.fundMoveId ?? trade?.fundMoveId ?? null, offeringId: r.offeringId, amount: r.amount, externalId: r.externalId });
         return;
       }
       case "disbursement.settle": {

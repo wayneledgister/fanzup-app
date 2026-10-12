@@ -40,7 +40,8 @@ describe("Appendix A policy defaults (accepted 2026-10-03)", () => {
     expect(POLICY.approvals.secondVerifierAboveMinor).toBe(500_000);
     expect(POLICY.singleOperator).toEqual({ delayAboveMinor: 100_000, delayHours: 24, dailyLimits: { refundsMinor: 500_000, verifications: 3 } });
     expect(POLICY.outbound.maxAttempts).toBe(8);
-    expect(POLICY.recon).toEqual({ materialityMinor: 100, maxBreakAgeBusinessDays: 1, inflightGraceMinutes: 30 });
+    // closedPoolSweepHours: Layer 2 recon sweep of closed Pools (PR #12 review round 3).
+    expect(POLICY.recon).toEqual({ materialityMinor: 100, maxBreakAgeBusinessDays: 1, inflightGraceMinutes: 30, closedPoolSweepHours: 24 });
     expect(POLICY.staff.idleTimeoutMinutes).toBe(15);
   });
 });

@@ -4,7 +4,7 @@
  */
 import { MockError, MockEscrowEngine } from "@fanzup/mock-escrow/engine";
 import { parseSigned } from "./http";
-import { RegCfError, type RegCfEvent, type RegCfProvider, type RegCfTrade } from "./types";
+import { RegCfError, type RegCfEvent, type RegCfOffering, type RegCfProvider, type RegCfTrade } from "./types";
 
 export class InProcessRegCf implements RegCfProvider {
   readonly name = "mock-escrow" as const;
@@ -35,6 +35,8 @@ export class InProcessRegCf implements RegCfProvider {
 
   createIssuer: RegCfProvider["createIssuer"] = (i, idem) => this.run("createIssuer", () => this.e().createIssuer(i, idem));
   createOffering: RegCfProvider["createOffering"] = (i, idem) => this.run("createOffering", () => this.e().createOffering(i, idem));
+  findOffering: RegCfProvider["findOffering"] = (q) => this.run("findOffering", () => this.e().findOffering(q) as unknown as RegCfOffering | null);
+  updateOffering: RegCfProvider["updateOffering"] = (id, i, idem) => this.run("updateOffering", () => this.e().updateOffering(id, i, idem) as unknown as RegCfOffering);
   closeOffering: RegCfProvider["closeOffering"] = (id, idem) => this.run("closeOffering", () => this.e().closeOffering(id, idem) as { id: string; status: string });
   createParty: RegCfProvider["createParty"] = (i, idem) => this.run("createParty", () => this.e().createParty(i, idem) as unknown as { id: string; kycStatus: string });
   setPartyKyc: RegCfProvider["setPartyKyc"] = (id, d, idem) => this.run("setPartyKyc", () => this.e().updatePartyKyc(id, d, idem) as unknown as { id: string; kycStatus: string });
@@ -47,6 +49,7 @@ export class InProcessRegCf implements RegCfProvider {
   cancelTrade: RegCfProvider["cancelTrade"] = (id, idem) => this.run("cancelTrade", () => this.e().cancelTrade(id, idem) as unknown as { id: string; status: string });
   listTransactions: RegCfProvider["listTransactions"] = (q) => this.run("listTransactions", () => this.e().listTransactions(q).data);
   refundTrade: RegCfProvider["refundTrade"] = (id, i, idem) => this.run("refundTrade", () => this.e().refundTrade(id, i, idem));
+  refundFundMove: RegCfProvider["refundFundMove"] = (id, i, idem) => this.run("refundFundMove", () => this.e().refundFundMove(id, i, idem));
   disburseToIssuer: RegCfProvider["disburseToIssuer"] = (id, i, idem) => this.run("disburse", () => this.e().disburseToIssuer(id, i, idem));
   getEscrow: RegCfProvider["getEscrow"] = (id) => this.run("getEscrow", () => this.e().getEscrow(id) as { balance: number; status: string });
   createCollectionAccount: RegCfProvider["createCollectionAccount"] = (i, idem) => this.run("createCollectionAccount", () => this.e().createCollectionAccount(i, idem));

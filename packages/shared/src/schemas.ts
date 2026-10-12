@@ -39,6 +39,8 @@ export const PublicConfig = z.object({
   stripePublishableKey: z.string().nullable(),
   /** Current Terms/Privacy versions; the sign-up form sends these (design §3.7). */
   legal: z.object({ termsVersion: z.string(), privacyVersion: z.string() }),
+  /** The server's view of feature flags (FR-PLT-001; L2 design §2). Layer 2 is on only with the mock provider + DB flag. */
+  flags: z.object({ layer2: z.boolean() }).optional(),
 });
 export type PublicConfig = z.infer<typeof PublicConfig>;
 
@@ -146,5 +148,5 @@ export const Me = z.object({
 export type Me = z.infer<typeof Me>;
 
 /** `GET /staff/queue?type=` (design §4.2). `payouts`: releases waiting on a payout account, funds, a recon pause or an earlier tranche. */
-export const StaffQueueType = z.enum(["review", "verification", "refunds", "payouts", "unmatched", "dead_letters", "breaks", "failed_events", "scheduled"]);
+export const StaffQueueType = z.enum(["review", "verification", "refunds", "payouts", "unmatched", "dead_letters", "pool_dead_letters", "pool_breaks", "breaks", "failed_events", "scheduled"]);
 export type StaffQueueType = z.infer<typeof StaffQueueType>;

@@ -22,7 +22,7 @@ create table auth.users (
   email_change_token_new text, recovery_token text
 );
 create table auth.identities (
-  id text, user_id uuid references auth.users (id), provider_id text, identity_data jsonb, provider text,
+  id uuid, user_id uuid references auth.users (id), provider_id text, identity_data jsonb, provider text,
   last_sign_in_at timestamptz, created_at timestamptz, updated_at timestamptz
 );
 create function auth.uid() returns uuid language sql stable as $$

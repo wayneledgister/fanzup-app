@@ -80,6 +80,61 @@ describe("mock escrow engine (ADR-007)", () => {
     expect(e.getEscrow(o.id).balance).toBe(8_000);
   });
 
+  it("refundFundMove refunds one settled fund move by its ref, in full, once; the trade's own state is untouched for a stray", async () => {
+    const { e, inbox } = engine();
+    const o = offering(e);
+    const { account } = investor(e);
+    await e.advance(3);
+    const own = e.createTrade({ offeringId: o.id, accountId: account.id, units: 2, unitPrice: 5_000, amount: 10_000, externalId: "inv-1" }, k());
+    e.fundTrade(own.id, { amount: 10_000, externalId: "inv-1" }, k());
+    // A second trade naming the same investment: its fund move is a stray for FanZuP (design §3.1).
+    const stray = e.createTrade({ offeringId: o.id, accountId: account.id, units: 1, unitPrice: 5_000, amount: 5_000, externalId: "inv-1" }, k());
+    const fm = e.fundTrade(stray.id, { amount: 5_000, externalId: "inv-1" }, k()) as { id: string };
+    expect(() => e.refundFundMove(fm.id, { amount: 5_000, externalId: "op-1" }, k())).toThrow(/settled fund move/);
+    await e.advance(3);
+    expect(() => e.refundFundMove(fm.id, { amount: 4_999, externalId: "op-1" }, k())).toThrow(/full fund move amount/);
+    const key = k();
+    const r = e.refundFundMove(fm.id, { amount: 5_000, externalId: "op-1" }, key);
+    expect(e.refundFundMove(fm.id, { amount: 5_000, externalId: "op-1" }, key).id).toBe(r.id); // idempotent replay
+    expect(() => e.refundFundMove(fm.id, { amount: 5_000, externalId: "op-1" }, k())).toThrow(/already has a refund/);
+    await e.advance(2);
+    expect(e.getEscrow(o.id).balance).toBe(10_000);
+    expect(e.get("trade", own.id).status).toBe("funded");
+    const settled = inbox.filter((x) => x.evt.type === "refund.settled").map((x) => x.evt.data);
+    expect(settled).toEqual([expect.objectContaining({ refundId: r.id, fundMoveId: fm.id, amount: 5_000, externalId: "op-1" })]);
+  });
+
+  it("failRefund (test trigger): a pending refund fails at the bank — nothing leaves escrow, the old key replays the failed refund, a new key refunds", async () => {
+    const { e, inbox } = engine();
+    const o = offering(e);
+    const { account } = investor(e);
+    await e.advance(3);
+    const t = e.createTrade({ offeringId: o.id, accountId: account.id, units: 2, unitPrice: 5_000, amount: 10_000, externalId: "inv-f" }, k());
+    e.fundTrade(t.id, { amount: 10_000, externalId: "inv-f" }, k());
+    await e.advance(3);
+    const key = k();
+    const r = e.refundTrade(t.id, { amount: 10_000, externalId: "op-f" }, key);
+    expect(e.get("trade", t.id).status).toBe("refunding");
+    const failed = e.failRefund(r.id, "R02");
+    expect(failed).toMatchObject({ status: "failed", returnCode: "R02" });
+    expect(e.failRefund(r.id).status).toBe("failed"); // idempotent
+    await e.advance(3); // its settle job finds it failed: nothing settles
+    expect(e.get("refund", r.id).status).toBe("failed");
+    expect(e.get("trade", t.id).status).toBe("funded");
+    expect(e.getEscrow(o.id).balance).toBe(10_000);
+    expect(inbox.filter((x) => x.evt.type === "refund.failed").map((x) => x.evt.data))
+      .toEqual([expect.objectContaining({ refundId: r.id, externalId: "op-f", amount: 10_000, returnCode: "R02" })]);
+    expect(e.listTransactions({ offeringId: o.id }).data.find((x) => x.id === r.id)).toMatchObject({ kind: "refund", status: "failed", returnCode: "R02" });
+    // Same key → the same (failed) refund, never a new movement; a new key (a new attempt generation) refunds.
+    expect(e.refundTrade(t.id, { amount: 10_000, externalId: "op-f" }, key)).toMatchObject({ id: r.id, status: "pending" });
+    const again = e.refundTrade(t.id, { amount: 10_000, externalId: "op-f:r1" }, k());
+    expect(again.id).not.toBe(r.id);
+    await e.advance(2);
+    expect(e.get("refund", again.id).status).toBe("settled");
+    expect(e.getEscrow(o.id).balance).toBe(0);
+    expect(() => e.failRefund(again.id)).toThrow(/Only a pending refund/);
+  });
+
   it("collection account: deposits in, payouts out, never negative", async () => {
     const { e, types } = engine();
     const o = offering(e);
@@ -232,6 +287,32 @@ describe("mock escrow HTTP service", () => {
     expect(c.json().status).toBe("cancelled");
     const list = await app.inject({ method: "GET", url: `/v1/offerings/${o.id}/transactions`, headers: h });
     expect(list.json()).toEqual({ data: [] });
+    // Fund-move-level refund (design §3.1 strays), by fund-move ref.
+    const t2 = e.createTrade({ offeringId: o.id, accountId: account.id, units: 1, unitPrice: 5_000, amount: 5_000, externalId: "inv-r" }, k());
+    const fm = e.fundTrade(t2.id, { amount: 5_000, externalId: "inv-r" }, k()) as { id: string };
+    await e.advance(3);
+    const r = await app.inject({ method: "POST", url: `/v1/fund-moves/${fm.id}/refund`, headers: { ...h, "idempotency-key": `refund:fund:${fm.id}` }, payload: { amount: 5_000, externalId: "op-h" } });
+    expect(r.statusCode, r.body).toBe(201);
+    expect(r.json()).toMatchObject({ fundMoveId: fm.id, amount: 5_000, status: "pending" });
+    await app.close();
+  });
+  it("finds an offering by externalId and moves its end date (PR #12 review round 3: a re-planned launch deadline)", async () => {
+    const e = new MockEscrowEngine({ db: ":memory:", webhookSecret: SECRET });
+    const { app } = buildServer(cfg, e);
+    const h = { "x-api-key": "k_test_123" };
+    const o = offering(e);
+    expect((await app.inject({ method: "GET", url: "/v1/offerings?externalId=pool-1", headers: h })).json().data[0]).toMatchObject({ id: o.id, endDate: "2027-01-01" });
+    expect((await app.inject({ method: "GET", url: "/v1/offerings?externalId=nope", headers: h })).json()).toEqual({ data: [] });
+    const end = "2027-02-15T18:00:00.000Z";
+    const u = await app.inject({ method: "POST", url: `/v1/offerings/${o.id}/end-date`, headers: { ...h, "idempotency-key": `offering_end:pool-1:${end}` }, payload: { endDate: end } });
+    expect(u.statusCode, u.body).toBe(200);
+    expect(u.json()).toMatchObject({ id: o.id, endDate: end, status: "open" });
+    expect(e.findOffering({ externalId: "pool-1" })).toMatchObject({ endDate: end });
+    const bad = await app.inject({ method: "POST", url: `/v1/offerings/${o.id}/end-date`, headers: { ...h, "idempotency-key": "offering_end:pool-1:bad" }, payload: { endDate: "soon" } });
+    expect(bad.statusCode).toBe(400);
+    e.closeOffering(o.id, k());
+    const closed = await app.inject({ method: "POST", url: `/v1/offerings/${o.id}/end-date`, headers: { ...h, "idempotency-key": "offering_end:pool-1:late" }, payload: { endDate: "2027-03-01T00:00:00.000Z" } });
+    expect(closed.json().error).toBe("offering_not_open");
     await app.close();
   });
   it("refuses to start in a deployed environment", async () => {

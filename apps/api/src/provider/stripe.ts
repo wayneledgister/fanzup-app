@@ -7,7 +7,7 @@
  * transfers wait for funds (classified `wait_funds`, design §5).
  */
 import Stripe from "stripe";
-import { ProviderError, type BalanceTxn, type NormalizedEvent, type PaymentProvider } from "./types";
+import { attemptOf, ProviderError, type BalanceTxn, type NormalizedEvent, type PaymentProvider } from "./types";
 
 export interface StripeConfig {
   secretKey: string;
@@ -148,18 +148,18 @@ export class StripeTestProvider implements PaymentProvider {
       const r = await this.stripe.refunds.create(
         {
           payment_intent: input.paymentRef, amount: input.amountMinor,
-          metadata: { outbound_op_id: input.opId, campaign_id: input.campaignId, ...(input.backingId ? { backing_id: input.backingId } : {}) },
+          metadata: { outbound_op_id: input.opId, outbound_attempt: String(input.attempt), campaign_id: input.campaignId, ...(input.backingId ? { backing_id: input.backingId } : {}) },
         },
         { idempotencyKey: input.idempotencyKey },
       );
-      return { refundRef: r.id, amountMinor: r.amount };
+      return { refundRef: r.id, amountMinor: r.amount, status: r.status ?? "pending" };
     });
   }
 
-  findRefund(input: { paymentRef: string; opId: string }) {
+  findRefund(input: { paymentRef: string; opId: string; attempt: number }) {
     return this.call(async () => {
       const list = await this.stripe.refunds.list({ payment_intent: input.paymentRef, limit: 100 });
-      const r = list.data.find((x) => x.metadata?.outbound_op_id === input.opId);
+      const r = list.data.find((x) => x.metadata?.outbound_op_id === input.opId && attemptOf(x.metadata) === input.attempt);
       return r ? { refundRef: r.id, amountMinor: r.amount, status: r.status ?? "pending" } : null;
     });
   }
@@ -169,7 +169,7 @@ export class StripeTestProvider implements PaymentProvider {
       const t = await this.stripe.transfers.create(
         {
           amount: input.amountMinor, currency: "usd", destination: input.destination, transfer_group: `campaign_${input.campaignId}`,
-          metadata: { outbound_op_id: input.opId, campaign_id: input.campaignId, tranche_id: input.trancheId },
+          metadata: { outbound_op_id: input.opId, outbound_attempt: String(input.attempt), campaign_id: input.campaignId, tranche_id: input.trancheId },
         },
         { idempotencyKey: input.idempotencyKey },
       );
@@ -177,10 +177,10 @@ export class StripeTestProvider implements PaymentProvider {
     });
   }
 
-  findTransfer(input: { campaignId: string; opId: string }) {
+  findTransfer(input: { campaignId: string; opId: string; attempt: number }) {
     return this.call(async () => {
       const list = await this.stripe.transfers.list({ transfer_group: `campaign_${input.campaignId}`, limit: 100 });
-      const t = list.data.find((x) => x.metadata?.outbound_op_id === input.opId);
+      const t = list.data.find((x) => x.metadata?.outbound_op_id === input.opId && attemptOf(x.metadata) === input.attempt);
       return t ? { transferRef: t.id, amountMinor: t.amount } : null;
     });
   }
