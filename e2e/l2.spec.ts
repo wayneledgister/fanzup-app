@@ -6,7 +6,7 @@
  *     Form C and execute the collection agreement → creator launches (browser, attestation again) → a new fan (browser)
  *     passes mock KYC, sets their limit, reads the documents (intermediary pending, unsecured line, D-2) and invests →
  *     the confirmation shows amount, price, Units, issuer and the cancel-by time → the Pool funds → a royalty statement
- *     for the first scheduled period, cash, reconciliation → staff in the BROWSER at aal2 (TOTP in place) dry-run and
+ *     for the first scheduled period, cash, reconciliation → staff in the BROWSER at aal2 (password + TOTP) dry-run and
  *     commit the distribution; the committed run's hash equals the dry-run's → the fan sees it in the portfolio.
  *     Ledger ⇄ provider reconciles to zero.
  *  2. A Pool misses its target → every investor is refunded; on the way, a cancel while the payment is still moving
@@ -31,17 +31,24 @@ async function logIn(page: Page, email: string, next: string) {
   await expect(page).toHaveURL(new RegExp(next.replace(/[?]/g, "\\?")));
 }
 
-/** Staff in the browser: password sign-in, then the in-place TOTP step of the staff screens (aal2). */
+/**
+ * Staff in the browser at aal2: password, then the log-in page's TOTP step (the reviewer has a verified factor from
+ * staffToken()). A code Auth already accepted in this 30-second step may be refused; then the next step's code is used.
+ */
 async function staffLogIn(page: Page, email: string, next: string) {
-  await logIn(page, email, next);
-  await expect(page.getByTestId("staff-second-factor")).toBeVisible();
+  await page.goto(`/login?next=${encodeURIComponent(next)}`);
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(SEED_PASSWORD); // ggignore
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByText("Enter your verification code")).toBeVisible();
   for (const fresh of [false, true]) {
-    await page.getByLabel("6-digit code").fill(await staffTotpCode(email, { fresh }));
-    await page.getByRole("button", { name: "Verify" }).click();
-    const ok = await page.getByTestId("staff-second-factor").waitFor({ state: "detached", timeout: 10_000 }).then(() => true, () => false);
+    const code = await staffTotpCode(email, { fresh });
+    for (let i = 0; i < 6; i++) await page.getByLabel(`Digit ${i + 1}`).fill(code[i]);
+    await page.getByRole("button", { name: "Verify and log in" }).click();
+    const ok = await page.waitForURL(new RegExp(next), { timeout: 10_000 }).then(() => true, () => false);
     if (ok) return;
   }
-  throw new Error("staff TOTP step did not complete");
+  throw new Error("staff TOTP sign-in did not complete");
 }
 
 /** Mock provider clock + one worker tick (dev route, mock rails only). */
@@ -108,20 +115,26 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   await expect(fan.getByTestId("form-c-notice")).toContainText(D2);
   await expect(fan.getByTestId("form-c-intermediary")).toHaveText(INTERMEDIARY);
   await fan.goto(`/pools/${slug}`);
-  await fan.getByRole("link", { name: /Start investor verification/ }).click();
-  await fan.getByLabel("Legal first name").fill("Eli");
-  await fan.getByLabel("Legal last name").fill("Santos");
-  await fan.getByLabel("State of residence").selectOption("PA");
-  await fan.getByTestId("kyc-submit").click();
-  await expect(fan.getByTestId("kyc-step")).toHaveAttribute("data-kyc-status", "approved", { timeout: 30_000 });
-  await fan.getByLabel("Annual income (USD)").fill("300000");
-  await fan.getByLabel("Net worth, excluding your home (USD)").fill("300000");
-  await fan.locator("#c-confirm").check();
-  await fan.getByTestId("certify-submit").click();
-  await expect(fan.getByTestId("limit-summary")).toContainText("$30,000");
-  await shot(fan, "3-investor");
-  await fan.getByTestId("investor-continue").click();
-  await expect(fan.getByTestId("pool-title")).toHaveText(title);
+  // Retry-safe: on a Playwright retry Eli is already verified from the first attempt, so the panel goes straight to
+  // the documents step.
+  const verify = fan.getByRole("link", { name: /Start investor verification/ });
+  await expect(verify.or(fan.getByTestId("review-documents"))).toBeVisible();
+  if (await verify.isVisible()) {
+    await verify.click();
+    await fan.getByLabel("Legal first name").fill("Eli");
+    await fan.getByLabel("Legal last name").fill("Santos");
+    await fan.getByLabel("State of residence").selectOption("PA");
+    await fan.getByTestId("kyc-submit").click();
+    await expect(fan.getByTestId("kyc-step")).toHaveAttribute("data-kyc-status", "approved", { timeout: 30_000 });
+    await fan.getByLabel("Annual income (USD)").fill("300000");
+    await fan.getByLabel("Net worth, excluding your home (USD)").fill("300000");
+    await fan.locator("#c-confirm").check();
+    await fan.getByTestId("certify-submit").click();
+    await expect(fan.getByTestId("limit-summary")).toContainText("$30,000");
+    await shot(fan, "3-investor");
+    await fan.getByTestId("investor-continue").click();
+    await expect(fan.getByTestId("pool-title")).toHaveText(title);
+  }
   await fan.getByTestId("units-input").fill("100");
   await fan.getByTestId("review-documents").click();
   await expect(fan.getByTestId("intermediary-line")).toHaveText(INTERMEDIARY);
@@ -177,7 +190,6 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   await staffPage.getByTestId("commit-run").click();
   await expect(staffPage.getByText("Done.")).toBeVisible();
   await staffPage.reload();
-  await staffLogInIfAsked(staffPage);
   const committed = staffPage.locator("[data-testid=run-row][data-label='Period 1']").getByTestId("run-hash");
   await expect(committed).toHaveText(shownHash);
   await shot(staffPage, "6-staff-run");
@@ -203,17 +215,6 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   await fanCtx.close();
   await staffCtx.close();
 });
-
-/** After a reload the session is still aal2; if the staff step shows again (session refresh race), finish it. */
-async function staffLogInIfAsked(page: Page) {
-  const asked = await page.getByTestId("staff-second-factor").waitFor({ state: "visible", timeout: 3_000 }).then(() => true, () => false);
-  if (!asked) return;
-  for (const fresh of [false, true]) {
-    await page.getByLabel("6-digit code").fill(await staffTotpCode("reviewer@fanzup.test", { fresh }));
-    await page.getByRole("button", { name: "Verify" }).click();
-    if (await page.getByTestId("staff-second-factor").waitFor({ state: "detached", timeout: 10_000 }).then(() => true, () => false)) return;
-  }
-}
 
 test("a Pool that misses its target refunds every investor in full", async ({ page }) => {
   const staff = await staffToken("reviewer@fanzup.test");
