@@ -62,9 +62,21 @@ export async function recordFailedMovement(
            failed_refs = case when failed_refs @> ${tx.json([{ gen: f.gen, ref: f.ref }])} then failed_refs else failed_refs || ${tx.json([entry])} end
      where id = ${op.id} and status <> 'confirmed' and attempt_gen = ${f.gen}
      returning id`);
-  if (row) log("alert", `${op.kind}.failed`, { opId: op.id, providerRef: f.ref, status: f.status, attempt: f.gen, via: f.via });
-  else log("warn", "outbound.failed_movement_stale", { opId: op.id, providerRef: f.ref, attempt: f.gen, via: f.via });
-  return !!row;
+  if (row) {
+    log("alert", `${op.kind}.failed`, { opId: op.id, providerRef: f.ref, status: f.status, attempt: f.gen, via: f.via });
+    return true;
+  }
+  // Not updated: either a stale report about an earlier generation (harmless), or the provider failed a movement it
+  // had already reported as succeeded on the current generation (e.g. a Stripe refund failing after `succeeded`).
+  // The latter means the ledger shows money out that came back — page on-call, as the L2 twin does.
+  const [cur] = await asService(sql, (tx) => tx<{ status: string; attempt_gen: number }[]>`
+    select status, attempt_gen from public.outbound_ops where id = ${op.id}`);
+  if (cur && cur.status === "confirmed" && cur.attempt_gen === f.gen) {
+    log("alert", `${op.kind}.failed_after_confirmed`, { opId: op.id, providerRef: f.ref, status: f.status, attempt: f.gen, via: f.via });
+  } else {
+    log("warn", "outbound.failed_movement_stale", { opId: op.id, providerRef: f.ref, attempt: f.gen, via: f.via });
+  }
+  return false;
 }
 
 /** Create (once) the refund op for a backing. Amount = what was actually captured (captured_minor). */
