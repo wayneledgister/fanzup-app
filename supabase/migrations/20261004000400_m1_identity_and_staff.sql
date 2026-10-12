@@ -109,7 +109,9 @@ create table public.privileged_actions (
   reason text not null check (char_length(btrim(reason)) >= 10),
   amount_minor bigint,
   params jsonb not null default '{}',
-  status text not null default 'scheduled' check (status in ('scheduled', 'executed', 'cancelled', 'failed')),
+  -- scheduled → executing (claimed by exactly one executor) → executed | failed; scheduled → cancelled.
+  -- Immediate actions are inserted already 'executing' (PR #8 review fix 1).
+  status text not null default 'scheduled' check (status in ('scheduled', 'executing', 'executed', 'cancelled', 'failed')),
   execute_after timestamptz not null default now(),
   executed_at timestamptz,
   error text,
@@ -128,6 +130,26 @@ create table public.review_signoffs (
   correlation_id text default public.ctx('correlation_id'),
   created_at timestamptz not null default now()
 );
+
+-- ── Single-operator mode: the operator can't own an artist (FR-ID-007; PR #8 review fix 6) ──
+-- Enforced here and not only in the API, because clients hold an insert grant on artists (design §9 G-2) and could
+-- otherwise create one through Supabase REST. Toggling the mode stays a SQL-only change in M1 (worklog deviation).
+create function public.single_operator_mode() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select (value #>> '{}')::boolean from public.platform_settings where key = 'single_operator_mode'), true)
+$$;
+
+create function public.artists_no_staff_owner() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if public.single_operator_mode() and exists (select 1 from public.staff s where s.user_id = new.owner_id) then
+    raise exception using errcode = 'P0001', message = 'staff_cannot_own',
+      detail = 'Staff can''t own artist profiles while single-operator mode is on.';
+  end if;
+  return new;
+end $$;
+create trigger artists_no_staff_owner before insert or update of owner_id on public.artists
+  for each row execute function public.artists_no_staff_owner();
 
 -- ── Workflow hardening ─────────────────────────────────────────────────
 -- Reviewer ≠ owner (FR-ID-003). Callable by the API only (NFR-SEC-02 slice); auth.uid() is the verified actor.
@@ -212,5 +234,6 @@ alter table public.privileged_actions enable row level security;
 alter table public.review_signoffs enable row level security;
 revoke all on public.consents, public.funnel_events, public.notifications, public.privileged_actions, public.review_signoffs
   from anon, authenticated;
-revoke execute on function public.missing_acceptances(uuid), public.backing_funnel(), public.fan_backings(uuid) from public, anon, authenticated;
-grant execute on function public.missing_acceptances(uuid), public.fan_backings(uuid) to service_role;
+revoke execute on function public.missing_acceptances(uuid), public.backing_funnel(), public.fan_backings(uuid),
+  public.single_operator_mode(), public.artists_no_staff_owner() from public, anon, authenticated;
+grant execute on function public.missing_acceptances(uuid), public.fan_backings(uuid), public.single_operator_mode() to service_role;

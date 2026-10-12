@@ -15,5 +15,6 @@ Layer 2 needs an escrow agent, KYC/AML on investors, trades, fund moves, a close
 
 ## Consequences
 - A `northcapital` adapter can replace the mock without touching domain code; the remaining work is mapping their field names, their webhook signature scheme, and their asynchronous statuses.
+- The interface includes lookups the money rules depend on (PR #10 review round 3, design §4.3, §5.1): find a trade by our investment id, void an unfunded trade, and list escrow and collection-account transactions for ref matching. A real adapter must provide equivalents (or the provider must, through its API) before it can replace the mock.
 - Two services to run locally (`pnpm dev` starts both).
 - The mock's behaviour is our reading of a public workflow, not a contract; drift is the main risk (L2-Q4: get sandbox access before any partner demo claims fidelity).

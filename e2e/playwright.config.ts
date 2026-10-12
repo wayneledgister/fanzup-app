@@ -6,6 +6,8 @@ import { defineConfig, devices } from "@playwright/test";
  *   SUPABASE_URL       Supabase API gateway (auth at /auth/v1)          default http://127.0.0.1:55321
  *   SUPABASE_ANON_KEY  publishable key
  *   MAILPIT_URL        Supabase CLI's mail catcher                      default http://127.0.0.1:55324
+ *   SUPABASE_SERVICE_ROLE_KEY  local stack only: clears the seed reviewer's TOTP factors left by an earlier attempt
+ *                              (so a retry can enrol again — PR #9 review finding 4)
  * CI starts all of it in .github/workflows/ci.yml (job "e2e").
  */
 export default defineConfig({

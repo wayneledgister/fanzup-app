@@ -23,6 +23,9 @@ importers:
       supabase:
         specifier: ^2.119.0
         version: 2.119.0
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
 
   apps/api:
     dependencies:

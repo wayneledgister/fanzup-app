@@ -16,13 +16,15 @@
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > packages/shared/src/db.types.ts",
-    "e2e": "playwright test -c e2e/playwright.config.ts"
+    "e2e": "playwright test -c e2e/playwright.config.ts",
+    "m1:operator": "tsx scripts/m1-operator.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@supabase/supabase-js": "^2.117.2",
     "@types/node": "^22.20.5",
     "otplib": "^12.0.1",
-    "supabase": "^2.119.0"
+    "supabase": "^2.119.0",
+    "tsx": "^4.23.15"
   }
 }

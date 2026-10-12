@@ -38,14 +38,35 @@ export async function seedSignIn(email: string, credential = SEED_PASSWORD) { //
   return data.session.access_token;
 }
 
-/** Staff session at aal2: enrol a TOTP factor (first run) and verify a code — the real Supabase MFA flow. */
+/** Local/CI stack's service-role key (`supabase status`), used only to clear the seed reviewer's old TOTP factors. */
+export const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+/**
+ * Staff session at aal2: enrol a TOTP factor and verify a code — the real Supabase MFA flow.
+ *
+ * Retry-safe (PR #9 review finding 4): a previous attempt (a Playwright retry, or an earlier local run) leaves a
+ * verified factor whose secret is gone, and a verified factor can only be removed by the user at aal2 — which needs
+ * that secret. So factors left over from earlier runs are deleted through the Auth admin API (local/CI stack only;
+ * the key never leaves the machine), then a fresh factor is enrolled.
+ */
 export async function staffToken(email: string) {
   const sb = client();
-  const { error } = await sb.auth.signInWithPassword({ email, password: SEED_PASSWORD });
-  if (error) throw new Error(`staff sign-in failed: ${error.message}`);
+  const { data: signedIn, error } = await sb.auth.signInWithPassword({ email, password: SEED_PASSWORD });
+  if (error || !signedIn.user) throw new Error(`staff sign-in failed: ${error?.message}`);
   const { data: existing } = await sb.auth.mfa.listFactors();
   for (const f of existing?.all ?? []) if (f.status !== "verified") await sb.auth.mfa.unenroll({ factorId: f.id });
-  if (existing?.totp.some((f) => f.status === "verified")) throw new Error("the staff seed user already has a verified TOTP factor from an earlier run — reset the local database (CI starts fresh)");
+  const verified = existing?.all.filter((f) => f.status === "verified") ?? [];
+  if (verified.length) {
+    if (!SERVICE_ROLE_KEY) throw new Error("the staff seed user already has a verified TOTP factor from an earlier run — set SUPABASE_SERVICE_ROLE_KEY (local stack) or reset the local database");
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    for (const f of verified) {
+      const del = await admin.auth.admin.mfa.deleteFactor({ id: f.id, userId: signedIn.user.id });
+      if (del.error) throw new Error(`could not remove an old TOTP factor: ${del.error.message}`);
+    }
+    // Start from a clean aal1 session now that the user has no factors.
+    const again = await sb.auth.signInWithPassword({ email, password: SEED_PASSWORD });
+    if (again.error) throw new Error(`staff sign-in failed: ${again.error.message}`);
+  }
   const enrolled = await sb.auth.mfa.enroll({ factorType: "totp", friendlyName: `e2e-${Date.now()}` });
   if (enrolled.error) throw new Error(`TOTP enrol failed: ${enrolled.error.message}`);
   const secret = enrolled.data.totp.secret;

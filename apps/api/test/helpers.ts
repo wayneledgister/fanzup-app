@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import postgres from "postgres";
 import { SignJWT } from "jose";
 import { createDb, type Sql } from "../src/db";
+import { POLICY } from "@fanzup/shared/policy";
 
 const ROOT = join(import.meta.dirname, "../../..");
 export const ADMIN_URL = process.env.TEST_DATABASE_URL ?? "postgres://postgres@localhost:54329/postgres";
@@ -100,7 +101,7 @@ export async function kit(extra: Partial<Deps> = {}, envOverrides: Record<string
 /** Create a confirmed (or unconfirmed) auth user; the new-user trigger creates the profile. */
 export async function createUser(sql: Sql, opts: { confirmed?: boolean; name?: string } = {}) {
   const id = randomUUID();
-  const meta = { display_name: opts.name ?? "Test Fan", adult_attested: true, terms_version: "2026-10-03-beta", privacy_version: "2026-10-03-beta" };
+  const meta = { display_name: opts.name ?? "Test Fan", adult_attested: true, terms_version: POLICY.legal.termsVersion, privacy_version: POLICY.legal.privacyVersion };
   await sql.begin((tx) => tx`
     insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
     values ('00000000-0000-0000-0000-000000000000', ${id}, 'authenticated', 'authenticated', ${`fan-${id.slice(0, 8)}@fanzup.test`},

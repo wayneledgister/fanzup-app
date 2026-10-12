@@ -30,6 +30,13 @@ export const POLICY = {
     holdMinutes: 15,
     /** FR-TAX-004. Limits card-testing. */
     maxUnconfirmedPerUser: 3,
+    /** FR-PAY-006, design §4.4: an `in_progress` claim with no backing older than this is abandoned and re-claimable. */
+    abandonedClaimMinutes: 2,
+    /**
+     * FR-PAY-001, design §5: a hold whose payment ref was never stored is looked up at the provider (Stripe search on
+     * metadata) only this long after it expired, so the provider's search index has caught up.
+     */
+    expiryLookupGraceMinutes: 5,
   },
   refunds: {
     /** FR-PAY-003, NFR-COMP-05 (E1 Compliance): auto-refunds initiated within this many minutes. */
@@ -57,6 +64,11 @@ export const POLICY = {
     /** FR-PAY-007 (E1 Compliance): $1. */
     materialityMinor: 100,
     maxBreakAgeBusinessDays: 1,
+    /**
+     * Design §7 in-flight allowance: a provider movement tied to an outbound op still `sent`, or to a provider event we
+     * received less than this many minutes ago and haven't processed yet, is expected state, not a break.
+     */
+    inflightGraceMinutes: 30,
   },
   /** NFR-SEC-13, FR-TAX-004 (E1 Security). Recorded at M1; enforced at M2. */
   rateLimits: { backingPerMinute: 5, backingPerHour: 20, writesPerMinutePerUser: 60, writesPerMinutePerIp: 120 },

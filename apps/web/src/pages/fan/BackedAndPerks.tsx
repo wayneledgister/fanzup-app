@@ -51,7 +51,7 @@ function BackedAndPerks() {
       <TestModeNotice />
       {error && (
         <Callout tone="error" icon={<CircleAlert />} title="We couldn't load your backings">
-          Your money is safe — this is only a display problem. <Button variant="ghost" size="sm" onClick={load}><RefreshCw /> Retry</Button>
+          This is a display problem; your backings haven't changed. <Button variant="ghost" size="sm" onClick={load}><RefreshCw /> Retry</Button>
         </Callout>
       )}
       {!items && !error && <div className="h-40 animate-pulse rounded-lg border border-line bg-surface" aria-busy="true" aria-label="Loading your backings" />}
