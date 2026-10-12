@@ -7,7 +7,7 @@ import { RequireAccount } from "@/components/RequireAccount";
 import { apiMessage, CollectionStateBadge, LoadGate, mechanismLabel, POOL_STATUS_COPY, RiskBadgeChip, shortDate, useLoad } from "@/components/invest/l2ui";
 import { IssuerAttestationField, attestationProblem, parseAttestation } from "@/components/invest/IssuerAttestation";
 import { l2, l2ErrorCopy, type CreatorPoolView, type PeriodWindow } from "@/lib/l2";
-import { formatInstant, formatMoney } from "@/lib/format";
+import { formatInstant, formatUsd } from "@/lib/format";
 
 /**
  * Source: (new) CR-002 FR-L2-CR-005, REV-001 — one Pool for its creator: status, Form C review outcome, collection
@@ -103,8 +103,8 @@ function Manage({ p, reload }: { p: CreatorPoolView; reload: () => void }) {
 
       {["live", "funded", "matured", "failed", "refunded"].includes(p.status) && (
         <div className="grid gap-4 sm:grid-cols-3">
-          <Card><Stat label="Raised" value={<span className="num">{formatMoney(p.raisedMinor)}</span>} hint={<>target <span className="num">{formatMoney(p.targetMinor)}</span></>} /></Card>
-          <Card><Stat label="Released to you" value={<span className="num">{formatMoney(p.money.releasedMinor)}</span>} hint={<>still in escrow <span className="num">{formatMoney(p.money.escrowMinor)}</span></>} /></Card>
+          <Card><Stat label="Raised" value={<span className="num">{formatUsd(p.raisedMinor)}</span>} hint={<>target <span className="num">{formatUsd(p.targetMinor)}</span></>} /></Card>
+          <Card><Stat label="Released to you" value={<span className="num">{formatUsd(p.money.releasedMinor)}</span>} hint={<>still in escrow <span className="num">{formatUsd(p.money.escrowMinor)}</span></>} /></Card>
           <Card><Stat label="Investors" value={<span className="num">{p.investors}</span>} hint={p.endsAt ? <>closes {formatInstant(p.endsAt)}</> : undefined} /></Card>
         </div>
       )}
@@ -126,12 +126,12 @@ function Manage({ p, reload }: { p: CreatorPoolView; reload: () => void }) {
               <div key={s.id} className="flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
                 <span className="text-fg">{s.periodLabel}</span>
                 <Badge tone={s.status === "collected" ? "success" : s.status === "short" ? "warning" : "neutral"}>{s.status === "collected" ? "Collected" : s.status === "short" ? "Short" : "Reported, not collected"}</Badge>
-                <span className="num text-muted">{formatMoney(s.collectedMinor)} of {formatMoney(s.coveredMinor)}</span>
+                <span className="num text-muted">{formatUsd(s.collectedMinor)} of {formatUsd(s.coveredMinor)}</span>
               </div>
             ))}
           </Card>
           <StatementForm p={p} onDone={reload} />
-          <p className="text-xs text-muted">Collected royalties are split {p.fansBps / 100}% to fans, {p.creatorBps / 100}% to you and {p.platformBps / 100}% to the platform. Royalties paid to you so far: <span className="num">{formatMoney(p.money.creatorRoyaltiesPaidMinor)}</span>.</p>
+          <p className="text-xs text-muted">Collected royalties are split {p.fansBps / 100}% to fans, {p.creatorBps / 100}% to you and {p.platformBps / 100}% to the platform. Royalties paid to you so far: <span className="num">{formatUsd(p.money.creatorRoyaltiesPaidMinor)}</span>.</p>
         </section>
       )}
 
@@ -139,7 +139,7 @@ function Manage({ p, reload }: { p: CreatorPoolView; reload: () => void }) {
         <SectionHeading eyebrow="Terms" title="What fans are buying" />
         <Card>
           <dl className="divide-y divide-line">
-            <KeyValue k="Units × price" v={<span className="num">{p.unitsTotal} × {formatMoney(p.unitPriceMinor)}</span>} />
+            <KeyValue k="Units × price" v={<span className="num">{p.unitsTotal} × {formatUsd(p.unitPriceMinor)}</span>} />
             <KeyValue k="Fan share" v={<span className="num">{p.fansBps / 100}%</span>} />
             <KeyValue k="Return cap" v={<span className="num">{p.returnCapBps / 10_000}×</span>} />
             <KeyValue k="Ends after" v={<span className="num">{p.maturityMonths / 12} years{p.maturesAt ? ` (${shortDate(p.maturesAt)})` : ""}</span>} />
@@ -161,7 +161,7 @@ function TrancheRow({ t, pool, onDone }: { t: CreatorPoolView["tranches"][number
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-fg"><span className="num">{t.pct}%</span> — {t.seq === 1 ? "at close" : t.milestone}</span>
         <Badge tone={t.status === "released" ? "success" : t.status === "pending" ? "neutral" : "info"}>{label}</Badge>
-        {t.releasedMinor != null && <span className="num text-sm text-muted">{formatMoney(t.releasedMinor)}</span>}
+        {t.releasedMinor != null && <span className="num text-sm text-muted">{formatUsd(t.releasedMinor)}</span>}
       </div>
       {canSubmit && (
         <form className="flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={async (e) => { e.preventDefault(); setErr(null); try { await l2.trancheEvidence(t.id, notes); setNotes(""); onDone(); } catch (x) { setErr(apiMessage(x)); } }}>
@@ -212,7 +212,7 @@ function StatementForm({ p, onDone }: { p: CreatorPoolView; onDone: () => void }
     setBusy(true);
     try {
       const r = await l2.addStatement(p.id, { periodLabel: label.trim() || `Period ${chosen.seq}`, periodStart: chosen.periodStart, periodEnd: chosen.periodEnd, lines });
-      setOk(`Statement saved. ${formatMoney(r.coveredMinor)} is covered by this Pool; it becomes distributable once the matching cash arrives in the collection account.`);
+      setOk(`Statement saved. ${formatUsd(r.coveredMinor)} is covered by this Pool; it becomes distributable once the matching cash arrives in the collection account.`);
       reset();
       onDone();
     } catch (x) {

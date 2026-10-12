@@ -9,7 +9,7 @@ import { mechanismLabel, PayoutIllustration, RiskBadgeChip } from "@/components/
 import { IssuerAttestationField, attestationProblem, parseAttestation } from "@/components/invest/IssuerAttestation";
 import { ApiError } from "@/lib/api";
 import { l2, l2ErrorCopy, type PoolDraftRequest } from "@/lib/l2";
-import { formatMoney } from "@/lib/format";
+import { formatUsd } from "@/lib/format";
 
 /**
  * Source: FanZuP CreatorApp create-pool modal steps 2–3, rebuilt as one page with sections (CR-002 FR-L2-CR-002…004;
@@ -176,7 +176,7 @@ function PoolNew() {
           ))}
           <div className="flex items-center justify-between">
             <Button variant="ghost" onClick={() => setFunds((s) => [...s, { label: "", dollars: "" }])} disabled={funds.length >= 12}><Plus /> Add a line</Button>
-            <p className="text-sm text-muted">Funding target <span className="num text-fg" data-testid="target">{formatMoney(target)}</span></p>
+            <p className="text-sm text-muted">Funding target <span className="num text-fg" data-testid="target">{formatUsd(target)}</span></p>
           </div>
         </Card>
       </section>
@@ -206,7 +206,7 @@ function PoolNew() {
             <Field label="Return cap (× Unit price)" htmlFor="t-cap"><TextInput id="t-cap" inputMode="decimal" value={cap} onChange={(e) => setCap(e.target.value)} /></Field>
             <Field label="Pool ends after (years)" htmlFor="t-years"><TextInput id="t-years" inputMode="decimal" value={years} onChange={(e) => setYears(e.target.value)} /></Field>
           </div>
-          <p className="text-sm text-muted">Distributions are quarterly, from collected royalties only. Maximum raise <span className="num text-fg">{formatMoney(maxMinor)}</span> (Units × price).</p>
+          <p className="text-sm text-muted">Distributions are quarterly, from collected royalties only. Maximum raise <span className="num text-fg">{formatUsd(maxMinor)}</span> (Units × price).</p>
         </Card>
       </section>
 
@@ -254,9 +254,9 @@ function PoolNew() {
         <SectionHeading eyebrow="6" title="What fans will see" />
         <Card>
           <dl className="divide-y divide-line">
-            <KeyValue k="Target / maximum" v={<span className="num">{formatMoney(target)} / {formatMoney(maxMinor)}</span>} />
-            <KeyValue k="Each Unit" v={<span className="num">{formatMoney(unitPriceMinor)}, a {unitsN ? (Number(fansPct) / unitsN).toFixed(4) : "0"}% share of collected royalties</span>} />
-            <KeyValue k="Cap per Unit" v={<span className="num">{formatMoney(Math.floor((unitPriceMinor * capBps) / 10_000))}</span>} />
+            <KeyValue k="Target / maximum" v={<span className="num">{formatUsd(target)} / {formatUsd(maxMinor)}</span>} />
+            <KeyValue k="Each Unit" v={<span className="num">{formatUsd(unitPriceMinor)}, a {unitsN ? (Number(fansPct) / unitsN).toFixed(4) : "0"}% share of collected royalties</span>} />
+            <KeyValue k="Cap per Unit" v={<span className="num">{formatUsd(Math.floor((unitPriceMinor * capBps) / 10_000))}</span>} />
             <KeyValue k="Collection" v={<RiskBadgeChip badge={badge} />} />
           </dl>
         </Card>

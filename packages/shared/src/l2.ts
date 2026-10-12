@@ -186,7 +186,7 @@ export const capMinor = (amountMinor: number, capBps: number) => Math.floor((amo
 export function illustratePerUnit(opts: { yearlyCoveredRoyaltiesMinor: number; fansBps: number; unitsTotal: number; unitPriceMinor: number; capBps: number; years: number }) {
   const perYear = Math.floor((opts.yearlyCoveredRoyaltiesMinor * opts.fansBps) / 10_000 / Math.max(1, opts.unitsTotal));
   const cap = capMinor(opts.unitPriceMinor, opts.capBps);
-  return { perYearMinor: perYear, totalMinor: Math.min(cap, perYear * opts.years), capMinor: cap };
+  return { perYearMinor: perYear, totalMinor: Math.min(cap, Math.floor(perYear * opts.years)), capMinor: cap };
 }
 
 export const L2_POLICY = POLICY.l2;

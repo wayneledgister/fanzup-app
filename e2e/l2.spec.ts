@@ -9,9 +9,11 @@
  *     for the first scheduled period, cash, reconciliation → staff in the BROWSER at aal2 (password + TOTP) dry-run and
  *     commit the distribution; the committed run's hash equals the dry-run's → the fan sees it in the portfolio.
  *     Ledger ⇄ provider reconciles to zero.
- *  2. A Pool misses its target → every investor is refunded; on the way, a cancel while the payment is still moving
- *     answers `cancel_pending` and the investment page says so; the confirmation page shows the cancel-by time. With
- *     the layer2 flag switched off, the investment page still renders, as the cancel-only view (L2-T-038).
+ *  2. A Pool misses its target → every investor is refunded; on the way, a cancel made in the browser while the
+ *     payment is still moving (the mock holds that fund move pending — `POST /dev/l2/delays`) answers `cancel_pending`
+ *     and the investment page says so; the confirmation page shows the cancel-by time. With the layer2 flag switched
+ *     off, /portfolio is the cancel-only list (L2-T-038; PR #13 review round 2, findings 2 and 6): it lists the open
+ *     investments, and one is cancelled from its cancel-only view.
  */
 import { expect, test, type Page } from "@playwright/test";
 import { api, poll, SEED_PASSWORD, seedSignIn, staffToken, staffTotpCode } from "./support";
@@ -236,24 +238,31 @@ test("a Pool that misses its target refunds every investor in full", async ({ pa
   const launch = await api<{ endsAt: string }>(`/creator/pools/${id}/launch`, { token: sol, body: { otherRegCfSales12mMinor: 0 } });
   expect(launch.status, JSON.stringify(launch.body)).toBe(200);
 
-  // Jordan (fan@, KYC approved in the seed) commits $100 through the API and cancels while the payment is still moving
-  // (the mock settles fund moves after a few seconds): the API answers cancel_pending (L2-T-031).
+  // Jordan (fan@, KYC approved in the seed) commits $100 through the API while the mock holds new fund moves pending for
+  // an hour of provider time (deterministic: nothing settles it until the deadline advance below), then cancels in the
+  // browser while the payment is still moving → cancel_pending (L2-T-031).
   const jordan = await seedSignIn("fan@fanzup.test");
   const pool = await api<{ riskAckVersion: string }>(`/pools/${slug}`, { token: jordan });
-  const small = await api<{ investmentId: string; status: string }>(`/pools/${id}/investments`, { token: jordan, body: { units: 2, riskAckVersion: pool.body.riskAckVersion }, headers: { "idempotency-key": `e2e-small-${run}` } });
+  const hold = await api("/dev/l2/delays", { body: { fund: 3600 } });
+  expect(hold.status, JSON.stringify(hold.body)).toBe(200);
+  const small = await api<{ investmentId: string; status: string }>(`/pools/${id}/investments`, { token: jordan, body: { units: 2, riskAckVersion: pool.body.riskAckVersion }, headers: { "idempotency-key": `e2e-small-${run}` } })
+    .finally(() => api("/dev/l2/delays", { body: { fund: 3 } })); // later fund moves settle in seconds again
   expect(small.status, JSON.stringify(small.body)).toBe(201);
-  const cancel = await api<{ result: string; investment: Investment }>(`/investments/${small.body.investmentId}/cancel`, { token: jordan, body: {} });
-  expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
-  // `funding` → cancel_pending; if the fund move already settled (slow runner) it's an immediate cancel of a funded investment.
-  expect(["cancel_pending", "cancelled"]).toContain(cancel.body.result);
+  expect(small.body.status).toBe("funding");
+
+  await logIn(page, "fan@fanzup.test", `/investments/${small.body.investmentId}`);
+  const holding = page.getByTestId("holding");
+  await expect(holding).toHaveAttribute("data-status", "funding");
+  await page.getByTestId("cancel-start").click();
+  await page.getByTestId("cancel-confirm").click();
+  await expect(holding).toHaveAttribute("data-status", "cancel_pending");
+  await expect(page.getByTestId("holding-help")).toContainText("Cancellation received");
+  await expect(page.getByTestId("cancel-start")).toHaveCount(0);
+  const pending = await api<Investment>(`/investments/${small.body.investmentId}`, { token: jordan });
+  expect(pending.body).toMatchObject({ status: "funding", canCancelUntil: null });
+  expect(pending.body.cancelRequestedAt).not.toBeNull();
 
   // …and invests $500 through the browser.
-  await logIn(page, "fan@fanzup.test", `/investments/${small.body.investmentId}`);
-  if (cancel.body.result === "cancel_pending" && cancel.body.investment.status !== "refund_pending") {
-    const holding = page.getByTestId("holding");
-    await expect(holding).toHaveAttribute("data-status", /cancel_pending|refund_pending|refunded/);
-    if ((await holding.getAttribute("data-status")) === "cancel_pending") await expect(page.getByTestId("holding-help")).toContainText("Cancellation received");
-  }
   await page.goto(`/pools/${slug}`);
   await page.getByTestId("units-input").fill("10");
   await page.getByTestId("review-documents").click();
@@ -262,6 +271,37 @@ test("a Pool that misses its target refunds every investor in full", async ({ pa
   await expect(page.getByTestId("confirmation")).toHaveAttribute("data-status", "funded", { timeout: 30_000 });
   await expect(page.getByTestId("c-cancel-by")).toHaveText(/\d{4}/);
   await expect(page.getByTestId("c-units")).toHaveText("10");
+
+  // Flag off while the offering is still open: /portfolio is the cancel-only list (completion route). It lists the open
+  // investments — the funded $500 and the cancel-pending $100 — and the investor cancels an open one from its view.
+  const one = await api<{ investmentId: string }>(`/pools/${id}/investments`, { token: jordan, body: { units: 1, riskAckVersion: pool.body.riskAckVersion }, headers: { "idempotency-key": `e2e-one-${run}` } });
+  expect(one.status, JSON.stringify(one.body)).toBe(201);
+  const off = await api<Action>("/staff/flags/layer2", { token: staff, body: { on: false, reason: "E2E: cancel-only list with the flag off" } });
+  expect(off.status, JSON.stringify(off.body)).toBe(200);
+  try {
+    await page.goto("/portfolio");
+    await expect(page.getByTestId("cancel-only-list")).toBeVisible();
+    await expect(page.getByTestId("layer2-demo-banner")).toHaveText(D2);
+    const open = page.locator(`[data-testid=cancel-only-row][data-pool='${slug}']`);
+    await expect(open.filter({ hasText: "10 Units" })).toHaveAttribute("data-status", "funded");
+    await expect(open.filter({ hasText: "2 Units" })).toHaveAttribute("data-status", "cancel_pending");
+    await shot(page, "9-cancel-only-list");
+    await open.filter({ hasText: "1 Unit ·" }).getByTestId("cancel-only-open").click();
+    await expect(page).toHaveURL(new RegExp(`/investments/${one.body.investmentId}`));
+    await expect(page.getByTestId("cancel-only-view")).toBeVisible();
+    await page.getByTestId("cancel-start").click();
+    await page.getByTestId("cancel-confirm").click();
+    await expect(page.getByTestId("holding")).toHaveAttribute("data-status", /cancel_pending|refund_pending|refunded|cancelled/);
+    await expect(page.getByTestId("cancel-start")).toHaveCount(0);
+    const oneAfter = await api<Investment>(`/investments/${one.body.investmentId}`, { token: jordan });
+    expect(oneAfter.body.cancelRequestedAt !== null || ["refund_pending", "refunded", "cancelled"].includes(oneAfter.body.status), JSON.stringify(oneAfter.body)).toBe(true);
+    expect(oneAfter.body.canCancelUntil).toBeNull();
+    await page.goto(`/pools/${slug}`);
+    await expect(page.getByText("Investing isn't open yet")).toBeVisible();
+  } finally {
+    const on = await api<Action>("/staff/flags/layer2", { token: staff, body: { on: true, reason: "E2E: back on after the cancel-only check" } });
+    expect(on.status, JSON.stringify(on.body)).toBe(200);
+  }
 
   // Deadline passes below target → failed → refunds settle.
   await advance(Math.ceil((new Date(launch.body.endsAt).getTime() - Date.now()) / 1000) + 20 * 60);
@@ -282,17 +322,4 @@ test("a Pool that misses its target refunds every investor in full", async ({ pa
   const recon = await api<{ ledger: { diffMinor: number } }>(`/staff/l2/pools/${id}/recon`, { token: staff, body: {} });
   expect(recon.body.ledger.diffMinor).toBe(0);
 
-  // Flag off: entry pages close, the investment stays readable as the cancel-only view (completion route).
-  const off = await api<Action>("/staff/flags/layer2", { token: staff, body: { on: false, reason: "E2E: cancel-only view with the flag off" } });
-  expect(off.status, JSON.stringify(off.body)).toBe(200);
-  try {
-    await page.goto(`/investments/${small.body.investmentId}`);
-    await expect(page.getByTestId("cancel-only-view")).toBeVisible();
-    await expect(page.getByTestId("layer2-demo-banner")).toHaveText(D2);
-    await page.goto(`/pools/${slug}`);
-    await expect(page.getByText("Investing isn't open yet")).toBeVisible();
-  } finally {
-    const on = await api<Action>("/staff/flags/layer2", { token: staff, body: { on: true, reason: "E2E: back on after the cancel-only check" } });
-    expect(on.status, JSON.stringify(on.body)).toBe(200);
-  }
 });

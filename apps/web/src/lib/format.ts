@@ -17,6 +17,20 @@ export function formatMoney(minor: number, opts: { cents?: boolean; compact?: bo
   }).format(dollars);
 }
 
+/**
+ * Exact money for Layer 2 (PR #13 review round 2, finding 1): whole dollars without decimals, otherwise the cents —
+ * never rounded. `formatUsd(3750)` → "$37.50", `formatUsd(100000)` → "$1,000", `formatUsd(1)` → "$0.01".
+ */
+export function formatUsd(minor: number): string {
+  const whole = Number.isInteger(minor) && minor % 100 === 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: whole ? 0 : 2,
+  }).format(minor / 100);
+}
+
 export function formatNumber(n: number, compact = false): string {
   return new Intl.NumberFormat("en-US", compact ? { notation: "compact", maximumFractionDigits: 1 } : {}).format(n);
 }

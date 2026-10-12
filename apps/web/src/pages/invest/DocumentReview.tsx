@@ -6,7 +6,7 @@ import { RequireAccount } from "@/components/RequireAccount";
 import { FormCLinkTo, IntermediaryPending, LoadGate, RiskBadgeChip, useLoad } from "@/components/invest/l2ui";
 import { CancellationNotice, LimitMeter, OfferingEscrowNotice } from "@/components/invest/ui";
 import { l2, l2ErrorCopy, newKey, TERMINAL_PURCHASE_CODES, type InvestorMeView, type PoolDetailView } from "@/lib/l2";
-import { formatInstant, formatMoney } from "@/lib/format";
+import { formatInstant, formatUsd } from "@/lib/format";
 
 /**
  * Source: Fan Profile Setup DocumentReview.tsx, rebuilt on the API (CR-002, FR-L2-INV-004).
@@ -41,10 +41,10 @@ function DocumentReview() {
   );
 }
 
-const ACKS = [
+const acksFor = (lockupMonths: number) => [
   { id: "ack-risk", text: "I understand I could lose all the money I invest, and that potential payouts depend only on royalties actually collected." },
   { id: "ack-unsecured", text: "I understand my claim is unsecured and that Units are not ownership of the artist's music or business." },
-  { id: "ack-lockup", text: "I understand I can't resell Units for 12 months and that there's no marketplace to sell them afterwards." },
+  { id: "ack-lockup", text: `I understand I can't resell Units for ${lockupMonths} months and that there's no marketplace to sell them afterwards.` },
   { id: "ack-formc", text: "I've read the Form C, including the risk factors and how royalties are collected." },
 ];
 
@@ -55,6 +55,7 @@ function Review({ pool, me, units }: { pool: PoolDetailView; me: InvestorMeView;
   const [err, setErr] = useState<ReturnType<typeof l2ErrorCopy> | null>(null);
   const [key, setKey] = useState(() => newKey());
   const total = units * pool.unitPriceMinor;
+  const ACKS = acksFor(pool.lockupMonths);
   const allAck = ACKS.every((a) => acks[a.id]);
   const ready = me.kycStatus === "approved" && me.certified;
 
@@ -77,15 +78,15 @@ function Review({ pool, me, units }: { pool: PoolDetailView; me: InvestorMeView;
 
   return (
     <>
-      <PageHeader eyebrow="Review and confirm" title={pool.title} description={`${units} Unit${units > 1 ? "s" : ""} at ${formatMoney(pool.unitPriceMinor)} each`} />
+      <PageHeader eyebrow="Review and confirm" title={pool.title} description={`${units} Unit${units > 1 ? "s" : ""} at ${formatUsd(pool.unitPriceMinor)} each`} />
       <InvestmentRiskDisclosure lockupMonths={pool.lockupMonths} />
       <Card className="flex flex-col gap-3">
         <div className="flex items-center gap-2"><RiskBadgeChip badge={pool.riskBadge} /></div>
         <dl className="divide-y divide-line">
           <KeyValue k="Units" v={<span className="num">{units}</span>} />
-          <KeyValue k="You pay" v={<span className="num text-lg font-medium">{formatMoney(total)}</span>} />
-          <KeyValue k="Most these Units can ever pay (cap)" v={<span className="num">{formatMoney(Math.floor((total * pool.returnCapBps) / 10_000))}</span>} />
-          <KeyValue k="Least they can pay" v={<span className="num">{formatMoney(0)}</span>} />
+          <KeyValue k="You pay" v={<span className="num text-lg font-medium">{formatUsd(total)}</span>} />
+          <KeyValue k="Most these Units can ever pay (cap)" v={<span className="num">{formatUsd(Math.floor((total * pool.returnCapBps) / 10_000))}</span>} />
+          <KeyValue k="Least they can pay" v={<span className="num">{formatUsd(0)}</span>} />
           <KeyValue k="Offering closes" v={<span className="num">{pool.endsAt ? formatInstant(pool.endsAt) : "—"}</span>} />
           <KeyValue k="Payment" v="Bank transfer into the offering's escrow account (simulated)" />
         </dl>
@@ -127,7 +128,7 @@ function Review({ pool, me, units }: { pool: PoolDetailView; me: InvestorMeView;
         </div>
       )}
       <Button size="lg" block disabled={!allAck || !ready || busy || terminal} onClick={confirm} data-testid="confirm-investment">
-        <Lock /> {busy ? "Sending to escrow…" : `Invest ${formatMoney(total)}`}
+        <Lock /> {busy ? "Sending to escrow…" : `Invest ${formatUsd(total)}`}
       </Button>
     </>
   );

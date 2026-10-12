@@ -95,6 +95,8 @@ export interface RegCfProvider {
   simulateDeposit?(collectionAccountId: string, i: { amount: number; reference: string; externalId: string }, idem: string): Promise<{ id: string }>;
   /** Mock-only: move the provider's clock forward (settlements, KYC decisions). */
   advance?(seconds: number): Promise<unknown>;
+  /** Mock-only: change the virtual delay of later async steps (e.g. `{ fund: 3600 }` holds new fund moves pending). */
+  setDelays?(delays: Record<string, number>): Promise<unknown>;
   /** Verify a webhook delivery and parse it. Throws RegCfError("permanent", "bad_signature") on a bad signature. */
   parseWebhook(rawBody: string, signature: string | undefined): RegCfEvent;
 }

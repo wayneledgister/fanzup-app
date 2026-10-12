@@ -5,7 +5,7 @@ import { RequireAccount } from "@/components/RequireAccount";
 import { StaffLoadGate } from "@/components/admin/StaffGate";
 import { POOL_STATUS_COPY, RiskBadgeChip, useLoad } from "@/components/invest/l2ui";
 import { l2 } from "@/lib/l2";
-import { formatInstant, formatMoney } from "@/lib/format";
+import { formatInstant, formatUsd } from "@/lib/format";
 
 /**
  * Source: (new) CR-002 FR-L2-ADM — the Layer 2 staff worklist (Form C reviews, collection agreements to execute, KYC
@@ -87,7 +87,7 @@ function AdminPools() {
                     <span className="min-w-0 flex-1"><span className="font-medium text-fg">{p.title}</span> <span className="text-muted">· {p.artistDisplay}</span></span>
                     <RiskBadgeChip badge={p.riskBadge} />
                     <Badge tone="neutral">{POOL_STATUS_COPY[p.status]}</Badge>
-                    <span className="num text-sm text-muted">{formatMoney(p.raisedMinor)} / {formatMoney(p.targetMinor)}</span>
+                    <span className="num text-sm text-muted">{formatUsd(p.raisedMinor)} / {formatUsd(p.targetMinor)}</span>
                   </Link>
                 ))}
               </Card>

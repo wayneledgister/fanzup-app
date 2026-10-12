@@ -111,7 +111,7 @@ export function ActionForm({ label, run, tone = "primary", testId, defaultReason
         <TextInput id={inputId} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="At least 10 characters" minLength={10} />
       </Field>
       <Button type="submit" variant={tone} disabled={busy || reason.trim().length < 10} data-testid={testId}>{busy ? "Working…" : label}</Button>
-      {msg && <p className={`text-sm ${msg.ok ? "text-success" : "text-error"}`} role="status">{msg.text}</p>}
+      {msg && <p className={`text-sm ${msg.ok ? "text-success" : "text-error"}`} role={msg.ok ? "status" : "alert"}>{msg.text}</p>}
     </form>
   );
 }

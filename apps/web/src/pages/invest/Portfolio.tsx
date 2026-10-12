@@ -4,8 +4,10 @@ import { ArtistArt, Button, Card, Container, EmptyState, PageHeader, ProgressBar
 import { RequireAccount } from "@/components/RequireAccount";
 import { CollectionStateBadge, displayStatus, LoadGate, RiskBadgeChip, shortDate, StatusBadge, useLoad } from "@/components/invest/l2ui";
 import { LimitMeter } from "@/components/invest/ui";
+import { CancelOnlyList } from "@/components/invest/CancelOnlyList";
+import { useFlag } from "@/lib/flags";
 import { l2, type InvestmentView } from "@/lib/l2";
-import { formatMoney } from "@/lib/format";
+import { formatUsd } from "@/lib/format";
 
 /**
  * Source: FanZuP FanApp dashboard, rebuilt on the API per CONSOLIDATION.md (CR-002, FR-L2-INV-005).
@@ -21,20 +23,35 @@ export default function PortfolioPage() {
 }
 
 function Portfolio() {
+  // Flag off: this route renders only on the server's completion signal (never in a deployed build) — cancel-only list.
+  if (!useFlag("layer2")) {
+    return (
+      <Container size="lg" className="flex flex-col gap-8 py-8">
+        <PageHeader eyebrow="Your Pools" title="Open investments" />
+        <CancelOnlyList />
+        <RegulatoryFooter />
+      </Container>
+    );
+  }
+  return <FullPortfolio />;
+}
+
+function FullPortfolio() {
   const load = useLoad(() => l2.portfolio(), []);
   return (
     <Container size="lg" className="flex flex-col gap-8 py-8">
       <PageHeader eyebrow="Your Pools" title="Portfolio" description="Your Units, where your money is, and what each Pool has paid so far." />
       <LoadGate load={load} what="your portfolio">
         {({ investor, investments }) => {
-          const held = investments.filter((i) => ["issued", "funded", "funding"].includes(i.status));
+          // A cancellation in progress isn't money in a Pool (review round 2, finding 9).
+          const held = investments.filter((i) => ["issued", "funded", "funding"].includes(i.status) && displayStatus(i) !== "cancel_pending");
           const invested = held.reduce((s, i) => s + i.amountMinor, 0);
           const received = investments.reduce((s, i) => s + i.receivedMinor, 0);
           return (
             <>
               <div className="grid gap-4 sm:grid-cols-3">
-                <Card><Stat label="In Pools" value={<span className="num">{formatMoney(invested)}</span>} hint="Held in escrow or issued as Units" /></Card>
-                <Card><Stat label="Paid to you" value={<span className="num">{formatMoney(received)}</span>} hint="From collected royalties" /></Card>
+                <Card><Stat label="In Pools" value={<span className="num">{formatUsd(invested)}</span>} hint="Held in escrow or issued as Units" /></Card>
+                <Card><Stat label="Paid to you" value={<span className="num">{formatUsd(received)}</span>} hint="From collected royalties" /></Card>
                 <Card>
                   {investor.limitMinor == null ? (
                     <Stat label="Reg CF limit" value="No limit" hint="Accredited investor" />
@@ -79,15 +96,15 @@ function Row({ i }: { i: InvestmentView }) {
           </div>
           <div className="text-right">
             <p className="num text-lg text-fg">{i.units} Units</p>
-            <p className="num text-sm text-muted">{formatMoney(i.amountMinor)}</p>
+            <p className="num text-sm text-muted">{formatUsd(i.amountMinor)}</p>
           </div>
         </div>
         {i.status === "issued" && (
           <>
             <div className="flex flex-col gap-1">
               <div className="flex justify-between text-sm">
-                <span className="text-muted">Paid to you <span className="num text-fg" data-testid="received">{formatMoney(i.receivedMinor)}</span></span>
-                <span className="text-muted">cap <span className="num">{formatMoney(i.capMinor)}</span></span>
+                <span className="text-muted">Paid to you <span className="num text-fg" data-testid="received">{formatUsd(i.receivedMinor)}</span></span>
+                <span className="text-muted">cap <span className="num">{formatUsd(i.capMinor)}</span></span>
               </div>
               <ProgressBar value={i.distributedMinor} max={i.capMinor} tone="info" label="Progress to the return cap" />
             </div>

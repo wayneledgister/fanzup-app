@@ -9,20 +9,19 @@ import { POLICY } from "@fanzup/shared/policy";
 import { Button, Callout } from "@/components/brand";
 import { l2, l2ErrorCopy, type InvestmentView } from "@/lib/l2";
 import { formatInstant } from "@/lib/format";
+import { cancelState } from "./l2copy";
 
 export const CANNOT_CANCEL_LINE = `Can't be cancelled — within ${POLICY.l2.cancelCutoffHours} hours of the deadline`;
 
-/** True once the cancel-by instant has passed for an investment that would otherwise still be open. */
-export function pastCancelBy(i: Pick<InvestmentView, "cancelBy">, now = Date.now()) {
-  return !!i.cancelBy && new Date(i.cancelBy).getTime() <= now;
-}
+export { pastCancelBy } from "./l2copy";
 
 export function CancelInvestment({ i, onDone }: { i: InvestmentView; onDone: (next: InvestmentView, result: string) => void }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<{ title: string; body: string } | null>(null);
   const yesRef = useRef<HTMLButtonElement>(null);
-  if (!i.canCancelUntil) return null;
+  // Hidden once the cut-off has passed, even if a stale read still carries `canCancelUntil` (review round 2, finding 3).
+  if (!i.canCancelUntil || cancelState(i) !== "open") return null;
   const moneyMoved = i.status === "funded" || i.status === "funding";
   const go = async () => {
     setBusy(true);

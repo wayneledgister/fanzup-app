@@ -11,7 +11,8 @@ import { Holding } from "./HoldingDetail";
  * Source: (new) CR-002 L2-T-038 (design §2, round 5 finding 3) — one investment by id, from GET /investments/:id, a
  * completion route that answers with the layer2 flag off. With the server flag on this is the full holding; with it
  * off (the route renders only on the server's `flags.layer2Completion` signal, which a deployed server never sends) it
- * is a cancel-only view: status, amount and the cancel right while it lasts — no links into the closed Layer 2 pages.
+ * is a cancel-only view: status, amount and the cancel right while it lasts — linked from, and back to, the cancel-only
+ * list at /portfolio (also a completion route; review round 2, finding 2), never into the closed Layer 2 pages.
  */
 export default function InvestmentViewPage() {
   return (
@@ -27,7 +28,7 @@ function InvestmentView() {
   const load = useLoad(() => l2.investment(id), [id]);
   return (
     <Container size="lg" className="flex flex-col gap-8 py-8">
-      {flagOn && <Link to="/portfolio" className="flex items-center gap-1 text-sm text-muted hover:text-fg"><ArrowLeft className="size-4" /> Portfolio</Link>}
+      <Link to="/portfolio" className="flex items-center gap-1 text-sm text-muted hover:text-fg"><ArrowLeft className="size-4" /> {flagOn ? "Portfolio" : "Open investments"}</Link>
       <LoadGate load={load} what="this investment">
         {(i) => (
           <>

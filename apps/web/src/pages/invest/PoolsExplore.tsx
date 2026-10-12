@@ -6,7 +6,7 @@ import { ArtistArt, Badge, Button, Card, Container, EmptyState, Field, PageHeade
 import { InvestmentRiskDisclosure } from "@/components/brand";
 import { daysLeft, LoadGate, POOL_STATUS_COPY, RiskBadgeChip, useLoad } from "@/components/invest/l2ui";
 import { l2, type PoolCardView } from "@/lib/l2";
-import { formatMoney } from "@/lib/format";
+import { formatUsd } from "@/lib/format";
 
 /**
  * Source: (new) Layer 2 discovery, PRD 02 §8 — rebuilt on the API (CR-002, FR-L2-INV-001).
@@ -112,7 +112,7 @@ function PoolCard({ p }: { p: PoolCardView }) {
           </div>
           <div>
             <dt className="text-muted">Unit price</dt>
-            <dd className="num text-fg">{formatMoney(p.unitPriceMinor)}</dd>
+            <dd className="num text-fg">{formatUsd(p.unitPriceMinor)}</dd>
           </div>
           <div>
             <dt className="text-muted">Cap</dt>
@@ -128,7 +128,7 @@ function PoolCard({ p }: { p: PoolCardView }) {
             <ProgressBar value={p.raisedMinor} max={p.targetMinor} tone="info" label="Progress to target" />
             <div className="flex justify-between text-xs text-muted">
               <span>
-                Target <span className="num">{formatMoney(p.targetMinor)}</span>
+                Target <span className="num">{formatUsd(p.targetMinor)}</span>
               </span>
               <span className="num">{left > 0 ? `${left}d left` : "Closing"}</span>
             </div>

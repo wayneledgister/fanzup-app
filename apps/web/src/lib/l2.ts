@@ -73,6 +73,8 @@ export const l2 = {
   certify: (b: CertificationRequest) => post<InvestorMeView>("/v1/investor/certification", b),
   invest: (poolId: string, units: number, riskAckVersion: string, key: string) => post<InvestResponse>(`/v1/pools/${poolId}/investments`, { units, riskAckVersion }, key),
   investment: (id: string) => request<InvestmentView>(`/v1/investments/${id}`),
+  /** The investor's own investments — a completion route, for the flag-off cancel-only list (review round 2, finding 2). */
+  investments: () => request<{ investments: InvestmentView[] }>("/v1/investments"),
   cancel: (id: string) => post<CancelResult>(`/v1/investments/${id}/cancel`),
   portfolio: () => request<{ investor: InvestorMeView; investments: InvestmentView[] }>("/v1/portfolio"),
 

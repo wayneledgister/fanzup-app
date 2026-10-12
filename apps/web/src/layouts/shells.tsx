@@ -6,7 +6,7 @@ import {
   Sparkles, Ticket, Upload, User, Users, Wallet, X, Megaphone, Landmark, Vote, ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useFlag, setFlag, allFlags } from "@/lib/flags";
+import { useFlag, setFlag, allFlags, useLayer2Completion } from "@/lib/flags";
 import { Button, Logo, Container } from "@/components/brand";
 import { initials, useSession } from "@/lib/session";
 
@@ -37,7 +37,8 @@ function AccountActions({ mobile = false, onDone }: { mobile?: boolean; onDone?:
   );
 }
 
-type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta"; end?: boolean };
+/** `completion`: a layer2 item also shown on the server's completion signal (flag off; L2-T-038, review round 2 finding 2). */
+type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta"; completion?: boolean; end?: boolean };
 
 /* ── Public (marketing + discovery) ─────────────────────── */
 
@@ -181,7 +182,7 @@ const FAN_NAV: NavItem[] = [
   { to: "/backstage", label: "Backstage", icon: Sparkles },
   { to: "/live", label: "Live", icon: Radio },
   { to: "/pools", label: "Pools", icon: Disc3, flag: "layer2" },
-  { to: "/portfolio", label: "Portfolio", icon: LineChart, flag: "layer2" },
+  { to: "/portfolio", label: "Portfolio", icon: LineChart, flag: "layer2", completion: true },
   { to: "/governance", label: "Holder votes", icon: Vote, flag: "postBeta" },
 ];
 const FAN_SECONDARY: NavItem[] = [
@@ -212,7 +213,8 @@ const ADMIN_NAV: NavItem[] = [
 function SideNav({ items, secondary, onNavigate }: { items: NavItem[]; secondary?: NavItem[]; onNavigate?: () => void }) {
   const layer2 = useFlag("layer2");
   const postBeta = useFlag("postBeta");
-  const visible = (i: NavItem) => !i.flag || (i.flag === "layer2" ? layer2 : postBeta);
+  const completion = useLayer2Completion();
+  const visible = (i: NavItem) => !i.flag || (i.flag === "layer2" ? layer2 || (!!i.completion && completion) : postBeta);
   const link = (i: NavItem) => (
     <NavLink
       key={i.to}

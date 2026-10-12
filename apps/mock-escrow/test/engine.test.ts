@@ -63,6 +63,23 @@ describe("mock escrow engine (ADR-007)", () => {
     expect(types()).toEqual(expect.arrayContaining(["fund_move.settled", "fund_move.returned"]));
   });
 
+  it("setDelays (test hook): later fund moves stay pending until the longer delay; reset restores the defaults", async () => {
+    const { e } = engine();
+    const o = offering(e);
+    const { account } = investor(e);
+    await e.advance(3);
+    expect(e.setDelays({ fund: 3600 }).fund).toBe(3600);
+    expect(() => e.setDelays({ nope: 1 } as never)).toThrow("unknown delay");
+    const t = e.createTrade({ offeringId: o.id, accountId: account.id, units: 2, unitPrice: 5_000, amount: 10_000, externalId: "inv-held" }, k());
+    const fm = e.fundTrade(t.id, { amount: 10_000, externalId: "inv-held" }, k());
+    await e.advance(60);
+    expect(e.get("fundMove", fm.id).status).toBe("pending");
+    await e.advance(3600);
+    expect(e.get("fundMove", fm.id).status).toBe("settled");
+    e.reset();
+    expect(e.setDelays({}).fund).toBe(3);
+  });
+
   it("escrow is released only after close and never past the balance; refunds return the full amount", async () => {
     const { e } = engine();
     const o = offering(e);

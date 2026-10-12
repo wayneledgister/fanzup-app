@@ -9,7 +9,7 @@ import { apiMessage, LoadGate, useLoad } from "@/components/invest/l2ui";
 import { PartnerBanner } from "@/components/invest/ui";
 import { l2, type InvestorMeView } from "@/lib/l2";
 import { safeNext } from "@/lib/supabase";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatUsd } from "@/lib/format";
 
 /**
  * Source: Fan Profile Setup InvestorCertification.tsx + KYC handoff, rebuilt on the API (CR-002, FR-L2-INV-002/003).
@@ -59,7 +59,7 @@ function Steps({ me, onChange, next }: { me: InvestorMeView; onChange: (m: Inves
         <Card className="flex flex-col gap-3" data-testid="investor-ready">
           <p className="flex items-center gap-2 font-semibold text-fg"><BadgeCheck className="size-5 text-success" /> You're ready to invest</p>
           <p className="text-sm text-muted">
-            {me.limitMinor == null ? "As an accredited investor, no Reg CF limit applies." : <>You can invest up to <span className="num text-fg">{formatMoney(me.remainingMinor ?? 0)}</span> more in the next 12 months across all Reg CF offerings.</>}
+            {me.limitMinor == null ? "As an accredited investor, no Reg CF limit applies." : <>You can invest up to <span className="num text-fg">{formatUsd(me.remainingMinor ?? 0)}</span> more in the next 12 months across all Reg CF offerings.</>}
           </p>
           <Button onClick={() => navigate(next)} data-testid="investor-continue">Continue <ArrowRight /></Button>
         </Card>
@@ -178,13 +178,13 @@ function Attestation({ me, onSaved }: { me: InvestorMeView; onSaved: (m: Investo
       <p className="text-sm text-muted">
         Regulation Crowdfunding limits how much non-accredited investors can put into all Reg CF offerings in 12 months. Figures verified{" "}
         <span className="num">{formatDate(POLICY.regCf.verifiedOn)}</span>: if your income or net worth is under{" "}
-        <span className="num">{formatMoney(POLICY.regCf.thresholdMinor)}</span>, the greater of <span className="num">{formatMoney(POLICY.regCf.floorMinor)}</span> or{" "}
+        <span className="num">{formatUsd(POLICY.regCf.thresholdMinor)}</span>, the greater of <span className="num">{formatUsd(POLICY.regCf.floorMinor)}</span> or{" "}
         <span className="num">5%</span> of the greater figure; if both are at or above it, <span className="num">10%</span> of the greater, up to{" "}
-        <span className="num">{formatMoney(POLICY.regCf.thresholdMinor)}</span>.
+        <span className="num">{formatUsd(POLICY.regCf.thresholdMinor)}</span>.
       </p>
       {me.certified && (
         <p className="text-sm text-fg" data-testid="limit-summary">
-          {me.limitMinor == null ? "Accredited: no limit." : <>Limit <span className="num">{formatMoney(me.limitMinor)}</span> · used <span className="num">{formatMoney(me.usedMinor)}</span> · left <span className="num">{formatMoney(me.remainingMinor ?? 0)}</span></>}
+          {me.limitMinor == null ? "Accredited: no limit." : <>Limit <span className="num">{formatUsd(me.limitMinor)}</span> · used <span className="num">{formatUsd(me.usedMinor)}</span> · left <span className="num">{formatUsd(me.remainingMinor ?? 0)}</span></>}
         </p>
       )}
       <form onSubmit={save} className="flex flex-col gap-4" noValidate>
@@ -198,7 +198,7 @@ function Attestation({ me, onSaved }: { me: InvestorMeView; onSaved: (m: Investo
         <Checkbox id="c-acc" checked={accredited} onChange={setAccredited}>I'm an accredited investor (for example, income over $200,000 or net worth over $1 million excluding my home).</Checkbox>
         {preview !== undefined && (
           <p className="text-sm text-muted">
-            Your limit would be <span className="num text-fg">{preview == null ? "no limit" : formatMoney(preview)}</span> over 12 months.
+            Your limit would be <span className="num text-fg">{preview == null ? "no limit" : formatUsd(preview)}</span> over 12 months.
           </p>
         )}
         <Checkbox id="c-confirm" checked={confirm} onChange={setConfirm}>These figures are accurate. I understand my limit is based on what I tell you.</Checkbox>

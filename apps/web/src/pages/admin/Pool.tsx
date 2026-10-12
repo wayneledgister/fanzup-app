@@ -6,7 +6,7 @@ import { RequireAccount } from "@/components/RequireAccount";
 import { ActionForm, StaffLoadGate } from "@/components/admin/StaffGate";
 import { apiMessage, CollectionStateBadge, mechanismLabel, POOL_STATUS_COPY, RiskBadgeChip, useLoad } from "@/components/invest/l2ui";
 import { l2, STAFF_RESOLVED_BREAKS, type DryRun, type ReconResult, type StaffMoney } from "@/lib/l2";
-import { formatInstant, formatMoney } from "@/lib/format";
+import { formatInstant, formatMoney, formatUsd } from "@/lib/format";
 
 /**
  * Source: (new) CR-002 FR-L2-ADM — one Pool for staff: Form C review, collection agreement, ledger vs provider
@@ -108,8 +108,8 @@ function Money({ m, reload }: { m: StaffMoney; reload: () => void }) {
             <div key={i.id} className="flex flex-wrap items-center gap-3 p-3 text-sm">
               <span className="min-w-0 flex-1 text-fg">{i.investor}</span>
               <Badge tone="neutral">{i.status.replace("_", " ")}</Badge>
-              <span className="num">{i.units} Units · {formatMoney(i.amountMinor)}</span>
-              <span className="num text-muted">paid {formatMoney(i.distributedMinor, { cents: true })} / cap {formatMoney(i.capMinor)}</span>
+              <span className="num">{i.units} Units · {formatUsd(i.amountMinor)}</span>
+              <span className="num text-muted">paid {formatMoney(i.distributedMinor, { cents: true })} / cap {formatUsd(i.capMinor)}</span>
             </div>
           ))}
           {m.investments.length === 0 && <p className="p-4 text-sm text-muted">No investments yet.</p>}
@@ -124,7 +124,7 @@ function Money({ m, reload }: { m: StaffMoney; reload: () => void }) {
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <span className="flex-1 text-fg"><span className="num">{t.pct}%</span> — {t.seq === 1 ? "at close" : t.milestone}</span>
                 <Badge tone={t.status === "released" ? "success" : t.status === "evidence_submitted" ? "warning" : "neutral"}>{t.status.replace("_", " ")}</Badge>
-                {t.released_minor && <span className="num">{formatMoney(Number(t.released_minor))}</span>}
+                {t.released_minor && <span className="num">{formatUsd(Number(t.released_minor))}</span>}
               </div>
               {t.status === "evidence_submitted" && <ActionForm label="Verify milestone" testId={`verify-${t.seq}`} run={(r) => l2.verifyTranche(t.id, r).then(after)} />}
             </div>

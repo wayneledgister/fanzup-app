@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { ArrowLeft, Landmark, Lock, SearchX, ShieldCheck, Undo2 } from "lucide-react";
 import { Button, Callout, Container, EmptyState, ProgressBar, Stepper } from "@/components/brand";
-import { formatMoney } from "@/lib/format";
+import { formatUsd } from "@/lib/format";
 
 /* ── KYC wizard frame ───────────────────────────────────── */
 
@@ -114,9 +114,9 @@ export function LimitMeter({ limit, used, extra = 0 }: { limit: number; used: nu
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2 text-sm">
         <span className="text-muted">
-          <span className="num text-fg">{formatMoney(used + extra)}</span> used of <span className="num">{formatMoney(limit)}</span>
+          <span className="num text-fg">{formatUsd(used + extra)}</span> used of <span className="num">{formatUsd(limit)}</span>
         </span>
-        <span className="num text-fg">{formatMoney(remaining)} left</span>
+        <span className="num text-fg">{formatUsd(remaining)} left</span>
       </div>
       <ProgressBar value={used + extra} max={limit} tone={used + extra > limit ? "gold" : "info"} label="Reg CF limit used" />
     </div>

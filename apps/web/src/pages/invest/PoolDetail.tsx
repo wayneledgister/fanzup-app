@@ -10,7 +10,8 @@ import {
 } from "@/components/invest/l2ui";
 import { l2, type InvestorMeView, type PoolDetailView } from "@/lib/l2";
 import { useSession } from "@/lib/session";
-import { formatDate, formatMoney } from "@/lib/format";
+import { closedCopy } from "@/components/invest/l2copy";
+import { formatDate, formatUsd } from "@/lib/format";
 
 /**
  * Source: Fan Profile Setup CampaignDetailPage.tsx (investment variant), rebuilt on the API (CR-002, FR-L2-INV-001).
@@ -60,9 +61,9 @@ function Offering({ p }: { p: PoolDetailView }) {
         <div className="flex min-w-0 flex-col gap-10">
           <Card className="flex flex-col gap-3">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="num text-lg font-medium text-fg">{formatMoney(p.raisedMinor)}</span>
+              <span className="num text-lg font-medium text-fg">{formatUsd(p.raisedMinor)}</span>
               <span className="text-sm text-muted">
-                target <span className="num">{formatMoney(p.targetMinor)}</span> · max <span className="num">{formatMoney(p.maxMinor)}</span>
+                target <span className="num">{formatUsd(p.targetMinor)}</span> · max <span className="num">{formatUsd(p.maxMinor)}</span>
               </span>
             </div>
             <ProgressBar value={p.raisedMinor} max={p.targetMinor} tone="info" label="Progress to target" />
@@ -92,7 +93,7 @@ function Offering({ p }: { p: PoolDetailView }) {
                 <RevenueTypes types={p.revenueTypes} />
               </div>
               <dl className="divide-y divide-line">
-                <KeyValue k="Unit price" v={<span className="num">{formatMoney(p.unitPriceMinor)}</span>} />
+                <KeyValue k="Unit price" v={<span className="num">{formatUsd(p.unitPriceMinor)}</span>} />
                 <KeyValue k="Fan share of royalties" v={<span className="num">{p.fansBps / 100}%</span>} />
                 <KeyValue k="Artist / platform share" v={<span className="num">{p.creatorBps / 100}% / {p.platformBps / 100}%</span>} />
                 <KeyValue k="Return cap" v={<span className="num">{p.returnCapBps / 10_000}× what you paid</span>} />
@@ -110,8 +111,8 @@ function Offering({ p }: { p: PoolDetailView }) {
               <Card className="flex flex-wrap items-center gap-3 text-sm">
                 <span className="text-muted">Collection status</span> <CollectionStateBadge state={p.collectionState} />
                 <span className="text-muted">
-                  Collected so far <span className="num text-fg">{formatMoney(p.revenue.collectedMinor)}</span> · paid to holders{" "}
-                  <span className="num text-fg">{formatMoney(p.revenue.distributedToFansMinor)}</span> across <span className="num">{p.revenue.periods}</span> distributions
+                  Collected so far <span className="num text-fg">{formatUsd(p.revenue.collectedMinor)}</span> · paid to holders{" "}
+                  <span className="num text-fg">{formatUsd(p.revenue.distributedToFansMinor)}</span> across <span className="num">{p.revenue.periods}</span> distributions
                 </span>
               </Card>
             )}
@@ -133,7 +134,7 @@ function Offering({ p }: { p: PoolDetailView }) {
               </Card>
               <Card>
                 <dl className="divide-y divide-line">
-                  {p.useOfFunds.map((u) => <KeyValue key={u.label} k={u.label} v={<span className="num">{formatMoney(u.amountMinor)}</span>} />)}
+                  {p.useOfFunds.map((u) => <KeyValue key={u.label} k={u.label} v={<span className="num">{formatUsd(u.amountMinor)}</span>} />)}
                 </dl>
                 <p className="mt-3 text-xs text-muted">Released to the artist in stages: {p.tranches.map((t) => `${t.pct}% ${t.seq === 1 ? "at close" : `after "${t.milestone}" is verified`}`).join(", then ")}.</p>
               </Card>
@@ -182,9 +183,7 @@ function ClosedPanel({ p }: { p: PoolDetailView }) {
     <Card className="flex flex-col gap-3">
       <p className="font-semibold text-fg">This offering is closed</p>
       <p className="text-sm text-muted">
-        {p.status === "funded" || p.status === "matured"
-          ? "Units were issued to investors when it closed. There's no marketplace to buy or sell them."
-          : "It didn't reach its target, so every investor was refunded in full."}
+        {closedCopy(p.status)}
       </p>
       <Button asChild variant="secondary">
         <Link to="/pools">Browse open Pools</Link>
@@ -213,7 +212,7 @@ function PurchasePanel({ p }: { p: PoolDetailView }) {
     <Card className="flex flex-col gap-5" data-testid="purchase-panel">
       <div className="flex items-baseline justify-between">
         <span className="eyebrow">Unit price</span>
-        <span className="num text-2xl font-medium text-fg">{formatMoney(p.unitPriceMinor)}</span>
+        <span className="num text-2xl font-medium text-fg">{formatUsd(p.unitPriceMinor)}</span>
       </div>
       <div className="flex flex-col gap-2">
         <label htmlFor="units" className="text-sm font-medium text-fg">Units</label>
@@ -239,9 +238,9 @@ function PurchasePanel({ p }: { p: PoolDetailView }) {
         <p className="text-xs text-muted"><span className="num">{p.unitsLeft}</span> of <span className="num">{p.unitsTotal}</span> Units left</p>
       </div>
       <dl className="border-y border-line py-2">
-        <KeyValue k="Total" v={<span className="num text-lg font-medium">{formatMoney(total)}</span>} />
-        <KeyValue k="Most it can ever pay (cap)" v={<span className="num">{formatMoney(Math.floor((total * p.returnCapBps) / 10_000))}</span>} />
-        <KeyValue k="Least it can pay" v={<span className="num">{formatMoney(0)}</span>} />
+        <KeyValue k="Total" v={<span className="num text-lg font-medium">{formatUsd(total)}</span>} />
+        <KeyValue k="Most it can ever pay (cap)" v={<span className="num">{formatUsd(Math.floor((total * p.returnCapBps) / 10_000))}</span>} />
+        <KeyValue k="Least it can pay" v={<span className="num">{formatUsd(0)}</span>} />
       </dl>
 
       {!session.session ? (

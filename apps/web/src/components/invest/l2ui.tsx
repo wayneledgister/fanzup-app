@@ -9,7 +9,8 @@ import { illustratePerUnit, RISK_BADGE_COPY, REVENUE_TYPE_COPY, type RevenueType
 import { Badge, Button, Callout, Card, Container, EmptyState, KeyValue } from "@/components/brand";
 import { ApiError } from "@/lib/api";
 import { isL2Disabled, l2ErrorCopy, type InvestmentView } from "@/lib/l2";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatUsd } from "@/lib/format";
+import { illustrationPeriod, illustrationYears } from "./l2copy";
 
 /* ── Loading / error / disabled ─────────────────────────── */
 
@@ -178,14 +179,15 @@ const SCENARIOS = [
 export function illustrationSummary(totals: number[], paidMinor: number): string {
   const below = totals.filter((t) => t < paidMinor).length;
   const n = totals.length;
-  const paid = formatMoney(paidMinor);
+  const paid = formatUsd(paidMinor);
   if (below === n) return `In all ${n} illustrations, the total paid back is less than the ${paid} paid.`;
   if (below === 0) return `In these ${n} illustrations the total reaches at least the ${paid} paid only because royalties are assumed to keep coming in; real royalties can be lower or zero.`;
   return `In ${below} of these ${n} illustrations, the total paid back is less than the ${paid} paid.`;
 }
 
 export function PayoutIllustration({ fansBps, unitsTotal, unitPriceMinor, capBps, maturityMonths, units = 1 }: { fansBps: number; unitsTotal: number; unitPriceMinor: number; capBps: number; maturityMonths: number; units?: number }) {
-  const years = Math.max(1, Math.round(maturityMonths / 12));
+  // Fractional years (PR #13 review round 2, finding 4): an 18-month Pool illustrates 1.5 years, labelled "18 months".
+  const years = illustrationYears(maturityMonths);
   const results = SCENARIOS.map((s) => ({ ...s, totalMinor: illustratePerUnit({ yearlyCoveredRoyaltiesMinor: s.yearly, fansBps, unitsTotal, unitPriceMinor, capBps, years }).totalMinor * units }));
   const paidMinor = unitPriceMinor * units;
   return (
@@ -193,15 +195,15 @@ export function PayoutIllustration({ fansBps, unitsTotal, unitPriceMinor, capBps
       <div>
         <p className="font-semibold text-fg">What {units === 1 ? "one Unit" : `${units} Units`} could pay — an illustration, not a forecast</p>
         <p className="text-sm text-muted">
-          Potential payouts over {years} years from the fan share of royalties, capped at {capBps / 10_000}× the price. Real results depend on royalties actually
+          Potential payouts over {illustrationPeriod(maturityMonths)} from the fan share of royalties, capped at {capBps / 10_000}× the price. Real results depend on royalties actually
           collected and can be zero.
         </p>
       </div>
       <dl className="divide-y divide-line">
-        {results.map((r) => <KeyValue key={r.label} k={r.label} v={<span className="num">{formatMoney(r.totalMinor, { cents: true })} total</span>} />)}
+        {results.map((r) => <KeyValue key={r.label} k={r.label} v={<span className="num">{formatUsd(r.totalMinor)} total</span>} />)}
       </dl>
       <p className="text-xs text-muted" data-testid="illustration-summary">
-        {units === 1 ? "One Unit costs" : `${units} Units cost`} <span className="num">{formatMoney(paidMinor)}</span>. {illustrationSummary(results.map((r) => r.totalMinor), paidMinor)}{" "}
+        {units === 1 ? "One Unit costs" : `${units} Units cost`} <span className="num">{formatUsd(paidMinor)}</span>. {illustrationSummary(results.map((r) => r.totalMinor), paidMinor)}{" "}
         Potential payouts are never guaranteed.
       </p>
     </Card>

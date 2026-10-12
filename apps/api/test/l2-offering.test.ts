@@ -233,6 +233,13 @@ describe("Escrow invariants (01a AC-E1…E5)", () => {
     await advance(k, 3);
     const late = new Date((await poolRow(k.sql, pool)).ends_at.getTime() - 3_600_000);
     await expect(asService(k.sql, (tx) => tx`select public.cancel_investment(${r2.json().investmentId}, ${fan.id}, ${late})`)).rejects.toThrow("cancel_window_closed");
+    // Review round 2, finding 3: the read model drops canCancelUntil once now ≥ cut-off (cancelBy stays, in the past).
+    const open = (await k.app.inject({ method: "GET", url: `/api/v1/investments/${r2.json().investmentId}`, headers: { authorization: fan.auth } })).json();
+    expect(open.canCancelUntil).toBe(open.cancelBy);
+    await asService(k.sql, (tx) => tx`update public.pools set ends_at = now() + interval '1 hour' where id = ${pool}`);
+    const past = (await k.app.inject({ method: "GET", url: `/api/v1/investments/${r2.json().investmentId}`, headers: { authorization: fan.auth } })).json();
+    expect(past).toMatchObject({ status: "funded", canCancelUntil: null });
+    expect(new Date(past.cancelBy).getTime()).toBeLessThan(Date.now());
   });
 
   it("a fund move that settles after the offering closed is recorded and refunded (money in, money out)", async () => {

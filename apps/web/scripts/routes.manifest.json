@@ -339,15 +339,15 @@
 "fan",
 "/portfolio",
 "invest/Portfolio",
-"layer2",
-"FanZuP FanApp.tsx dashboard (rebuilt per CONSOLIDATION.md)"
+"layer2Completion",
+"FanZuP FanApp.tsx dashboard (rebuilt per CONSOLIDATION.md) \u2014 flag off: cancel-only list of open investments (L2-T-038)"
 ],
 [
 "fan",
 "/portfolio/:poolId",
 "invest/HoldingDetail",
-"layer2",
-"(new) holding + LockupNotice + soft-transfer (postBeta) per Mechanism 07"
+"layer2Completion",
+"(new) holding + LockupNotice + soft-transfer (postBeta) per Mechanism 07 \u2014 flag off: cancel-only list of open investments (L2-T-038)"
 ],
 [
 "fan",

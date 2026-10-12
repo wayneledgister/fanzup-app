@@ -6,7 +6,7 @@ import { RequireAccount } from "@/components/RequireAccount";
 import { CancelInvestment, cancelOutcome, CANNOT_CANCEL_LINE, pastCancelBy } from "@/components/invest/CancelInvestment";
 import { apiMessage, displayStatus, ErrorBox, INVESTMENT_STATUS, StatusBadge, statusHelp } from "@/components/invest/l2ui";
 import { l2, type InvestmentView } from "@/lib/l2";
-import { formatInstant, formatMoney } from "@/lib/format";
+import { formatInstant, formatUsd } from "@/lib/format";
 
 /**
  * Source: Fan Profile Setup InvestmentConfirmation.tsx, rebuilt on the API (CR-002).
@@ -72,8 +72,8 @@ function InvestmentConfirmation() {
               <StatusBadge status={status} />
             </div>
             <dl className="divide-y divide-line" data-testid="commitment">
-              <KeyValue k="Amount" v={<span className="num" data-testid="c-amount">{formatMoney(inv.amountMinor)}</span>} />
-              <KeyValue k="Price per Unit" v={<span className="num" data-testid="c-price">{formatMoney(inv.unitPriceMinor)}</span>} />
+              <KeyValue k="Amount" v={<span className="num" data-testid="c-amount">{formatUsd(inv.amountMinor)}</span>} />
+              <KeyValue k="Price per Unit" v={<span className="num" data-testid="c-price">{formatUsd(inv.unitPriceMinor)}</span>} />
               <KeyValue k="Units" v={<span className="num" data-testid="c-units">{inv.units}</span>} />
               <KeyValue k="Issuer" v={<span data-testid="c-issuer">{inv.issuerName ?? inv.artistDisplay}</span>} />
               <KeyValue k="Offering closes" v={<span className="num">{inv.poolEndsAt ? formatInstant(inv.poolEndsAt) : "—"}</span>} />

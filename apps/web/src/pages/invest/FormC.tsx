@@ -4,7 +4,7 @@ import { Badge, Callout, Card, Container, KeyValue, PageHeader, RegulatoryFooter
 import { INTERMEDIARY_LINE, IntermediaryPending, LoadGate, useLoad } from "@/components/invest/l2ui";
 import { LAYER2_DEMO_TEXT } from "@/components/brand/gates";
 import { l2 } from "@/lib/l2";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatUsd } from "@/lib/format";
 
 /**
  * Source: (new) CR-002 FR-L2-CR-005. The mock Form C generated from the Pool's data at submission, with its version
@@ -37,7 +37,7 @@ type Body = {
 
 function Doc({ d }: { d: { title: string; version: number; sha256: string; createdAt: string; body: Record<string, unknown> } }) {
   const b = d.body as Body;
-  const money = (k: string) => (typeof b.offering?.[k] === "number" ? formatMoney(b.offering[k] as number) : "—");
+  const money = (k: string) => (typeof b.offering?.[k] === "number" ? formatUsd(b.offering[k] as number) : "—");
   return (
     <>
       <PageHeader eyebrow="Form C (mock)" title={d.title} />
@@ -94,7 +94,7 @@ function Doc({ d }: { d: { title: string; version: number; sha256: string; creat
         <Card>
           <h2 className="mb-2 text-lg font-semibold">Use of funds and milestones</h2>
           <dl className="divide-y divide-line">
-            {b.useOfFunds.map((u) => <KeyValue key={u.label} k={u.label} v={<span className="num">{formatMoney(u.amountMinor)}</span>} />)}
+            {b.useOfFunds.map((u) => <KeyValue key={u.label} k={u.label} v={<span className="num">{formatUsd(u.amountMinor)}</span>} />)}
           </dl>
           <ul className="mt-3 list-disc pl-5 text-sm text-muted">
             {(b.milestones ?? []).map((m) => <li key={m.seq}><span className="num">{m.pct}%</span> — {m.milestone}</li>)}

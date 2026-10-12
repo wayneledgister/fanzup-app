@@ -3,10 +3,13 @@ import { Link, useParams } from "react-router";
 import { ArrowLeft, FileText } from "lucide-react";
 import { Callout, Card, Container, EmptyState, KeyValue, LockupNotice, PageHeader, ProgressBar, RegulatoryFooter, SectionHeading } from "@/components/brand";
 import { RequireAccount } from "@/components/RequireAccount";
-import { CancelInvestment, cancelOutcome, CANNOT_CANCEL_LINE, pastCancelBy } from "@/components/invest/CancelInvestment";
+import { CancelInvestment, cancelOutcome, CANNOT_CANCEL_LINE } from "@/components/invest/CancelInvestment";
+import { cancelState } from "@/components/invest/l2copy";
+import { CancelOnlyList } from "@/components/invest/CancelOnlyList";
+import { useFlag } from "@/lib/flags";
 import { CollectionStateBadge, displayStatus, FormCLinkTo, LoadGate, RiskBadgeChip, shortDate, StatusBadge, statusHelp, useLoad } from "@/components/invest/l2ui";
 import { l2, type InvestmentView } from "@/lib/l2";
-import { formatInstant, formatMoney } from "@/lib/format";
+import { formatInstant, formatUsd } from "@/lib/format";
 
 /**
  * Source: (new) holding detail + LockupNotice per Mechanism 07 P0, rebuilt on the API (CR-002).
@@ -25,6 +28,21 @@ export default function HoldingDetailPage() {
 
 function HoldingDetail() {
   const { poolId = "" } = useParams();
+  // Flag off: this route renders only on the server's completion signal — the cancel-only list for this Pool.
+  if (!useFlag("layer2")) {
+    return (
+      <Container size="lg" className="flex flex-col gap-8 py-8">
+        <Link to="/portfolio" className="flex items-center gap-1 text-sm text-muted hover:text-fg"><ArrowLeft className="size-4" /> Open investments</Link>
+        <PageHeader eyebrow="Your Pools" title="Open investments" />
+        <CancelOnlyList poolSlug={poolId} />
+        <RegulatoryFooter />
+      </Container>
+    );
+  }
+  return <FullHoldingDetail poolId={poolId} />;
+}
+
+function FullHoldingDetail({ poolId }: { poolId: string }) {
   const load = useLoad(async () => (await l2.portfolio()).investments.filter((i) => i.poolSlug === poolId), [poolId]);
   return (
     <Container size="lg" className="flex flex-col gap-8 py-8">
@@ -46,9 +64,8 @@ function HoldingDetail() {
   );
 }
 
-/** Whether an open investment has passed its cancel-by time (so the page says it can't be cancelled any more). */
-const showCannotCancel = (i: InvestmentView) =>
-  !i.canCancelUntil && !i.cancelRequestedAt && ["reserved", "funding", "funded"].includes(i.status) && i.poolStatus === "live" && pastCancelBy(i);
+/** Whether an open investment has passed its cut-off (so the page says it can't be cancelled any more) — the cut-off alone decides. */
+const showCannotCancel = (i: InvestmentView) => cancelState(i) === "closed";
 
 export function Holding({ i, onChange, cancelOnly = false }: { i: InvestmentView; onChange: () => void; cancelOnly?: boolean }) {
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -64,9 +81,9 @@ export function Holding({ i, onChange, cancelOnly = false }: { i: InvestmentView
         <p className="text-sm text-muted" data-testid="holding-help">{statusHelp(i)}</p>
         <dl className="divide-y divide-line">
           <KeyValue k="Units" v={<span className="num">{i.units}</span>} />
-          <KeyValue k="Amount" v={<span className="num">{formatMoney(i.amountMinor)}</span>} />
-          {!cancelOnly && <KeyValue k="Received so far" v={<span className="num">{formatMoney(i.receivedMinor)}</span>} />}
-          {!cancelOnly && <KeyValue k="Most it can still pay" v={<span className="num">{formatMoney(Math.max(0, i.capMinor - i.distributedMinor))}</span>} />}
+          <KeyValue k="Amount" v={<span className="num">{formatUsd(i.amountMinor)}</span>} />
+          {!cancelOnly && <KeyValue k="Received so far" v={<span className="num">{formatUsd(i.receivedMinor)}</span>} />}
+          {!cancelOnly && <KeyValue k="Most it can still pay" v={<span className="num">{formatUsd(Math.max(0, i.capMinor - i.distributedMinor))}</span>} />}
           {!cancelOnly && <KeyValue k="Pool ends by" v={<span className="num">{shortDate(i.maturesAt)}</span>} />}
           {i.cancelRequestedAt && <KeyValue k="Cancellation received" v={<span className="num">{formatInstant(i.cancelRequestedAt)}</span>} />}
           {i.refundedAt && <KeyValue k="Refunded" v={<span className="num">{formatInstant(i.refundedAt)}</span>} />}
@@ -97,7 +114,7 @@ export function Holding({ i, onChange, cancelOnly = false }: { i: InvestmentView
                 <div key={p.label} className="flex flex-wrap items-center justify-between gap-2 p-4">
                   <span className="text-fg">{p.label}</span>
                   <span className="text-sm text-muted">{p.status === "paid" ? `Paid ${shortDate(p.paidAt)}` : "On its way"} · {p.taxForm ?? "—"} (pending counsel)</span>
-                  <span className="num text-fg">{formatMoney(p.amountMinor, { cents: true })}</span>
+                  <span className="num text-fg">{formatUsd(p.amountMinor)}</span>
                 </div>
               ))}
             </Card>

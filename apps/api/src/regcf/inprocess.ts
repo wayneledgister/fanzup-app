@@ -57,6 +57,7 @@ export class InProcessRegCf implements RegCfProvider {
   payoutFromCollection: RegCfProvider["payoutFromCollection"] = (id, i, idem) => this.run("payout", () => this.e().payoutFromCollection(id, i, idem));
   simulateDeposit: NonNullable<RegCfProvider["simulateDeposit"]> = (id, i, idem) => this.run("deposit", () => this.e().simulateDeposit(id, i, idem));
   advance: NonNullable<RegCfProvider["advance"]> = (seconds) => this.e().advance(seconds);
+  setDelays: NonNullable<RegCfProvider["setDelays"]> = async (delays) => ({ delays: this.e().setDelays(delays) });
 
   parseWebhook(rawBody: string, signature: string | undefined): RegCfEvent {
     return parseSigned(this.webhookSecret, rawBody, signature);

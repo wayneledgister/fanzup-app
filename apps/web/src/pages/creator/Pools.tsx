@@ -5,7 +5,7 @@ import { RequireAccount } from "@/components/RequireAccount";
 import { LoadGate, POOL_STATUS_COPY, RiskBadgeChip, useLoad } from "@/components/invest/l2ui";
 import { ApiError } from "@/lib/api";
 import { l2 } from "@/lib/l2";
-import { formatMoney } from "@/lib/format";
+import { formatUsd } from "@/lib/format";
 
 /**
  * Source: (new) CR-002 FR-L2-CR-001 — the creator's album royalty Pools. A separate Layer 2 path, never mixed into
@@ -57,7 +57,7 @@ function Pools() {
                     {["live", "funded", "matured"].includes(p.status) && (
                       <>
                         <ProgressBar value={p.raisedMinor} max={p.targetMinor} tone="info" label="Raised vs target" />
-                        <p className="text-sm text-muted"><span className="num text-fg">{formatMoney(p.raisedMinor)}</span> of <span className="num">{formatMoney(p.targetMinor)}</span> · <span className="num">{p.investors}</span> investors</p>
+                        <p className="text-sm text-muted"><span className="num text-fg">{formatUsd(p.raisedMinor)}</span> of <span className="num">{formatUsd(p.targetMinor)}</span> · <span className="num">{p.investors}</span> investors</p>
                       </>
                     )}
                   </Card>
