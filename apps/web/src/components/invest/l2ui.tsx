@@ -4,11 +4,11 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { CircleAlert, FlaskConical, RefreshCw, ShieldCheck, ShieldQuestion, ShieldHalf } from "lucide-react";
+import { Building2, CircleAlert, FlaskConical, RefreshCw, ShieldCheck, ShieldQuestion, ShieldHalf } from "lucide-react";
 import { illustratePerUnit, RISK_BADGE_COPY, REVENUE_TYPE_COPY, type RevenueType, type RiskBadge } from "@fanzup/shared/l2";
 import { Badge, Button, Callout, Card, Container, EmptyState, KeyValue } from "@/components/brand";
 import { ApiError } from "@/lib/api";
-import { isL2Disabled } from "@/lib/l2";
+import { isL2Disabled, l2ErrorCopy, type InvestmentView } from "@/lib/l2";
 import { formatDate, formatMoney } from "@/lib/format";
 
 /* ── Loading / error / disabled ─────────────────────────── */
@@ -34,7 +34,7 @@ export function L2Unavailable() {
   return (
     <Container size="md" className="py-20">
       <EmptyState icon={<FlaskConical />} title="Investing isn't open yet">
-        Investment Pools launch once our registered funding-portal partner is live. Until then you can back campaigns, subscribe, and shop merch and tickets.
+        Revenue-share Pools aren't available right now. You can still back campaigns, subscribe, and shop merch and tickets.
       </EmptyState>
     </Container>
   );
@@ -67,8 +67,11 @@ export function ErrorBox({ title, body, action }: { title: string; body?: ReactN
   );
 }
 
+/** One line of human copy for an API error (Brand §7): the mapped sentence for known Layer 2 codes, else the server's. */
 export function apiMessage(e: unknown) {
-  return e instanceof ApiError ? e.message : "Something went wrong on our side.";
+  if (!(e instanceof ApiError)) return "Something went wrong on our side.";
+  const c = l2ErrorCopy(e);
+  return c.body && c.body !== e.message ? `${c.title}. ${c.body}` : e.message;
 }
 
 /* ── Risk badge (design §8) ─────────────────────────────── */
@@ -79,12 +82,26 @@ const BADGE_TONE: Record<RiskBadge, { tone: "success" | "info" | "warning"; icon
   TRUST_BASED: { tone: "warning", icon: <ShieldQuestion /> },
 };
 
+/** The line that always sits next to the strongest badge (FR-L2-CR-004, gate cond. 5, L2-T-021). */
+export const UNSECURED_LINE = "Your claim is unsecured";
+
+/**
+ * The collection badge. The strongest badge ("More secure collection") never stands alone: wherever it shows,
+ * "Your claim is unsecured" sits right next to it, so "more secure" can't be read as "secured".
+ */
 export function RiskBadgeChip({ badge }: { badge: RiskBadge | null }) {
   if (!badge) return null;
-  return (
+  const chip = (
     <Badge tone={BADGE_TONE[badge].tone} icon={BADGE_TONE[badge].icon}>
       {RISK_BADGE_COPY[badge].label}
     </Badge>
+  );
+  if (badge !== "SECURED_ISH") return chip;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1" data-testid="risk-badge-strongest">
+      {chip}
+      <span className="text-xs font-medium text-fg" data-testid="unsecured-line">{UNSECURED_LINE}</span>
+    </span>
   );
 }
 
@@ -123,34 +140,69 @@ export function RevenueTypes({ types }: { types: RevenueType[] }) {
   );
 }
 
+/* ── Intermediary (D-4, L2-T-025) ───────────────────────── */
+
+/**
+ * No SEC-registered intermediary (funding portal or broker-dealer) is engaged (L2-Q3); no Layer 2 screen may say one
+ * is. Shown on the Pool page, the documents/purchase step and the Form C view.
+ */
+export const INTERMEDIARY_LINE = "Intermediary: pending — L2-Q3";
+export function IntermediaryPending({ className }: { className?: string }) {
+  return (
+    <div className={`flex gap-3 rounded-lg border border-line bg-surface-2 p-4 text-sm ${className ?? ""}`} role="note">
+      <Building2 className="mt-0.5 size-5 shrink-0 text-muted" aria-hidden />
+      <div className="flex flex-col gap-1">
+        <p className="font-semibold text-fg" data-testid="intermediary-line">{INTERMEDIARY_LINE}</p>
+        <p className="text-muted">
+          A Reg CF offering has to be made through a funding portal or broker-dealer registered with the SEC. None has been chosen for this demo, so nothing here is an
+          offer. FanZuP provides the technology and doesn't give investment advice.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ── Potential payout illustration (always includes zero) ── */
+
+/** Yearly covered royalties the album might earn: none, modest, strong. Illustrations, not forecasts. */
+const SCENARIOS = [
+  { label: "If the album earns nothing", yearly: 0 },
+  { label: "If it earns $5,000 a year", yearly: 5_000_00 },
+  { label: "If it earns $40,000 a year", yearly: 40_000_00 },
+];
+
+/**
+ * The closing sentence is computed from the scenario results (round-1 review of PR #13): it counts how many
+ * illustrations pay back less than the price — never a blanket claim the numbers may contradict.
+ */
+export function illustrationSummary(totals: number[], paidMinor: number): string {
+  const below = totals.filter((t) => t < paidMinor).length;
+  const n = totals.length;
+  const paid = formatMoney(paidMinor);
+  if (below === n) return `In all ${n} illustrations, the total paid back is less than the ${paid} paid.`;
+  if (below === 0) return `In these ${n} illustrations the total reaches at least the ${paid} paid only because royalties are assumed to keep coming in; real royalties can be lower or zero.`;
+  return `In ${below} of these ${n} illustrations, the total paid back is less than the ${paid} paid.`;
+}
 
 export function PayoutIllustration({ fansBps, unitsTotal, unitPriceMinor, capBps, maturityMonths, units = 1 }: { fansBps: number; unitsTotal: number; unitPriceMinor: number; capBps: number; maturityMonths: number; units?: number }) {
   const years = Math.max(1, Math.round(maturityMonths / 12));
-  // Yearly covered royalties the album might earn: none, modest, strong. Illustrations, not forecasts.
-  const scenarios = [
-    { label: "If the album earns nothing", yearly: 0 },
-    { label: "If it earns $5,000 a year", yearly: 5_000_00 },
-    { label: "If it earns $40,000 a year", yearly: 40_000_00 },
-  ];
+  const results = SCENARIOS.map((s) => ({ ...s, totalMinor: illustratePerUnit({ yearlyCoveredRoyaltiesMinor: s.yearly, fansBps, unitsTotal, unitPriceMinor, capBps, years }).totalMinor * units }));
+  const paidMinor = unitPriceMinor * units;
   return (
     <Card className="flex flex-col gap-4" data-testid="payout-illustration">
       <div>
         <p className="font-semibold text-fg">What {units === 1 ? "one Unit" : `${units} Units`} could pay — an illustration, not a forecast</p>
         <p className="text-sm text-muted">
-          Potential payouts over {years} years from the fan share of royalties, capped at {capBps / 10_000}× what you paid. Real results depend on royalties
-          actually collected and can be zero.
+          Potential payouts over {years} years from the fan share of royalties, capped at {capBps / 10_000}× the price. Real results depend on royalties actually
+          collected and can be zero.
         </p>
       </div>
       <dl className="divide-y divide-line">
-        {scenarios.map((s) => {
-          const r = illustratePerUnit({ yearlyCoveredRoyaltiesMinor: s.yearly, fansBps, unitsTotal, unitPriceMinor, capBps, years });
-          return <KeyValue key={s.label} k={s.label} v={<span className="num">{formatMoney(r.totalMinor * units, { cents: true })} total</span>} />;
-        })}
+        {results.map((r) => <KeyValue key={r.label} k={r.label} v={<span className="num">{formatMoney(r.totalMinor, { cents: true })} total</span>} />)}
       </dl>
-      <p className="text-xs text-muted">
-        You paid <span className="num">{formatMoney(unitPriceMinor * units)}</span>. Most of these scenarios return less than that. Potential payouts are never
-        guaranteed.
+      <p className="text-xs text-muted" data-testid="illustration-summary">
+        {units === 1 ? "One Unit costs" : `${units} Units cost`} <span className="num">{formatMoney(paidMinor)}</span>. {illustrationSummary(results.map((r) => r.totalMinor), paidMinor)}{" "}
+        Potential payouts are never guaranteed.
       </p>
     </Card>
   );
@@ -164,11 +216,31 @@ export const INVESTMENT_STATUS: Record<string, { label: string; tone: "gold" | "
   funded: { label: "Held in escrow", tone: "gold", help: "Your money is in the offering's escrow account. If the target isn't reached, you're refunded in full." },
   issued: { label: "Units issued", tone: "success", help: "The offering closed at its target and your Units were issued." },
   expired: { label: "Reservation expired", tone: "neutral", help: "The payment didn't start in time. Nothing was charged." },
-  cancelled: { label: "Cancelled", tone: "neutral", help: "You cancelled before paying." },
+  cancelled: { label: "Cancelled", tone: "neutral", help: "You cancelled. Nothing was charged." },
+  cancel_pending: { label: "Cancellation received", tone: "warning", help: "Cancellation received — we'll refund your payment in full as soon as it arrives." },
   returned: { label: "Payment returned", tone: "error", help: "Your bank returned the payment, so no Units were issued." },
   refund_pending: { label: "Refund on its way", tone: "warning", help: "Your refund from escrow has started." },
   refunded: { label: "Refunded", tone: "neutral", help: "You were refunded in full from escrow." },
 };
+
+type StatusFields = Pick<InvestmentView, "status" | "statusReason"> & { cancelRequestedAt?: string | null };
+
+/**
+ * What to show for an investment. `cancel_pending` isn't a stored status: the investor asked to cancel while a payment
+ * may still be on its way (`cancelRequestedAt` set on a `reserved` or `funding` investment — L2-T-031, L2-T-043).
+ */
+export function displayStatus(i: StatusFields): string {
+  if (i.cancelRequestedAt && (i.status === "reserved" || i.status === "funding")) return "cancel_pending";
+  return i.status;
+}
+
+export function statusHelp(i: StatusFields): string {
+  const s = displayStatus(i);
+  // A reservation with a provider call started: a payment may or may not have been taken (design §4.3).
+  if (s === "cancel_pending" && i.status === "reserved") return "Cancellation received — if any payment was taken, we'll refund it in full as soon as it arrives.";
+  if (i.status === "refund_pending" && i.statusReason === "cancelled_by_investor") return "Cancelled. Your refund from escrow has started, for the full amount received.";
+  return INVESTMENT_STATUS[s]?.help ?? "";
+}
 
 export function StatusBadge({ status }: { status: string }) {
   const s = INVESTMENT_STATUS[status] ?? { label: status, tone: "neutral" as const };

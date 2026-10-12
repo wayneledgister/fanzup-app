@@ -147,16 +147,22 @@ function Attestation({ me, onSaved }: { me: InvestorMeView; onSaved: (m: Investo
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const valid = Number.isFinite(dollars(income)) && Number.isFinite(dollars(worth)) && income !== "" && worth !== "" && dollars(income) >= 0 && dollars(worth) >= 0;
+  const amountOk = (v: string) => v.trim() !== "" && /^\$?[\d,]*(\.\d{0,2})?$/.test(v.trim()) && Number.isFinite(dollars(v)) && dollars(v) >= 0;
+  const valid = amountOk(income) && amountOk(worth);
+  // Round-1 review: the "elsewhere" figure is validated like the others (empty means none).
+  const elsewhereOk = elsewhere.trim() === "" || amountOk(elsewhere);
+  const elsewhereErr = elsewhereOk ? null : "Enter a dollar amount, like 1,500 — or 0 if none.";
   const preview = useMemo(() => (valid ? regCfLimitMinor({ annualIncomeMinor: dollars(income), netWorthMinor: dollars(worth), accredited }) : undefined), [valid, income, worth, accredited]);
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid) return setErr("Enter your annual income and net worth in dollars.");
+    if (!elsewhereOk) return setErr("Check the amount you've invested in other Reg CF offerings.");
     if (!confirm) return setErr("Confirm that the figures are accurate.");
     setBusy(true);
     setErr(null);
     try {
-      onSaved(await l2.certify({ annualIncomeMinor: dollars(income), netWorthMinor: dollars(worth), accredited, elsewhereMinor: dollars(elsewhere || "0") }));
+      onSaved(await l2.certify({ annualIncomeMinor: dollars(income), netWorthMinor: dollars(worth), accredited, elsewhereMinor: elsewhere.trim() ? dollars(elsewhere) : 0 }));
+      setConfirm(false);
     } catch (x) {
       setErr(apiMessage(x));
     } finally {
@@ -186,8 +192,8 @@ function Attestation({ me, onSaved }: { me: InvestorMeView; onSaved: (m: Investo
           <Field label="Annual income (USD)" htmlFor="c-income"><TextInput id="c-income" inputMode="decimal" value={income} onChange={(e) => setIncome(e.target.value)} placeholder="60,000" /></Field>
           <Field label="Net worth, excluding your home (USD)" htmlFor="c-worth"><TextInput id="c-worth" inputMode="decimal" value={worth} onChange={(e) => setWorth(e.target.value)} placeholder="40,000" /></Field>
         </div>
-        <Field label="Reg CF investments elsewhere in the last 12 months (USD)" htmlFor="c-else" optional>
-          <TextInput id="c-else" inputMode="decimal" value={elsewhere} onChange={(e) => setElsewhere(e.target.value)} />
+        <Field label="Reg CF investments elsewhere in the last 12 months (USD)" htmlFor="c-else" optional error={elsewhereErr} hint="Other platforms count toward the same limit.">
+          <TextInput id="c-else" inputMode="decimal" value={elsewhere} onChange={(e) => setElsewhere(e.target.value)} aria-invalid={!elsewhereOk} aria-describedby="c-else-msg" />
         </Field>
         <Checkbox id="c-acc" checked={accredited} onChange={setAccredited}>I'm an accredited investor (for example, income over $200,000 or net worth over $1 million excluding my home).</Checkbox>
         {preview !== undefined && (

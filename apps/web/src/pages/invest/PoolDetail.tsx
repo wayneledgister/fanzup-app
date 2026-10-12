@@ -4,9 +4,9 @@ import { ArrowLeft, ArrowRight, CircleAlert, FileText, Minus, Plus } from "lucid
 import {
   ArtistArt, Badge, Button, Callout, Card, Container, InvestmentRiskDisclosure, KeyValue, ProgressBar, RegulatoryFooter, SectionHeading,
 } from "@/components/brand";
-import { IntermediaryDisclosure, LimitMeter, LockupExplainer, OfferingEscrowNotice } from "@/components/invest/ui";
+import { LimitMeter, LockupExplainer, OfferingEscrowNotice } from "@/components/invest/ui";
 import {
-  CollectionStateBadge, daysLeft, FormCLinkTo, LoadGate, PayoutIllustration, POOL_STATUS_COPY, RevenueTypes, RiskBadgeChip, RiskBadgeExplainer, shortDate, useLoad,
+  CollectionStateBadge, daysLeft, FormCLinkTo, IntermediaryPending, LoadGate, PayoutIllustration, POOL_STATUS_COPY, RevenueTypes, RiskBadgeChip, RiskBadgeExplainer, shortDate, useLoad,
 } from "@/components/invest/l2ui";
 import { l2, type InvestorMeView, type PoolDetailView } from "@/lib/l2";
 import { useSession } from "@/lib/session";
@@ -106,7 +106,7 @@ function Offering({ p }: { p: PoolDetailView }) {
           <section className="flex flex-col gap-4">
             <SectionHeading eyebrow="Collection" title="How royalties reach the Pool" />
             <RiskBadgeExplainer badge={p.riskBadge} mechanism={p.collectionMechanism} />
-            {p.status === "funded" && (
+            {(p.status === "funded" || p.status === "matured") && (
               <Card className="flex flex-wrap items-center gap-3 text-sm">
                 <span className="text-muted">Collection status</span> <CollectionStateBadge state={p.collectionState} />
                 <span className="text-muted">
@@ -150,7 +150,7 @@ function Offering({ p }: { p: PoolDetailView }) {
             )}
             {lockupEstimate && <LockupExplainer unlocksOn={shortDate(lockupEstimate)} />}
             <OfferingEscrowNotice />
-            <IntermediaryDisclosure />
+            <IntermediaryPending />
           </section>
 
           <section>

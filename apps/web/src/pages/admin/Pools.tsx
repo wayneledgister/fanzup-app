@@ -9,7 +9,10 @@ import { formatInstant, formatMoney } from "@/lib/format";
 
 /**
  * Source: (new) CR-002 FR-L2-ADM — the Layer 2 staff worklist (Form C reviews, collection agreements to execute, KYC
- * manual reviews, milestone verifications, distributions due, breaks, failed provider operations) and every Pool.
+ * manual reviews, milestone verifications, distributions due, breaks, failed provider operations) and every Pool, plus
+ * the Layer 2 rows of the M1 staff queue: `pool_dead_letters` (replay with `pool_op.replay`, L2-T-046) and
+ * `pool_breaks` (staff-resolved kinds closed with `pool_break.resolve`, L2-T-056). All of it answers with the layer2
+ * flag off (design §9): money already owed is a completion path.
  */
 const TYPE: Record<string, { label: string; tone: "warning" | "info" | "error" | "gold" | "neutral" }> = {
   form_c_review: { label: "Form C review", tone: "gold" },
@@ -19,6 +22,8 @@ const TYPE: Record<string, { label: string; tone: "warning" | "info" | "error" |
   distribution_due: { label: "Distribution due", tone: "gold" },
   break: { label: "Break", tone: "error" },
   op_failed: { label: "Provider op failed", tone: "error" },
+  pool_dead_letters: { label: "Op needs replay", tone: "error" },
+  pool_breaks: { label: "Pool break", tone: "error" },
 };
 
 export default function AdminPoolsPage() {
@@ -30,13 +35,33 @@ export default function AdminPoolsPage() {
 }
 
 function AdminPools() {
-  const load = useLoad(async () => ({ q: await l2.staffQueue(), pools: await l2.staffPools() }), []);
+  const load = useLoad(async () => {
+    const [q, pools, dead, breaks] = await Promise.all([l2.staffQueue(), l2.staffPools(), l2.staffM1Queue("pool_dead_letters"), l2.staffM1Queue("pool_breaks")]);
+    return { q, pools, money: [...dead.items, ...breaks.items] };
+  }, []);
   return (
     <Container size="xl" className="flex flex-col gap-8 py-8">
       <PageHeader eyebrow="Layer 2 · staff" title="Pools" description="Every action asks for a reason and goes in the audit log. Money actions wait out the single-operator delay." />
       <StaffLoadGate load={load} what="the Pool queue">
-        {({ q, pools }) => (
+        {({ q, pools, money }) => (
           <>
+            <section>
+              <SectionHeading eyebrow="Money owed" title="Operations and breaks" />
+              {money.length === 0 ? (
+                <p className="text-sm text-muted" data-testid="staff-money-queue-empty">No Pool operation needs a replay and no break is open.</p>
+              ) : (
+                <Card padded={false} className="divide-y divide-line" data-testid="staff-money-queue">
+                  {money.map((i) => (
+                    <Link key={`${i.type}:${i.id}`} to={i.subjectId ? `/admin/pools/${i.subjectId}` : "/admin/pools"} className="flex flex-wrap items-center gap-3 p-4 hover:bg-surface-2" data-testid="money-queue-row" data-type={i.type}>
+                      <Badge tone={TYPE[i.type]?.tone ?? "neutral"}>{TYPE[i.type]?.label ?? i.type}</Badge>
+                      <span className="min-w-0 flex-1 text-fg">{i.summary.replaceAll("_", " ")}</span>
+                      <span className="num text-xs text-muted">{Math.round(i.ageSeconds / 60)} min</span>
+                      <ArrowRight className="size-4 text-muted" aria-hidden />
+                    </Link>
+                  ))}
+                </Card>
+              )}
+            </section>
             <section>
               <SectionHeading eyebrow="Worklist" title="Needs attention" />
               {q.items.length === 0 ? (

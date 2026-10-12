@@ -5,9 +5,10 @@ import { COLLECTION_MECHANISMS, REVENUE_TYPE_COPY, riskBadge, type CollectionMec
 import { POLICY } from "@fanzup/shared/policy";
 import { Button, Callout, Card, Checkbox, ChoiceCard, Container, Field, KeyValue, PageHeader, SectionHeading, TextArea, TextInput } from "@/components/brand";
 import { RequireAccount } from "@/components/RequireAccount";
-import { apiMessage, mechanismLabel, PayoutIllustration, RiskBadgeChip } from "@/components/invest/l2ui";
+import { mechanismLabel, PayoutIllustration, RiskBadgeChip } from "@/components/invest/l2ui";
+import { IssuerAttestationField, attestationProblem, parseAttestation } from "@/components/invest/IssuerAttestation";
 import { ApiError } from "@/lib/api";
-import { l2, type PoolDraftRequest } from "@/lib/l2";
+import { l2, l2ErrorCopy, type PoolDraftRequest } from "@/lib/l2";
 import { formatMoney } from "@/lib/format";
 
 /**
@@ -15,6 +16,9 @@ import { formatMoney } from "@/lib/format";
  * L2 gate condition 11). Album basics, use of funds (= target), royalty terms (revenue types, split, Units, price,
  * cap, maturity), collection mechanism with its derived badge, production milestones, then a plain-language summary
  * with a potential-payout illustration that includes zero. "Shares" are Units (Brand §7.5).
+ * The offering runs at least 21 days (Reg CF; L2-T-020). Submitting asks for the issuer attestation of other Reg CF
+ * sales in the last 12 months (L2-T-019, L2-Q12). A draft created by "Submit" is never orphaned: once created, the page
+ * switches to editing it, so a failed submit retries against the same draft (round-1 review).
  */
 export default function PoolNewPage() {
   return (
@@ -33,7 +37,9 @@ const cents = (d: string) => Math.round(Number((d || "0").replace(/[$,\s]/g, "")
 function PoolNew() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const editId = params.get("edit");
+  // The draft this page edits: from the URL, or the one this page just created (so a failed submit never orphans it).
+  const [createdId, setCreatedId] = useState<string | null>(null);
+  const editId = params.get("edit") ?? createdId;
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
@@ -49,7 +55,8 @@ function PoolNew() {
   const [units, setUnits] = useState("400");
   const [price, setPrice] = useState("50");
   const [minUnits, setMinUnits] = useState("1");
-  const [days, setDays] = useState("30");
+  const [days, setDays] = useState(String(POLICY.l2.deadlineDays.min));
+  const [otherSales, setOtherSales] = useState("");
   const [cap, setCap] = useState(String(POLICY.l2.defaults.returnCapBps / 10_000));
   const [years, setYears] = useState(String(POLICY.l2.defaults.maturityMonths / 12));
   const [mechanism, setMechanism] = useState<CollectionMechanism>("DISTRIBUTOR_REDIRECT");
@@ -59,7 +66,7 @@ function PoolNew() {
   const [err, setErr] = useState<{ title: string; body: string; tier?: boolean } | null>(null);
 
   useEffect(() => {
-    if (!editId) return;
+    if (!editId || editId === createdId) return;
     l2.creatorPool(editId).then((p) => {
       setTitle(p.title); setSlug(p.slug); setSlugTouched(true); setGenre(p.genre ?? ""); setReleaseDate(p.releaseDate ?? ""); setTracks(p.tracklist.join("\n"));
       setStory(p.story ?? ""); setRisks(p.risks ?? ""); setFunds(p.useOfFunds.map((u) => ({ label: u.label, dollars: String(u.amountMinor / 100) })));
@@ -67,8 +74,8 @@ function PoolNew() {
       setDays(String(p.durationDays)); setCap(String(p.returnCapBps / 10_000)); setYears(String(p.maturityMonths / 12)); setMechanism(p.collectionMechanism as CollectionMechanism);
       setCounterparty(p.collection?.details?.counterparty ?? "");
       setTranches(p.tranches.map((t) => ({ pct: String(t.pct), milestone: t.milestone ?? "", evidence: t.evidenceRequired ?? "", date: t.targetDate ?? "" })));
-    }).catch((e) => setErr({ title: "We couldn't load that draft", body: apiMessage(e) }));
-  }, [editId]);
+    }).catch((e) => setErr({ title: "We couldn't load that draft", body: l2ErrorCopy(e).body }));
+  }, [editId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const target = funds.reduce((s, f) => s + cents(f.dollars), 0);
   const unitPriceMinor = cents(price);
@@ -95,9 +102,10 @@ function PoolNew() {
     if (!(capBps >= 10_000 && capBps <= 30_000)) p.push("The return cap must be between 1× and 3×.");
     if (!(maturityMonths >= 12 && maturityMonths <= 120)) p.push("Maturity must be between 1 and 10 years.");
     const d = Number(days);
-    if (!(d >= POLICY.l2.deadlineDays.min && d <= POLICY.l2.deadlineDays.max)) p.push(`The offering runs ${POLICY.l2.deadlineDays.min}–${POLICY.l2.deadlineDays.max} days.`);
+    if (!(Number.isInteger(d) && d >= POLICY.l2.deadlineDays.min && d <= POLICY.l2.deadlineDays.max)) p.push(`The offering must run ${POLICY.l2.deadlineDays.min}–${POLICY.l2.deadlineDays.max} days.`);
     return p;
   }, [title, slug, tracks, target, maxMinor, types, fansBps, creatorPct, trancheSum, tranches, capBps, maturityMonths, days]);
+  const attestationErr = attestationProblem(otherSales);
 
   const body = (): PoolDraftRequest => ({
     slug, title: title.trim(), genre: genre || null, releaseDate: releaseDate || null,
@@ -110,15 +118,28 @@ function PoolNew() {
 
   const save = async (andSubmit: boolean) => {
     if (problems.length) return setErr({ title: "Fix these first", body: problems.join(" ") });
+    if (andSubmit && attestationErr) return setErr({ title: "Fix these first", body: attestationErr });
     setBusy(andSubmit ? "submit" : "save");
     setErr(null);
+    let id = editId;
     try {
-      const id = editId ? (await l2.updatePool(editId, body())).id : (await l2.createPool(body())).id;
-      if (andSubmit) await l2.submitPool(id);
+      if (id) await l2.updatePool(id, body());
+      else {
+        id = (await l2.createPool(body())).id;
+        // From here on this page edits the new draft: a failed submit below retries against it, never a second draft.
+        setCreatedId(id);
+        navigate(`/creator/pools/new?edit=${id}`, { replace: true });
+      }
+      if (andSubmit) await l2.submitPool(id, parseAttestation(otherSales));
       navigate(`/creator/pools/${id}`);
     } catch (e) {
       const tier = e instanceof ApiError && e.code === "tier_not_eligible";
-      setErr({ title: tier ? "Pools open at Rising tier" : "We couldn't save the Pool", body: apiMessage(e), tier });
+      const c = l2ErrorCopy(e);
+      setErr({
+        title: tier ? "Pools open at Rising tier" : id && andSubmit ? `Your draft is saved, but it wasn't submitted: ${c.title.toLowerCase()}` : c.title,
+        body: c.body,
+        tier,
+      });
       setBusy(null);
     }
   };
@@ -179,7 +200,9 @@ function PoolNew() {
             <Field label="Units" htmlFor="t-units"><TextInput id="t-units" inputMode="numeric" value={units} onChange={(e) => setUnits(e.target.value)} /></Field>
             <Field label="Unit price ($)" htmlFor="t-price"><TextInput id="t-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></Field>
             <Field label="Minimum Units per fan" htmlFor="t-min"><TextInput id="t-min" inputMode="numeric" value={minUnits} onChange={(e) => setMinUnits(e.target.value)} /></Field>
-            <Field label="Offering length (days)" htmlFor="t-days"><TextInput id="t-days" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} /></Field>
+            <Field label="Offering length (days)" htmlFor="t-days" hint={`At least ${POLICY.l2.deadlineDays.min} days (Reg CF minimum), at most ${POLICY.l2.deadlineDays.max}.`}>
+              <TextInput id="t-days" type="number" inputMode="numeric" min={POLICY.l2.deadlineDays.min} max={POLICY.l2.deadlineDays.max} value={days} onChange={(e) => setDays(e.target.value)} aria-describedby="t-days-msg" />
+            </Field>
             <Field label="Return cap (× Unit price)" htmlFor="t-cap"><TextInput id="t-cap" inputMode="decimal" value={cap} onChange={(e) => setCap(e.target.value)} /></Field>
             <Field label="Pool ends after (years)" htmlFor="t-years"><TextInput id="t-years" inputMode="decimal" value={years} onChange={(e) => setYears(e.target.value)} /></Field>
           </div>
@@ -238,6 +261,13 @@ function PoolNew() {
           </dl>
         </Card>
         {unitsN > 0 && unitPriceMinor > 0 && <PayoutIllustration fansBps={fansBps} unitsTotal={unitsN} unitPriceMinor={unitPriceMinor} capBps={capBps} maturityMonths={maturityMonths} />}
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <SectionHeading eyebrow="7" title="Before you submit" />
+        <Card className="flex flex-col gap-3">
+          <IssuerAttestationField id="p-other-sales" value={otherSales} onChange={setOtherSales} />
+        </Card>
       </section>
 
       {err && (

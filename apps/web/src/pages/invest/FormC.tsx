@@ -1,13 +1,15 @@
 import { Link, useParams } from "react-router";
-import { ArrowLeft, FileText } from "lucide-react";
-import { Badge, Card, Container, KeyValue, PageHeader, RegulatoryFooter } from "@/components/brand";
-import { LoadGate, useLoad } from "@/components/invest/l2ui";
+import { ArrowLeft, FileText, TriangleAlert } from "lucide-react";
+import { Badge, Callout, Card, Container, KeyValue, PageHeader, RegulatoryFooter } from "@/components/brand";
+import { INTERMEDIARY_LINE, IntermediaryPending, LoadGate, useLoad } from "@/components/invest/l2ui";
+import { LAYER2_DEMO_TEXT } from "@/components/brand/gates";
 import { l2 } from "@/lib/l2";
 import { formatDate, formatMoney } from "@/lib/format";
 
 /**
  * Source: (new) CR-002 FR-L2-CR-005. The mock Form C generated from the Pool's data at submission, with its version
- * and SHA-256. It says on its face that it's a demo and was never filed.
+ * and SHA-256. It says on its face that it's a demo and was never filed: the document's own notice opens with the D-2
+ * sentence (L2-T-016), and the intermediary field reads "Intermediary: pending — L2-Q3" (L2-T-025).
  */
 export default function FormC() {
   const { id = "" } = useParams();
@@ -38,7 +40,11 @@ function Doc({ d }: { d: { title: string; version: number; sha256: string; creat
   const money = (k: string) => (typeof b.offering?.[k] === "number" ? formatMoney(b.offering[k] as number) : "—");
   return (
     <>
-      <PageHeader eyebrow="Form C (mock)" title={d.title} description={b.notice ?? "Demo document. Not filed."} />
+      <PageHeader eyebrow="Form C (mock)" title={d.title} />
+      <Callout tone="warning" icon={<TriangleAlert />} title="Demo document — not filed">
+        {/* The document's own notice; older documents without it still show the D-2 sentence. */}
+        <span data-testid="form-c-notice">{b.notice?.includes(LAYER2_DEMO_TEXT) ? b.notice : `${LAYER2_DEMO_TEXT} ${b.notice ?? "Mock Form C; not filed with the SEC."}`}</span>
+      </Callout>
       <div className="flex flex-wrap gap-2 text-xs">
         <Badge tone="warning" icon={<FileText />}>Not filed — demo</Badge>
         <Badge tone="neutral">Version <span className="num">{d.version}</span></Badge>
@@ -50,7 +56,7 @@ function Doc({ d }: { d: { title: string; version: number; sha256: string; creat
         <dl className="divide-y divide-line">
           <KeyValue k="Issuer" v={b.issuer?.name ?? "—"} />
           <KeyValue k="Creator tier" v={b.issuer?.creatorTier ?? "—"} />
-          <KeyValue k="Intermediary" v={b.intermediary ?? "—"} />
+          <KeyValue k="Intermediary" v={<span data-testid="form-c-intermediary">{b.intermediary ?? INTERMEDIARY_LINE}</span>} />
         </dl>
       </Card>
       <Card>
@@ -102,6 +108,7 @@ function Doc({ d }: { d: { title: string; version: number; sha256: string; creat
         </Card>
       )}
       {b.tax && <p className="text-sm text-muted">Tax: {b.tax.characterization}</p>}
+      <IntermediaryPending />
     </>
   );
 }

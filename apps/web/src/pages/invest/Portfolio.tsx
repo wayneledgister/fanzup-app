@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import { ArrowRight, Briefcase, Lock } from "lucide-react";
 import { ArtistArt, Button, Card, Container, EmptyState, PageHeader, ProgressBar, RegulatoryFooter, Stat } from "@/components/brand";
 import { RequireAccount } from "@/components/RequireAccount";
-import { CollectionStateBadge, LoadGate, RiskBadgeChip, shortDate, StatusBadge, useLoad } from "@/components/invest/l2ui";
+import { CollectionStateBadge, displayStatus, LoadGate, RiskBadgeChip, shortDate, StatusBadge, useLoad } from "@/components/invest/l2ui";
 import { LimitMeter } from "@/components/invest/ui";
 import { l2, type InvestmentView } from "@/lib/l2";
 import { formatMoney } from "@/lib/format";
@@ -65,14 +65,14 @@ function Row({ i }: { i: InvestmentView }) {
   const lockDays = i.lockupEndsAt ? Math.max(0, Math.ceil((new Date(i.lockupEndsAt).getTime() - Date.now()) / 86_400_000)) : null;
   return (
     <li>
-      <Card className="flex flex-col gap-4" data-testid="holding-row" data-status={i.status} data-pool={i.poolSlug}>
+      <Card className="flex flex-col gap-4" data-testid="holding-row" data-status={displayStatus(i)} data-pool={i.poolSlug}>
         <div className="flex flex-wrap items-start gap-4">
           <ArtistArt seed={i.poolSlug} label={i.poolTitle} rounded="md" className="size-14 shrink-0" />
           <div className="min-w-0 flex-1 basis-48">
             <Link to={`/portfolio/${i.poolSlug}`} className="font-semibold hover:underline">{i.poolTitle}</Link>
             <p className="text-sm text-muted">{i.artistDisplay}</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              <StatusBadge status={i.status} />
+              <StatusBadge status={displayStatus(i)} />
               <RiskBadgeChip badge={i.riskBadge} />
               {i.status === "issued" && <CollectionStateBadge state={i.collectionState} />}
             </div>

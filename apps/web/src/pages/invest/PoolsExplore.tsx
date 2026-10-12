@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { ArrowRight, Disc3, SearchX } from "lucide-react";
 import { RISK_BADGE_COPY, REVENUE_TYPE_COPY, type RiskBadge } from "@fanzup/shared/l2";
-import { ArtistArt, Badge, Button, Card, Container, EmptyState, Field, PageHeader, ProgressBar, RegulatoryFooter, Select } from "@/components/brand";
+import { ArtistArt, Badge, Button, Card, Container, EmptyState, Field, PageHeader, ProgressBar, RegulatoryFooter, Select, TextInput } from "@/components/brand";
 import { InvestmentRiskDisclosure } from "@/components/brand";
 import { daysLeft, LoadGate, POOL_STATUS_COPY, RiskBadgeChip, useLoad } from "@/components/invest/l2ui";
 import { l2, type PoolCardView } from "@/lib/l2";
@@ -18,7 +18,14 @@ export default function PoolsExplore() {
   const [revenueType, setRevenueType] = useState("");
   const [badge, setBadge] = useState("");
   const [sort, setSort] = useState<"ending" | "newest">("ending");
-  const load = useLoad(() => l2.pools({ tab, revenueType, badge, sort }), [tab, revenueType, badge, sort]);
+  // Genre filter (round-1 review): free text, matched case-insensitively by the API; sent after a short pause in typing.
+  const [genreInput, setGenreInput] = useState("");
+  const [genre, setGenre] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setGenre(genreInput.trim()), 350);
+    return () => clearTimeout(t);
+  }, [genreInput]);
+  const load = useLoad(() => l2.pools({ tab, revenueType, badge, genre, sort }), [tab, revenueType, badge, genre, sort]);
 
   return (
     <Container size="xl" className="flex flex-col gap-8 py-8 sm:py-10">
@@ -37,7 +44,7 @@ export default function PoolsExplore() {
             </Button>
           ))}
         </div>
-        <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Revenue type" htmlFor="f-rev">
             <Select id="f-rev" value={revenueType} onChange={(e) => setRevenueType(e.target.value)}>
               <option value="">Any</option>
@@ -49,6 +56,9 @@ export default function PoolsExplore() {
               <option value="">Any</option>
               {(Object.keys(RISK_BADGE_COPY) as RiskBadge[]).map((b) => <option key={b} value={b}>{RISK_BADGE_COPY[b].label}</option>)}
             </Select>
+          </Field>
+          <Field label="Genre" htmlFor="f-genre">
+            <TextInput id="f-genre" value={genreInput} onChange={(e) => setGenreInput(e.target.value)} placeholder="Any" maxLength={40} autoComplete="off" />
           </Field>
           <Field label="Order" htmlFor="f-sort">
             <Select id="f-sort" value={sort} onChange={(e) => setSort(e.target.value as "ending" | "newest")}>
@@ -62,7 +72,7 @@ export default function PoolsExplore() {
       <LoadGate load={load} what="Pools">
         {({ pools }) =>
           pools.length === 0 ? (
-            <EmptyState icon={<SearchX />} title={tab === "live" ? "No Pools are open right now" : "No closed Pools match"}>
+            <EmptyState icon={<SearchX />} title={genre || revenueType || badge ? "No Pools match these filters" : tab === "live" ? "No Pools are open right now" : "No closed Pools yet"}>
               Try a different filter, or check back soon.
             </EmptyState>
           ) : (

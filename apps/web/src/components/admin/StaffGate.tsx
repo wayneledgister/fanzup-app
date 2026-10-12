@@ -96,16 +96,19 @@ export function ActionForm({ label, run, tone = "primary", testId, defaultReason
       const r = (await run(reason)) as StaffAction | undefined;
       const a = r && typeof r === "object" && "action" in r ? r.action : null;
       setMsg({ ok: true, text: a?.status === "scheduled" ? `Scheduled: runs after ${a.executeAfter ? formatInstant(a.executeAfter) : "the single-operator delay"} (cancellable).` : "Done." });
+      setReason(defaultReason);
     } catch (x) {
       setMsg({ ok: false, text: apiMessage(x) });
     } finally {
       setBusy(false);
     }
   };
+  // A valid, unique-per-action id (no spaces) so the label and the reason field stay associated.
+  const inputId = `r-${(testId ?? label).replace(/[^A-Za-z0-9_-]+/g, "-")}`;
   return (
     <form onSubmit={go} className="flex flex-col gap-2 sm:flex-row sm:items-end">
-      <Field label="Reason (goes in the audit log)" htmlFor={`r-${testId ?? label}`} className="flex-1">
-        <TextInput id={`r-${testId ?? label}`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="At least 10 characters" />
+      <Field label="Reason (goes in the audit log)" htmlFor={inputId} className="flex-1">
+        <TextInput id={inputId} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="At least 10 characters" minLength={10} />
       </Field>
       <Button type="submit" variant={tone} disabled={busy || reason.trim().length < 10} data-testid={testId}>{busy ? "Working…" : label}</Button>
       {msg && <p className={`text-sm ${msg.ok ? "text-success" : "text-error"}`} role="status">{msg.text}</p>}

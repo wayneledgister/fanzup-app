@@ -1,18 +1,19 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { ArrowLeft, CircleAlert, FileText, Lock } from "lucide-react";
-import { Button, Card, Checkbox, Container, InvestmentRiskDisclosure, KeyValue, PageHeader, RegulatoryFooter } from "@/components/brand";
+import { ArrowLeft, CircleAlert, FileText, Lock, RotateCcw } from "lucide-react";
+import { Button, Callout, Card, Checkbox, Container, InvestmentRiskDisclosure, KeyValue, PageHeader, RegulatoryFooter } from "@/components/brand";
 import { RequireAccount } from "@/components/RequireAccount";
-import { apiMessage, FormCLinkTo, LoadGate, RiskBadgeChip, useLoad } from "@/components/invest/l2ui";
-import { CancellationNotice, IntermediaryDisclosure, LimitMeter, OfferingEscrowNotice } from "@/components/invest/ui";
-import { l2, newKey, type InvestorMeView, type PoolDetailView } from "@/lib/l2";
+import { FormCLinkTo, IntermediaryPending, LoadGate, RiskBadgeChip, useLoad } from "@/components/invest/l2ui";
+import { CancellationNotice, LimitMeter, OfferingEscrowNotice } from "@/components/invest/ui";
+import { l2, l2ErrorCopy, newKey, TERMINAL_PURCHASE_CODES, type InvestorMeView, type PoolDetailView } from "@/lib/l2";
 import { formatInstant, formatMoney } from "@/lib/format";
 
 /**
  * Source: Fan Profile Setup DocumentReview.tsx, rebuilt on the API (CR-002, FR-L2-INV-004).
  * Order is fixed: risk disclosure → acknowledgments (versioned) → Units reserved → trade + fund move into the
- * offering's escrow → confirmation. The purchase is idempotent: the key is kept for this page view, so a double
- * click or a retry after a network error never creates a second investment.
+ * offering's escrow → confirmation. The purchase is idempotent (design §5): the key is kept for this page view, so a
+ * double click or a retry after a network error never creates a second investment. A stored final answer for the key
+ * (reservation expired, cancelled, returned, a rule refusal) needs a NEW key to start again — "Start again" makes one.
  */
 export default function DocumentReviewPage() {
   return (
@@ -51,8 +52,8 @@ function Review({ pool, me, units }: { pool: PoolDetailView; me: InvestorMeView;
   const navigate = useNavigate();
   const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const key = useMemo(() => newKey(), []);
+  const [err, setErr] = useState<ReturnType<typeof l2ErrorCopy> | null>(null);
+  const [key, setKey] = useState(() => newKey());
   const total = units * pool.unitPriceMinor;
   const allAck = ACKS.every((a) => acks[a.id]);
   const ready = me.kycStatus === "approved" && me.certified;
@@ -64,10 +65,15 @@ function Review({ pool, me, units }: { pool: PoolDetailView; me: InvestorMeView;
       const r = await l2.invest(pool.id, units, pool.riskAckVersion, key);
       navigate(`/invest/${pool.slug}/confirmation?investment=${r.investmentId}`);
     } catch (x) {
-      setErr(apiMessage(x));
+      setErr(l2ErrorCopy(x));
       setBusy(false);
     }
   };
+  const startAgain = () => {
+    setKey(newKey());
+    setErr(null);
+  };
+  const terminal = !!err && TERMINAL_PURCHASE_CODES.has(err.code);
 
   return (
     <>
@@ -95,7 +101,7 @@ function Review({ pool, me, units }: { pool: PoolDetailView; me: InvestorMeView;
       </Card>
       <OfferingEscrowNotice />
       <CancellationNotice cancelBy={pool.endsAt ? formatInstant(new Date(new Date(pool.endsAt).getTime() - pool.cancelCutoffHours * 3_600_000).toISOString()) : undefined} />
-      <IntermediaryDisclosure />
+      <IntermediaryPending />
       <Card className="flex flex-col gap-3" data-testid="acknowledgments">
         <p className="font-semibold text-fg">Before you confirm</p>
         {ACKS.map((a) => (
@@ -107,8 +113,20 @@ function Review({ pool, me, units }: { pool: PoolDetailView; me: InvestorMeView;
           Finish <Link className="underline" to={`/investor/certification?next=${encodeURIComponent(`/invest/${pool.slug}/documents?units=${units}`)}`}>investor verification</Link> first.
         </p>
       )}
-      {err && <p className="flex items-center gap-2 text-sm text-error" role="alert"><CircleAlert className="size-4" /> {err}</p>}
-      <Button size="lg" block disabled={!allAck || !ready || busy} onClick={confirm} data-testid="confirm-investment">
+      {err && (
+        <div role="alert" data-testid="purchase-error" data-code={err.code}>
+          <Callout tone="error" icon={<CircleAlert />} title={err.title}>
+            {err.body}{" "}
+            {terminal && (
+              <Button variant="ghost" size="sm" onClick={startAgain} data-testid="start-again"><RotateCcw /> Start again</Button>
+            )}
+            {err.next === "verify" && <Link className="font-medium text-gold underline-offset-4 hover:underline" to={`/investor/certification?next=${encodeURIComponent(`/invest/${pool.slug}/documents?units=${units}`)}`}>Investor verification</Link>}
+            {err.next === "pools" && <Link className="font-medium text-gold underline-offset-4 hover:underline" to="/pools">Browse Pools</Link>}
+            {err.next === "reload" && <Link className="font-medium text-gold underline-offset-4 hover:underline" to={`/pools/${pool.slug}`}>Back to the Pool</Link>}
+          </Callout>
+        </div>
+      )}
+      <Button size="lg" block disabled={!allAck || !ready || busy || terminal} onClick={confirm} data-testid="confirm-investment">
         <Lock /> {busy ? "Sending to escrow…" : `Invest ${formatMoney(total)}`}
       </Button>
     </>

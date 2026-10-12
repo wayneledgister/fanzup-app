@@ -11,7 +11,7 @@ import { accessToken } from "./supabase";
 const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "/api";
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string, public correlationId?: string) {
+  constructor(public status: number, public code: string, message: string, public correlationId?: string, public details?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -34,7 +34,7 @@ export async function request<T>(path: string, init: RequestInit & { auth?: bool
     throw new ApiError(0, "network", "We couldn't reach FanZuP. Check your connection and try again.");
   }
   const body = res.status === 204 || res.status === 202 ? null : await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, body?.error ?? "error", body?.message ?? "Something went wrong on our side.", body?.correlationId ?? res.headers.get("x-correlation-id") ?? undefined);
+  if (!res.ok) throw new ApiError(res.status, body?.error ?? "error", body?.message ?? "Something went wrong on our side.", body?.correlationId ?? res.headers.get("x-correlation-id") ?? undefined, body ?? undefined);
   return body as T;
 }
 
