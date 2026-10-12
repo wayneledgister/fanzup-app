@@ -76,7 +76,7 @@ export const POLICY = {
   /** FR-PRV-001. Placeholder documents until counsel-approved versions (P0b). */
   legal: { termsVersion: "2026-10-03-beta", privacyVersion: "2026-10-03-beta" },
 
-  // ── Layer 2 (CR-002, demo on mock rails). Mirrored in platform_settings by migration 20261005000200 (sync test). ──
+  // ── Layer 2 (CR-002, demo on mock rails). Mirrored in platform_settings by migration 20261011000300 (sync test). ──
   /**
    * Reg CF investor limits — REGULATORY figures, 17 CFR 227.100(a)(2) as amended (inflation adjustment effective
    * 2022-09-20). Verified 2026-10-03 against the SEC's "Regulation Crowdfunding inflation adjustments" notice

@@ -599,7 +599,7 @@ describe("clients have no access to any Layer 2 object (L2-T-037)", async () => 
   const { readdirSync, readFileSync } = await import("node:fs");
   const { join } = await import("node:path");
   const dir = join(import.meta.dirname, "../../../supabase/migrations");
-  const src = readdirSync(dir).filter((f) => /^20261005\d+_l2_.*\.sql$/.test(f)).map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+  const src = readdirSync(dir).filter((f) => /^\d{14}_l2_.*\.sql$/.test(f)).map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
   const names = (re: RegExp) => [...new Set([...src.matchAll(re)].map((m) => m[1]))];
   const tables = names(/create table public\.([a-z0-9_]+)/g);
   const views = names(/create (?:or replace )?(?:materialized )?view public\.([a-z0-9_]+)/g);
