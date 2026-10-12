@@ -409,6 +409,30 @@
         "status": "settled"
       },
       {
+        "id": "DP_seed_demo_q2",
+        "collectionAccountId": "ca_seed_demo",
+        "amount": 20000,
+        "reference": "Quarter 2",
+        "externalId": "9001a000-0000-4000-8000-000000000004",
+        "status": "settled"
+      },
+      {
+        "id": "DP_seed_demo_q3",
+        "collectionAccountId": "ca_seed_demo",
+        "amount": 20000,
+        "reference": "Quarter 3",
+        "externalId": "9001a000-0000-4000-8000-000000000004",
+        "status": "settled"
+      },
+      {
+        "id": "DP_seed_demo_q4",
+        "collectionAccountId": "ca_seed_demo",
+        "amount": 20000,
+        "reference": "Quarter 4",
+        "externalId": "9001a000-0000-4000-8000-000000000004",
+        "status": "settled"
+      },
+      {
         "id": "DP_seed_sol_q1",
         "collectionAccountId": "ca_seed_sol",
         "amount": 400000,
