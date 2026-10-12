@@ -243,6 +243,10 @@ describe("Waterfall commit (01a AC-W1–W6; L2-T-024)", () => {
     await refused(val(sql, (tx) => tx`select public.record_pool_payout_confirmed(${inv1.id}, 'po-1', ${n(inv1.amount_minor) + 1}, 'payout:po-1', ${now})`), "payout_amount_mismatch");
     expect(await val(sql, (tx) => tx`select public.record_pool_payout_confirmed(${inv1.id}, 'po-1', ${n(inv1.amount_minor)}, 'payout:po-1', ${now})`)).toBe("applied");
     expect(await val(sql, (tx) => tx`select public.record_pool_payout_confirmed(${inv1.id}, 'po-1', ${n(inv1.amount_minor)}, 'payout:po-1', ${now})`)).toBe("duplicate");
+    // 1099-DIV data row (Mechanism 04 default, L2-Q6), for the confirmation's tax year, counted once.
+    const tax = await svc(sql, (tx) => tx<{ tax_year: number; form: string; box: string; amount_minor: bigint }[]>`
+      select tax_year, form, box, amount_minor from public.tax_1099_rows where pool_id = ${p.id}`);
+    expect(tax).toEqual([{ tax_year: now.getUTCFullYear(), form: "1099-DIV", box: "1a", amount_minor: inv1.amount_minor }]);
   });
 
   it("fans equality: moving fan cents to the creator while a holder is under its cap is refused allocation_invalid", async () => {
