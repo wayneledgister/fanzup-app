@@ -5,16 +5,20 @@ import { Button, Callout } from "@/components/brand";
 import { AuthCard, StepsList } from "@/components/public/auth";
 import { safeNext, supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/session";
+import { api } from "@/lib/api";
 
 /**
  * Source: FPS EmailVerification.tsx (pending with resend cooldown, resent, verified, expired).
  * M1 (FR-ID-001, FR-BCK-002; card G1-B option 3): the confirmation link from Supabase lands here signed in;
  * once the email is confirmed the fan is forwarded to `next` (checkout with the same campaign and perk).
- * Cross-device (G2 condition 13): opening the link on another device signs that device in and forwards it;
- * the first device can continue with "I've verified — continue", which re-checks the session.
+ * Cross-device (G2 condition 13): opening the link on another device signs that device in and forwards it; the first
+ * device has no session until then, so it logs in after confirming elsewhere ("I've verified — continue" → log in).
+ * Another tab of the same browser is picked up automatically (Supabase cross-tab broadcast + `storage` event).
  */
 
 const COOLDOWN = 60;
+/** supabase-js's localStorage key for the session (`sb-<project-ref>-auth-token`). */
+const AUTH_KEY = /^sb-.+-auth-token$/;
 
 function linkError(): string | null {
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
@@ -39,6 +43,21 @@ export default function VerifyEmail() {
     if (!s.loading && s.session && s.emailVerified) navigate(next, { replace: true });
   }, [s.loading, s.session, s.emailVerified, next, navigate]);
 
+  // Same browser, another tab (design §11): the link opened in a new tab signs that tab in and writes the session to
+  // localStorage. Supabase broadcasts SIGNED_IN to this tab (SessionProvider listens), and as a fallback the `storage`
+  // event for its auth key reloads the session here; the effect above then carries on to `next`.
+  // Another device can't be detected: this tab has no session until the email is confirmed, so the fan logs in here
+  // after confirming elsewhere ("I've verified — continue" → log in).
+  const refresh = s.refresh;
+  useEffect(() => {
+    if (expired || !supabase) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key && AUTH_KEY.test(e.key) && e.newValue) void refresh().catch(() => { /* keep the button */ });
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [expired, refresh]);
+
   useEffect(() => {
     if (wait <= 0) return;
     const t = setTimeout(() => setWait((w) => w - 1), 1000);
@@ -55,10 +74,15 @@ export default function VerifyEmail() {
   const continueNow = async () => {
     setChecking(true);
     setNotYet(false);
-    if (s.session) await s.refresh();
+    if (!s.session) {
+      setChecking(false);
+      return navigate(`/login?next=${encodeURIComponent(next)}`);
+    }
+    const verified = await api.me().then((m) => m.emailVerified).catch(() => false);
+    await s.refresh();
     setChecking(false);
-    if (!s.session) return navigate(`/login?next=${encodeURIComponent(next)}`);
-    setNotYet(true); // the effect above navigates if the refresh found a verified email
+    if (verified) return navigate(next, { replace: true });
+    setNotYet(true);
   };
 
   if (s.session && s.emailVerified) {

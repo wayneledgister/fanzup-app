@@ -32,7 +32,7 @@ function misconfiguredApp(error: unknown) {
 /** Build the app once per process. Never rejects: bad config yields the 503 app instead. */
 async function createApp(): Promise<{ app: FastifyInstance; env: Env | null }> {
   try {
-    const env = loadEnv();
+    const env = loadEnv(process.env, { requireWebhookSecret: true });
     const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
     const app = await buildApp({ env, sql, provider: createProvider(env, sql), regcf: createRegCf(env), verify: createVerifier(env) });
     app.addHook("onClose", async () => {
@@ -69,7 +69,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   }
 }
 
-// Everywhere else (local dev, Render, tests via `node dist/server.js`): listen on a port.
+// Everywhere else (local dev, Render, `node dist/server.cjs`): listen on a port.
 if (!process.env.VERCEL) {
   ready
     .then(async ({ app, env }) => {

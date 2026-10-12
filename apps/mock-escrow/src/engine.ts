@@ -42,6 +42,21 @@ export const DEFAULT_DELAYS = { kyc: 2, fund: 3, refund: 2, disbursement: 2, dep
 
 type Obj = Record<string, unknown> & { id: string };
 
+/** One escrow or collection-account movement, as listTransactions returns it (design §5.1). */
+export interface ProviderTxn {
+  id: string;
+  kind: "fund_move" | "refund" | "disbursement" | "deposit" | "payout";
+  /** pending | settled | returned (fund moves only) */
+  status: string;
+  amount: number;
+  externalId: string | null;
+  tradeId: string | null;
+  returnCode: string | null;
+  reference: string | null;
+  /** settledAt, else createdAt (ISO) */
+  at: string;
+}
+
 const SCHEMA = `
 create table if not exists objects (id text primary key, type text not null, data text not null, created_at integer not null);
 create index if not exists objects_type on objects (type);
@@ -99,6 +114,7 @@ export class MockEscrowEngine {
 
   // ── Storage helpers ───────────────────────────────────────────────────
   private put(type: string, obj: Obj) {
+    if (obj.createdAt === undefined) obj.createdAt = new Date(this.now()).toISOString();
     this.db.prepare("insert into objects (id, type, data, created_at) values (?, ?, ?, ?) on conflict (id) do update set data = excluded.data")
       .run(obj.id, type, JSON.stringify(obj), this.now());
     return obj;
@@ -129,7 +145,12 @@ export class MockEscrowEngine {
     this.db.prepare("insert into webhooks (id, type, body, next_at, created_at) values (?, ?, ?, ?, ?)").run(evt.id, type, JSON.stringify(evt), Date.now(), Date.now());
   }
 
-  /** Idempotency (TransactAPI-style): replay returns the stored response; a different body under the same key is refused. */
+  /**
+   * Idempotency (TransactAPI-style): replay returns the stored response; a different body under the same key is refused.
+   * Keys are PERMANENT: they never expire with time (the virtual clock included) and survive restarts (the sqlite file);
+   * only `POST /admin/reset` clears them. FanZuP's keys name one money movement ever (design §5), so a real provider
+   * must keep keys at least as long — see ADR-007 "Prerequisites for a real adapter".
+   */
   idempotent<T>(key: string | undefined, scope: string, body: unknown, fn: () => T): T {
     if (!key || key.length < 8 || key.length > 200) throw new MockError(400, "idempotency_key_required", "Send an Idempotency-Key header (8–200 chars).");
     const h = hash({ scope, body });
@@ -225,6 +246,7 @@ export class MockEscrowEngine {
   fundTrade(tradeId: string, input: { amount: number; externalId: string }, idem?: string) {
     return this.idempotent(idem, "fundTrade", { tradeId, ...input }, () => {
       const t = this.get("trade", tradeId);
+      if (t.status === "cancelled") throw new MockError(409, "trade_cancelled", "The trade was cancelled.");
       if (t.status !== "created") throw new MockError(409, "trade_state", `Trade is ${t.status}.`);
       if (input.amount !== t.amount) throw new MockError(400, "invalid_request", "Fund amount must equal the trade amount.");
       const fm = this.put("fundMove", { id: this.newId("FM"), tradeId, offeringId: t.offeringId, amount: input.amount, externalId: input.externalId, status: "pending" });
@@ -234,8 +256,62 @@ export class MockEscrowEngine {
     });
   }
 
+  /** The trade and every fund move made for it (design §4.3 lookup). */
   getTrade(id: string) {
-    return this.get("trade", id);
+    const t = this.get("trade", id);
+    return { ...t, fundMoves: this.list("fundMove", (f) => f.tradeId === id) };
+  }
+
+  /** Lookup by our id (the investment id sent as externalId at createTrade). Null when no trade exists. */
+  findTrade(q: { externalId: string }) {
+    if (!q.externalId) throw new MockError(400, "invalid_request", "externalId is required");
+    const t = this.list("trade", (x) => x.externalId === q.externalId)[0];
+    return t ? this.getTrade(t.id) : null;
+  }
+
+  /** Void a trade that has no fund move (design §4.3). Refused `trade_funded` once a fund move exists. */
+  cancelTrade(tradeId: string, idem?: string) {
+    return this.idempotent(idem, "cancelTrade", { tradeId }, () => {
+      const t = this.get("trade", tradeId);
+      if (t.status === "cancelled") return t;
+      if (t.status !== "created" || this.list("fundMove", (f) => f.tradeId === tradeId).length) {
+        throw new MockError(409, "trade_funded", "A fund move exists for this trade; it can't be cancelled.");
+      }
+      const out = this.patch("trade", tradeId, { status: "cancelled", cancelledAt: new Date(this.now()).toISOString() });
+      this.emit("trade.cancelled", { tradeId, offeringId: t.offeringId, externalId: t.externalId });
+      return out;
+    });
+  }
+
+  /**
+   * Every movement of an offering's escrow or a collection account (design §5.1 ref matching): fund moves (pending,
+   * settled or returned), refunds, disbursements, deposits and payouts, oldest first, optionally since an ISO time.
+   */
+  listTransactions(q: { offeringId?: string; collectionAccountId?: string; since?: string }): { data: ProviderTxn[] } {
+    if (!q.offeringId === !q.collectionAccountId) throw new MockError(400, "invalid_request", "Pass offeringId or collectionAccountId.");
+    const since = q.since ? Date.parse(q.since) : -Infinity;
+    if (Number.isNaN(since)) throw new MockError(400, "invalid_request", "since must be an ISO date-time");
+    const row = (kind: ProviderTxn["kind"], o: Obj): ProviderTxn => ({
+      id: o.id, kind, status: String(o.status), amount: Number(o.amount), externalId: (o.externalId as string | undefined) ?? null,
+      tradeId: (o.tradeId as string | undefined) ?? null, returnCode: (o.returnCode as string | undefined) ?? null,
+      reference: (o.reference as string | undefined) ?? null, at: String(o.settledAt ?? o.createdAt),
+    });
+    let rows: ProviderTxn[];
+    if (q.offeringId) {
+      this.get("offering", q.offeringId);
+      rows = [
+        ...this.list("fundMove", (f) => f.offeringId === q.offeringId).map((f) => row("fund_move", f)),
+        ...this.list("refund", (r) => r.offeringId === q.offeringId).map((r) => row("refund", r)),
+        ...this.list("disbursement", (d) => d.offeringId === q.offeringId).map((d) => row("disbursement", d)),
+      ];
+    } else {
+      this.get("collectionAccount", q.collectionAccountId!);
+      rows = [
+        ...this.list("deposit", (d) => d.collectionAccountId === q.collectionAccountId).map((d) => row("deposit", d)),
+        ...this.list("payout", (p) => p.collectionAccountId === q.collectionAccountId).map((p) => row("payout", p)),
+      ];
+    }
+    return { data: rows.filter((r) => Date.parse(r.at) >= since).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : 1)) };
   }
 
   refundTrade(tradeId: string, input: { amount: number; externalId: string }, idem?: string) {

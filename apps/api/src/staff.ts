@@ -26,8 +26,7 @@ export async function requireStaff(req: FastifyRequest, d: Pick<Deps, "verify" |
 }
 
 export async function singleOperatorMode(sql: Sql): Promise<boolean> {
-  const [r] = await asService(sql, (tx) => tx<{ on: boolean }[]>`
-    select coalesce((select (value #>> '{}')::boolean from public.platform_settings where key = 'single_operator_mode'), true) as on`);
+  const [r] = await asService(sql, (tx) => tx<{ on: boolean }[]>`select public.single_operator_mode() as on`);
   return r.on;
 }
 
@@ -54,7 +53,7 @@ interface ActionRow {
 }
 
 type ActionDeps = Pick<Deps, "sql" | "provider"> & { regcf?: Deps["regcf"] };
-type Executor = (d: ActionDeps, a: ActionRow) => Promise<void>;
+type Executor = (d: ActionDeps, a: ActionRow) => Promise<unknown>;
 
 const EXECUTORS: Record<ActionName, Executor> = {
   "campaign.review": async (d, a) => {
@@ -83,7 +82,22 @@ const EXECUTORS: Record<ActionName, Executor> = {
        where id = ${a.subject_id} and status in ('dead', 'failed') returning id`);
     if (!r) throw new HttpError(409, "not_replayable", "Only dead-lettered or failed operations can be replayed.");
   },
-  "weekly_review.signoff": async () => undefined, // the sign-off row is written by the route itself
+  // The sign-off row is written by the executor, so it exists only if the action executed (PR #8 review fix 10).
+  "weekly_review.signoff": async (d, a) => {
+    const p = a.params as { weekStart: string; note?: string | null };
+    try {
+      const [row] = await asService(d.sql, (tx) => tx`
+        insert into public.review_signoffs (week_start, actor_id, note, action_count)
+        select ${p.weekStart}::date, ${a.actor_id}, ${p.note ?? null}, count(*)
+          from public.privileged_actions
+         where action <> 'weekly_review.signoff' and created_at >= ${p.weekStart}::date and created_at < ${p.weekStart}::date + 7
+        returning *`);
+      return row;
+    } catch (e) {
+      if ((e as { code?: string }).code === "23505") throw new HttpError(409, "already_signed", "That week is already signed off.");
+      throw e;
+    }
+  },
   // ── Layer 2 (CR-002). Reviewer ≠ owner is enforced here (campaignOwner) and again in SQL. ──
   "pool.review": async (d, a) => {
     const p = a.params as { decision: string; notes?: string };
@@ -142,10 +156,31 @@ async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | n
   return rows[0].owner_id;
 }
 
+export interface ActionResult {
+  id: string;
+  status: "scheduled" | "executed";
+  executeAfter: string | null;
+  /** The request's correlation id, so an operator can open `GET /staff/trace/:correlationId` (PR #9, exit test 4). */
+  correlationId: string | null;
+  /** What the executor returned (e.g. the sign-off row); not part of the HTTP `action` object. */
+  result?: unknown;
+}
+
+/**
+ * Record a privileged action and run it now or schedule it.
+ *
+ * Claiming (PR #8 review fix 1): an immediate action is inserted already `executing`, so neither the worker nor a
+ * cancel can touch it; a delayed one is inserted `scheduled`, and only `executeDueActions` (which claims it with
+ * `scheduled → executing` under `for update skip locked`) or `cancelAction` (only from `scheduled`) can move it.
+ * Final updates are conditional on `executing`, so every action runs at most once.
+ *
+ * Daily limits (review fix 7): the check and the insert run in one transaction under a per-action-type advisory
+ * lock, so two concurrent requests can't both fit under the same limit.
+ */
 export async function privileged(
   d: ActionDeps,
   input: { action: ActionName; subjectId: string | null; reason: unknown; amountMinor?: number | null; params?: Record<string, unknown> },
-) {
+): Promise<ActionResult> {
   const c = currentCtx();
   if (!c?.actorId || c.actorKind !== "staff" || c.aal !== "aal2") throw new HttpError(403, "second_factor_required", "Staff session with second factor required.");
   const reason = typeof input.reason === "string" ? input.reason.trim() : "";
@@ -156,29 +191,40 @@ export async function privileged(
 
   const single = await singleOperatorMode(d.sql);
   const amount = input.amountMinor ?? null;
-  let delayed = false;
-  if (single && MONEY_ACTIONS.has(input.action)) {
-    const [day] = await asService(d.sql, (tx) => tx<{ refunds: bigint; verifications: bigint }[]>`
-      select coalesce(sum(amount_minor) filter (where action = 'backing.refund'), 0) as refunds,
-             count(*) filter (where action = 'tranche.verify') as verifications
-        from public.privileged_actions
-       where status in ('scheduled', 'executed') and created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'`);
-    if (input.action === "backing.refund" && n(day.refunds) + (amount ?? 0) > POLICY.singleOperator.dailyLimits.refundsMinor) {
-      throw new HttpError(409, "daily_limit", "This would pass today's refund limit for single-operator mode. It resets at midnight UTC.");
-    }
-    if (input.action === "tranche.verify" && n(day.verifications) >= POLICY.singleOperator.dailyLimits.verifications) {
-      throw new HttpError(409, "daily_limit", "Today's verification limit for single-operator mode is reached. It resets at midnight UTC.");
-    }
-    delayed = (amount ?? 0) > POLICY.singleOperator.delayAboveMinor;
-  }
+  const money = single && MONEY_ACTIONS.has(input.action);
   // A recon override lifts the payout pause for everyone, so it always waits out the delay (G1 N4).
-  if (single && input.action === "recon.override") delayed = true;
+  const delayed = (money && (amount ?? 0) > POLICY.singleOperator.delayAboveMinor) || (single && input.action === "recon.override");
+  const delayHours = delayed ? POLICY.singleOperator.delayHours : 0;
 
   const [row] = await asService(d.sql, async (tx) => {
+    if (money) {
+      await tx`select pg_advisory_xact_lock(hashtext(${"privileged_actions:" + input.action}))`;
+      const [day] = await tx<{ refunds: bigint; verifications: bigint }[]>`
+        select coalesce(sum(amount_minor) filter (where action = 'backing.refund'), 0) as refunds,
+               count(*) filter (where action = 'tranche.verify') as verifications
+          from public.privileged_actions
+         where status in ('scheduled', 'executing', 'executed') and created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'`;
+      if (input.action === "backing.refund" && n(day.refunds) + (amount ?? 0) > POLICY.singleOperator.dailyLimits.refundsMinor) {
+        throw new HttpError(409, "daily_limit", "This would pass today's refund limit for single-operator mode. It resets at midnight UTC.");
+      }
+      if (input.action === "tranche.verify" && n(day.verifications) >= POLICY.singleOperator.dailyLimits.verifications) {
+        throw new HttpError(409, "daily_limit", "Today's verification limit for single-operator mode is reached. It resets at midnight UTC.");
+      }
+    }
+    // A delayed staff refund must not run at or after the campaign's deadline (design §9; review round 2).
+    if (delayed && input.action === "backing.refund") {
+      const [late] = await tx<{ late: boolean }[]>`
+        select now() + make_interval(hours => ${delayHours}) >= c.ends_at as late
+          from public.backings b join public.campaigns c on c.id = b.campaign_id where b.id = ${input.subjectId}`;
+      if (late?.late) {
+        throw new HttpError(409, "refund_after_deadline",
+          "This refund would run after the campaign ends. If the campaign misses its goal every backer is refunded automatically; refunds from a funded campaign arrive in M2.");
+      }
+    }
     const rows = await tx<ActionRow[]>`
-      insert into public.privileged_actions (action, subject_id, actor_id, aal, reason, amount_minor, params, execute_after)
+      insert into public.privileged_actions (action, subject_id, actor_id, aal, reason, amount_minor, params, status, execute_after)
       values (${input.action}, ${input.subjectId}, ${c.actorId}, ${c.aal}, ${reason}, ${amount}, ${tx.json((input.params ?? {}) as never)},
-              now() + make_interval(hours => ${delayed ? POLICY.singleOperator.delayHours : 0}))
+              ${delayed ? "scheduled" : "executing"}, now() + make_interval(hours => ${delayHours}))
       returning *`;
     await tx`insert into public.audit_events (action, entity, entity_id, data)
              values (${"staff." + input.action + (delayed ? ".scheduled" : ".requested")}, 'privileged_action', ${rows[0].id},
@@ -189,25 +235,54 @@ export async function privileged(
   return execute(d, row);
 }
 
-async function execute(d: ActionDeps, a: ActionRow) {
-  try {
-    await EXECUTORS[a.action](d, a);
-    await asService(d.sql, async (tx) => {
-      await tx`update public.privileged_actions set status = 'executed', executed_at = now() where id = ${a.id}`;
-      await tx`insert into public.audit_events (action, entity, entity_id) values (${"staff." + a.action + ".executed"}, 'privileged_action', ${a.id})`;
-    });
-    return { id: a.id, status: "executed", executeAfter: null as string | null, correlationId: a.correlation_id };
-  } catch (e) {
-    const msg = redact(String((e as { detail?: string; message?: string }).detail ?? (e as Error).message ?? e));
-    await asService(d.sql, (tx) => tx`update public.privileged_actions set status = 'failed', error = ${msg} where id = ${a.id}`);
-    throw e;
-  }
+/** Error code for the audit trail (audit payloads carry ids and codes only, NFR-COMP-11). */
+function errorCode(e: unknown): string {
+  if (e instanceof HttpError) return e.code;
+  const pg = e as { code?: string; message?: string };
+  if (pg.code === "P0001" && pg.message && /^[a-z_]{3,60}$/.test(pg.message)) return pg.message;
+  return pg.code ?? "error";
 }
 
-/** Worker step: run scheduled actions whose delay has passed, as their original actor. */
+/** Run an action this process has claimed (`status = 'executing'`). */
+async function execute(d: ActionDeps, a: ActionRow): Promise<ActionResult> {
+  let result: unknown;
+  try {
+    result = await EXECUTORS[a.action](d, a);
+  } catch (e) {
+    const msg = redact(String((e as { detail?: string; message?: string }).detail ?? (e as Error).message ?? e));
+    await asService(d.sql, async (tx) => {
+      const [r] = await tx`update public.privileged_actions set status = 'failed', error = ${msg}, executed_at = now()
+                            where id = ${a.id} and status = 'executing' returning id`;
+      if (r) {
+        await tx`insert into public.audit_events (action, entity, entity_id, data)
+                 values (${"staff." + a.action + ".failed"}, 'privileged_action', ${a.id}, ${tx.json({ error_code: errorCode(e) })})`;
+      }
+    });
+    throw e;
+  }
+  await asService(d.sql, async (tx) => {
+    const [r] = await tx`update public.privileged_actions set status = 'executed', executed_at = now()
+                          where id = ${a.id} and status = 'executing' returning id`;
+    if (!r) {
+      log("alert", "staff_action.claim_lost", { actionId: a.id, action: a.action });
+      return;
+    }
+    await tx`insert into public.audit_events (action, entity, entity_id) values (${"staff." + a.action + ".executed"}, 'privileged_action', ${a.id})`;
+  });
+  return { id: a.id, status: "executed", executeAfter: null, correlationId: a.correlation_id, result };
+}
+
+/**
+ * Worker step: claim scheduled actions whose delay has passed (`scheduled → executing`, skip-locked, so two workers
+ * never take the same row and a cancel can't race the run) and execute them as their original actor.
+ */
 export async function executeDueActions(d: ActionDeps, now = new Date()) {
   const due = await asService(d.sql, (tx) => tx<ActionRow[]>`
-    select * from public.privileged_actions where status = 'scheduled' and execute_after <= ${now} order by execute_after limit 20`);
+    update public.privileged_actions set status = 'executing'
+     where id in (select id from public.privileged_actions
+                   where status = 'scheduled' and execute_after <= ${now}
+                   order by execute_after for update skip locked limit 20)
+    returning *`);
   for (const a of due) {
     await runWithCtx({ correlationId: a.correlation_id, actorId: a.actor_id, actorKind: "staff", aal: a.aal }, async () => {
       try {
@@ -220,9 +295,12 @@ export async function executeDueActions(d: ActionDeps, now = new Date()) {
   return due.length;
 }
 
+/** Cancel a scheduled action. Only `scheduled` can be cancelled; once claimed (`executing`) it runs to the end. */
 export async function cancelAction(sql: Sql, id: string, reason: string) {
-  const [r] = await asService(sql, (tx) => tx<{ id: string }[]>`
-    update public.privileged_actions set status = 'cancelled', error = ${"cancelled: " + reason} where id = ${id} and status = 'scheduled' returning id`);
-  if (!r) throw new HttpError(409, "not_cancellable", "Only scheduled actions can be cancelled.");
-  await asService(sql, (tx) => tx`insert into public.audit_events (action, entity, entity_id) values ('staff.action.cancelled', 'privileged_action', ${id})`);
+  await asService(sql, async (tx) => {
+    const [r] = await tx<{ id: string }[]>`
+      update public.privileged_actions set status = 'cancelled', error = ${"cancelled: " + reason} where id = ${id} and status = 'scheduled' returning id`;
+    if (!r) throw new HttpError(409, "not_cancellable", "Only scheduled actions can be cancelled.");
+    await tx`insert into public.audit_events (action, entity, entity_id) values ('staff.action.cancelled', 'privileged_action', ${id})`;
+  });
 }

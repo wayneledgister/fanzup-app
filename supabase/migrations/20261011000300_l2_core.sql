@@ -19,6 +19,12 @@ create type public.revenue_type as enum ('master', 'sync', 'publishing');
 create function public.l2_fail(p_code text, p_detail text) returns void language plpgsql set search_path = '' as $$
 begin raise exception using errcode = 'P0001', message = p_code, detail = p_detail; end $$;
 
+-- Rule-detail sentences show money in dollars ("$1,234.56"), never raw cents (PR #11 review round 1).
+create function public.l2_usd(p_minor bigint) returns text language sql immutable set search_path = '' as $$
+  select case when p_minor < 0 then '-' else '' end || '$' || to_char(abs(p_minor) / 100, 'FM999,999,999,999,990')
+         || '.' || lpad((abs(p_minor) % 100)::text, 2, '0')
+$$;
+
 -- ── Flag (FR-PLT-001 slice; design §2). Off by default; local/CI seed turns it on. ──
 insert into public.platform_settings (key, value) values ('flag.layer2', 'false');
 create function public.l2_enabled() returns boolean language sql stable security definer set search_path = '' as $$
@@ -31,8 +37,8 @@ end $$;
 
 -- ── Policy mirrors (packages/shared/src/policy.ts; a sync test keeps them equal) ──
 insert into public.platform_settings (key, value) values
-  ('regcf_limits', '{"floor_minor": 250000, "threshold_minor": 12400000, "low_bps": 500, "high_bps": 1000}'),
-  ('l2_policy', '{"reserve_minutes": 30, "settle_grace_minutes": 10, "cancel_cutoff_hours": 48, "lockup_months": 12, "period_months": 3, "settlement_due_days": 45, "cure_days": 30, "blocked_states": [], "risk_ack_version": "2026-10-03-demo"}');
+  ('regcf_limits', '{"floor_minor": 250000, "threshold_minor": 12400000, "low_bps": 500, "high_bps": 1000, "issuer_cap_minor": 500000000, "min_offering_days": 21}'),
+  ('l2_policy', '{"reserve_minutes": 30, "settle_grace_minutes": 10, "cancel_cutoff_hours": 48, "lockup_months": 12, "period_months": 3, "settlement_due_days": 45, "cure_days": 30, "blocked_states": [], "risk_ack_version": "2026-10-03-demo", "deadline_min_days": 21, "deadline_max_days": 60, "expiry_lookup_grace_minutes": 5, "refund_direct_business_days": 5}');
 create function public.l2_policy(p_key text) returns jsonb language sql stable security definer set search_path = '' as $$
   select (select value from public.platform_settings where key = 'l2_policy') -> p_key
 $$;
@@ -70,7 +76,8 @@ create table public.pools (
   min_units integer not null default 1 check (min_units >= 1),
   target_minor bigint not null check (target_minor >= 100000),               -- $1,000 minimum target
   max_minor bigint generated always as (units_total::bigint * unit_price_minor) stored,
-  duration_days smallint not null default 30 check (duration_days between 14 and 60),
+  -- 17 CFR 227.303(e)(3)(i): never less than 21 days between launch and the deadline (POLICY.regCf.minOfferingDays).
+  duration_days smallint not null default 30 check (duration_days between 21 and 60),
   return_cap_bps integer not null default 15000 check (return_cap_bps between 10000 and 30000),
   maturity_months integer not null default 60 check (maturity_months between 12 and 120),
   distribution_frequency text not null default 'quarterly' check (distribution_frequency in ('quarterly')),
@@ -82,6 +89,13 @@ create table public.pools (
   tier_at_submission public.creator_tier,
   cap_minor_at_submission bigint,
   form_c_document_id uuid,
+  -- Issuer cap (design §4.1): Reg CF sales by the creator, its 227.100(c) affiliates and predecessors in the preceding
+  -- 12 months on other platforms, attested at submit and re-attested at launch (L2-Q12); the remaining cap launch checked.
+  issuer_other_regcf_12m_minor bigint not null default 0 check (issuer_other_regcf_12m_minor >= 0),
+  issuer_other_regcf_attested_at timestamptz,
+  issuer_cap_remaining_minor bigint check (issuer_cap_remaining_minor >= 0),
+  -- Hash of the offering terms at submission (l2_pool_terms_hash); approve and launch refuse if they changed.
+  terms_sha256 text check (terms_sha256 is null or terms_sha256 ~ '^[0-9a-f]{64}$'),
   provider_offering_ref text unique,
   provider_collection_ref text unique,
   -- Counters maintained only by the money functions.
@@ -232,6 +246,13 @@ create table public.investments (
   risk_ack_at timestamptz not null default now(),
   provider_trade_ref text unique,
   provider_fund_ref text unique,
+  -- Set (by the API, conditionally, design §5) in a committed transaction before the first provider call. From then on
+  -- the reservation is counted (limit headroom and Units) until the provider lookup or a fund-move event resolves it.
+  provider_call_started_at timestamptz,
+  -- Investor cancellation recorded while a provider call or fund move may still be in flight (design §3 Cancellation).
+  cancel_requested_at timestamptz,
+  -- What the fund move actually delivered (design §3.1); refunds and AC-E1 use it, never amount_minor.
+  funded_received_minor bigint check (funded_received_minor > 0),
   funded_at timestamptz,
   issued_at timestamptz,
   lockup_ends_at timestamptz,
@@ -313,3 +334,51 @@ returns public.risk_badge language sql immutable set search_path = '' as $$
                from unnest(case when cardinality(p_types) = 0 then '{master}'::public.revenue_type[] else p_types end) x)
   select case when tier >= 3 then 'SECURED_ISH' when tier = 2 then 'VERIFIED' else 'TRUST_BASED' end::public.risk_badge from t
 $$;
+
+-- ── Offering terms are frozen outside draft / revisions_requested (PR #10 final review) ──
+-- Edits are conditional updates under the Pool row lock: the trigger runs on the locked row, so a PATCH racing a submit
+-- either lands before it (and is in the submitted hash) or is refused. submit_pool stores l2_pool_terms_hash();
+-- review_pool (approve) and launch_pool refuse `terms_changed` if the hash no longer matches.
+create function public.l2_pool_terms(p public.pools) returns jsonb language sql immutable set search_path = '' as $$
+  select jsonb_build_object(
+    'slug', p.slug::text, 'title', p.title, 'artist_display', p.artist_display, 'genre', p.genre, 'release_date', p.release_date,
+    'tracklist', p.tracklist, 'story', p.story, 'risks', p.risks, 'use_of_funds', p.use_of_funds, 'revenue_types', p.revenue_types,
+    'fans_bps', p.fans_bps, 'creator_bps', p.creator_bps, 'platform_bps', p.platform_bps, 'units_total', p.units_total,
+    'unit_price_minor', p.unit_price_minor, 'min_units', p.min_units, 'target_minor', p.target_minor, 'duration_days', p.duration_days,
+    'return_cap_bps', p.return_cap_bps, 'maturity_months', p.maturity_months, 'distribution_frequency', p.distribution_frequency,
+    'collection_mechanism', p.collection_mechanism, 'artist_id', p.artist_id)
+$$;
+
+create function public.l2_pool_terms_hash(p_pool uuid) returns text language sql stable security definer set search_path = '' as $$
+  select encode(sha256(convert_to(jsonb_build_object(
+           'pool', public.l2_pool_terms(p),
+           'tranches', coalesce((select jsonb_agg(jsonb_build_object('seq', t.seq, 'pct', t.pct, 'milestone', t.milestone,
+                                   'evidence_required', t.evidence_required, 'target_date', t.target_date) order by t.seq)
+                                   from public.pool_tranches t where t.pool_id = p.id), '[]'::jsonb))::text, 'UTF8')), 'hex')
+    from public.pools p where p.id = p_pool
+$$;
+
+create function public.l2_pool_terms_guard() returns trigger language plpgsql set search_path = '' as $$
+begin
+  if old.status not in ('draft', 'revisions_requested') and public.l2_pool_terms(new) is distinct from public.l2_pool_terms(old) then
+    perform public.l2_fail('pool_not_editable', format('This Pool is %s; its terms can change only in draft or after revisions are requested.', old.status));
+  end if;
+  return new;
+end $$;
+create trigger pools_terms_frozen before update on public.pools for each row execute function public.l2_pool_terms_guard();
+
+create function public.l2_tranche_terms_guard() returns trigger language plpgsql set search_path = '' as $$
+declare v_pool uuid := coalesce(new.pool_id, old.pool_id); v_status public.pool_status;
+begin
+  if tg_op = 'UPDATE' and (new.seq, new.pct, new.milestone, new.evidence_required, new.target_date, new.pool_id)
+                          is not distinct from (old.seq, old.pct, old.milestone, old.evidence_required, old.target_date, old.pool_id) then
+    return new;
+  end if;
+  select status into v_status from public.pools where id = v_pool for update;
+  if found and v_status not in ('draft', 'revisions_requested') then
+    perform public.l2_fail('pool_not_editable', format('This Pool is %s; its milestones can change only in draft or after revisions are requested.', v_status));
+  end if;
+  return coalesce(new, old);
+end $$;
+create trigger pool_tranches_terms_frozen before insert or update or delete on public.pool_tranches
+  for each row execute function public.l2_tranche_terms_guard();

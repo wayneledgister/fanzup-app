@@ -211,6 +211,12 @@ describe("FR-PAY-007: reconciliation", () => {
       provider: "sandbox", eventId: `evt_stray_${randomUUID()}`, type: "transfer.created", livemode: false, account: null,
       objectRef: "sbx_tr_stray", amountMinor: 123, currency: "usd", metadata: { campaign_id: ids.solCampaign }, raw: {},
     });
+    // Received just now and not processed yet: in flight (design §7 allowance), not a break.
+    const young = await runReconciliation(k.sql, k.provider);
+    expect(young.breaks.some((b) => b.refs.ref === "sbx_tr_stray")).toBe(false);
+    expect(young.inFlight.map((t) => t.ref)).toContain("sbx_tr_stray");
+    // Past recon.inflightGraceMinutes it is a break.
+    await asService(k.sql, (tx) => tx`update public.provider_events set received_at = now() - make_interval(mins => ${POLICY.recon.inflightGraceMinutes + 1}) where object_ref = 'sbx_tr_stray'`);
     const r = await runReconciliation(k.sql, k.provider);
     expect(r.breaks.map((b) => b.kind)).toEqual(expect.arrayContaining(["campaign_diff", "unmatched_provider_txn"]));
     expect(r.diffMinor - baseline).toBe(-123);
@@ -242,10 +248,23 @@ describe("Stripe webhook endpoint (FR-PAY-002, FR-PAY-008)", () => {
     expect((await send(body)).statusCode).toBe(200);
     const id = JSON.parse(body).id;
     expect(await asService(k.sql, (tx) => tx`select 1 from public.provider_events where event_id = ${id}`)).toHaveLength(1);
-    const foreign = event({ account: "acct_not_ours", type: "account.updated", data: { object: { id: "acct_not_ours", object: "account" } } });
-    await send(foreign);
-    const row = await one(k.sql, (tx) => tx<{ status: string }[]>`select status from public.provider_events where event_id = ${JSON.parse(foreign).id}`);
-    expect(row.status).toBe("ignored");
+    // A connected account that isn't one of our artists': stored already `ignored` in the same insert, answered 200,
+    // and never processed (design §5; no account_mismatch 4xx).
+    const foreign = event({ account: "acct_not_ours", type: "payment_intent.succeeded", data: { object: { id: "pi_foreign", object: "payment_intent", amount: 1000, amount_received: 1000, currency: "usd", metadata: { campaign_id: ids.novaCampaign } } } });
+    const res = await send(foreign);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ received: true });
+    const fid = JSON.parse(foreign).id;
+    const read = () => one(k.sql, (tx) => tx<{ status: string; last_error: string; processed_at: Date | null; attempts: number }[]>`
+      select status, last_error, processed_at, attempts from public.provider_events where event_id = ${fid}`);
+    let row = await read();
+    expect(row).toMatchObject({ status: "ignored", last_error: "account_not_ours", attempts: 0 });
+    expect(row.processed_at).toBeInstanceOf(Date);
+    await new Promise((r) => setTimeout(r, 50));
+    await processPendingEvents(k.sql, k.provider);
+    row = await read();
+    expect(row).toMatchObject({ status: "ignored", attempts: 0 });
+    expect(await asService(k.sql, (tx) => tx`select 1 from public.ledger_transactions where external_ref = 'pi_foreign'`)).toHaveLength(0);
     await app.close();
   });
 });
@@ -267,6 +286,24 @@ describe("Stripe adapter contract (recorded payload shapes)", () => {
     const tr = normalizeStripeEvent({ id: "evt_4", object: "event", type: "transfer.created", livemode: false, data: { object: { id: "tr_1", object: "transfer", amount: 7000, currency: "usd", metadata: { outbound_op_id: "op2" } } } } as unknown as Stripe.Event);
     expect(tr).toMatchObject({ type: "transfer.created", objectRef: "tr_1", amountMinor: 7000 });
   });
+  it("findPayment searches PaymentIntents by metadata.backing_id and prefers a non-cancelled one (design §5)", async () => {
+    const queries: unknown[] = [];
+    // Recorded shape of GET /v1/payment_intents/search (trimmed to the fields the adapter reads).
+    const recorded = {
+      object: "search_result", url: "/v1/payment_intents/search", has_more: false, next_page: null,
+      data: [
+        { id: "pi_old", object: "payment_intent", status: "canceled", metadata: { backing_id: "b-1" } },
+        { id: "pi_live", object: "payment_intent", status: "requires_payment_method", metadata: { backing_id: "b-1" } },
+      ],
+    };
+    const fake = { paymentIntents: { search: async (q: unknown) => { queries.push(q); return recorded; } } } as unknown as Stripe;
+    const p = new StripeTestProvider({ secretKey: "sk_test_dummy", webhookSecret: null, publishableKey: null }, fake);
+    expect(await p.findPayment({ backingId: "b-1" })).toEqual({ paymentRef: "pi_live", status: "requires_payment_method" });
+    expect(queries[0]).toMatchObject({ query: "metadata['backing_id']:'b-1'" });
+    const none = new StripeTestProvider({ secretKey: "sk_test_dummy", webhookSecret: null, publishableKey: null },
+      { paymentIntents: { search: async () => ({ ...recorded, data: [] }) } } as unknown as Stripe);
+    expect(await none.findPayment({ backingId: "b-2" })).toBeNull();
+  });
   it("classifies errors: insufficient balance waits, connection/5xx/429 retry, the rest are permanent", () => {
     expect(classifyStripeError({ type: "StripeInvalidRequestError", code: "balance_insufficient" }).cls).toBe("wait_funds");
     expect(classifyStripeError({ type: "StripeConnectionError" }).cls).toBe("retry");
@@ -281,5 +318,14 @@ describe("Stripe adapter contract (recorded payload shapes)", () => {
     expect(refund).toEqual({ ref: "re_1", type: "refund", netMinor: -15000, feeMinor: 0, campaignId: "c1" });
     const transfer = mapBalanceTxn({ id: "txn_3", type: "transfer", net: -7000, fee: 0, source: { id: "tr_1", transfer_group: "campaign_c1", metadata: {} } } as unknown as Stripe.BalanceTransaction);
     expect(transfer).toMatchObject({ ref: "tr_1", type: "transfer", campaignId: "c1" });
+  });
+  it("maps only a top-up to platform_topup; payouts, stripe_fee and other adjustments stay adjustment (recon §7)", () => {
+    const bt = (type: string, net: number, source: unknown) => ({ id: `txn_${type}`, type, net, fee: 0, source } as unknown as Stripe.BalanceTransaction);
+    expect(mapBalanceTxn(bt("topup", 100_000, { id: "tu_1", metadata: {} }))).toEqual({ ref: "tu_1", type: "platform_topup", netMinor: 100_000, feeMinor: 0, campaignId: null });
+    // A top-up is never attributed to a campaign, even if its metadata says so.
+    expect(mapBalanceTxn(bt("topup", 500, { id: "tu_2", metadata: { campaign_id: "c1" } })).campaignId).toBeNull();
+    expect(mapBalanceTxn(bt("payout", -40_000, { id: "po_1", metadata: {} }))).toEqual({ ref: "txn_payout", type: "adjustment", netMinor: -40_000, feeMinor: 0, campaignId: null });
+    expect(mapBalanceTxn(bt("stripe_fee", -200, "fee_src"))).toEqual({ ref: "txn_stripe_fee", type: "adjustment", netMinor: -200, feeMinor: 0, campaignId: null });
+    expect(mapBalanceTxn(bt("adjustment", -1500, { id: "du_1", metadata: {} })).type).toBe("adjustment");
   });
 });

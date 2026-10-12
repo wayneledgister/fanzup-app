@@ -19,7 +19,7 @@ The founder's direct request overrides that sequencing **for a demo on mock rail
 
 ### Requirements
 - **Added:** a new requirements file for the change, `specs/l2/01-requirements.md` (FR-L2-*, NFR-L2-*), derived from PRD 01 §6.2–6.5, §8, §11, §11.1; PRD 01a §2–4; PRD 01b §1, §3, §5; Mechanisms 01, 03, 04, 07 (cited by ID; the PRD text itself is not in this public repo).
-- **Modified:** none of the v2 FRs. FR-PLT-001 (server-enforced flags) is **partly implemented** for `layer2` by this change (API + database enforcement; URL overrides still work in the web app for mock-only screens, see design §9).
+- **Modified:** none of the v2 FRs. FR-PLT-001 (server-enforced flags) is **partly implemented** for `layer2` by this change (API + database enforcement). The web app's `?flags=layer2` URL override (and `VITE_FLAG_LAYER2`) still reveals mock-only screens in the Vite dev server, but **production builds ignore it for `layer2`** and use the server's `flags.layer2` only (design §2; PR #10 review round 2, finding 6, and round 3, finding 9).
 - **Retired:** none.
 
 ### Design
@@ -53,3 +53,6 @@ Accept in v-now as a demo on mock rails. Keep the provider boundary shaped like 
 
 ## Decision
 **Accepted (v-now, demo on mock rails): Wayne, 2026-10-03** — direct request (quoted above). Production posture unchanged: `layer2` off in production; the mock provider can't run in a deployed environment.
+
+## Revisions
+- 2026-10-11: PR #10 review rounds 1–5 changed the requirements and design semantics (not the scope or the decision); see the post-gate delta in `specs/gates/L2-G1G2.md` and the change logs in `specs/l2/01-requirements.md` and `specs/l2/02-design.md`. Round 3 also corrected the URL-override note above (production builds ignore the `layer2` override).

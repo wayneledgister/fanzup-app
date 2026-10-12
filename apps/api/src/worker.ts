@@ -12,7 +12,8 @@ import { jobDeps } from "./app";
 import { createVerifier } from "./lib/auth";
 import { log, redact } from "./log";
 
-const env = loadEnv();
+// The worker never receives webhooks, so STRIPE_WEBHOOK_SECRET isn't required here (render.yaml omits it).
+const env = loadEnv(process.env, { requireWebhookSecret: false });
 const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
 const provider = createProvider(env, sql);
 const deps = jobDeps({ env, sql, provider, regcf: createRegCf(env), verify: createVerifier(env) });

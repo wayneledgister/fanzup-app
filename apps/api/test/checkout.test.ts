@@ -4,9 +4,12 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { POLICY } from "@fanzup/shared/policy";
+import { POLICY, processingFeeMinor } from "@fanzup/shared/policy";
 import { asService, n } from "../src/db";
-import { back, createUser, ids, kit, one, pay, tick, type Kit } from "./helpers";
+import { requestHash, scopedKey } from "../src/checkout";
+import { buildApp } from "../src/app";
+import type { PaymentProvider } from "../src/provider";
+import { back, balances, createUser, ids, kit, one, pay, tick, type Kit } from "./helpers";
 
 let k: Kit;
 let lastUnitPerk: string;
@@ -92,12 +95,158 @@ describe("FR-PAY-006: atomic, retry-safe backing creation", () => {
     expect(second.json().backingId).toBe(rows[0].id);
   });
 
-  it("a rejected request releases its key so the fan can retry after fixing the problem", async () => {
+  it("a rejected request stores its error on the key (same key → same error); a new key can succeed", async () => {
     const f = await createUser(k.sql);
     const bad = await back(k, f.auth, { campaignId: ids.novaCampaign, perkId: ids.solPerkGA }, "k-fixable-001");
     expect(bad.statusCode).toBe(404);
+    const again = await back(k, f.auth, { campaignId: ids.novaCampaign, perkId: ids.solPerkGA }, "k-fixable-001");
+    expect(again.statusCode).toBe(404);
+    expect(again.json().error).toBe("perk_not_found");
     const good = await back(k, f.auth, { campaignId: ids.solCampaign, perkId: ids.solPerkGA }, "k-fixable-002");
     expect(good.statusCode).toBe(201);
+  });
+
+  it("a rule violation is replayed for its key even after the cause goes away (design §4.4 step 2d)", async () => {
+    const perk = randomUUID();
+    await asService(k.sql, (tx) => tx`
+      insert into public.perks (id, campaign_id, title, kind, price_minor, quantity_limit, fulfill_by)
+      values (${perk}, ${ids.solCampaign}, 'Soundcheck pass', 'experience', 2000, 1, '2027-01-23')`);
+    const [a, b] = [await createUser(k.sql), await createUser(k.sql)];
+    const first = await back(k, a.auth, { campaignId: ids.solCampaign, perkId: perk });
+    expect(first.statusCode).toBe(201);
+    const sold = await back(k, b.auth, { campaignId: ids.solCampaign, perkId: perk }, "k-sold-out-01");
+    expect(sold.json().error).toBe("perk_sold_out");
+    await asService(k.sql, (tx) => tx`select public.release_backing_hold(${first.json().backingId}, 'test')`);
+    const replayed = await back(k, b.auth, { campaignId: ids.solCampaign, perkId: perk }, "k-sold-out-01");
+    expect(replayed.statusCode).toBe(409);
+    expect(replayed.json().error).toBe("perk_sold_out");
+    expect((await back(k, b.auth, { campaignId: ids.solCampaign, perkId: perk }, "k-sold-out-02")).statusCode).toBe(201);
+  });
+});
+
+describe("FR-PAY-006: crash between steps (design §4.4, T-006 a–f)", () => {
+  const body = (perkId = ids.novaPerkDiary) => ({ campaignId: ids.novaCampaign, perkId, quantity: 1 });
+  const createCalls = (backingId: string) => k.provider.calls.filter((c) => c.op === "createPayment" && (c.input as { backingId: string }).backingId === backingId);
+
+  it("(a) a failure after the claim but before the hold commits persists nothing; the same key then creates one backing", async () => {
+    const f = await createUser(k.sql);
+    await k.sql.unsafe(`
+      create function public.test_crash() returns trigger language plpgsql as $$
+      begin if new.backer_id = '${f.id}' then raise exception 'simulated crash' using errcode = 'XX000'; end if; return new; end $$;
+      create trigger test_crash before insert on public.backings for each row execute function public.test_crash();`);
+    const crashed = await back(k, f.auth, body(), "k-crash-a-0001");
+    await k.sql.unsafe(`drop trigger test_crash on public.backings; drop function public.test_crash();`);
+    expect(crashed.statusCode).toBe(500);
+    expect(await asService(k.sql, (tx) => tx`select 1 from public.api_idempotency where key = ${scopedKey(f.id, "k-crash-a-0001")}`)).toHaveLength(0);
+    expect(await asService(k.sql, (tx) => tx`select 1 from public.backings where backer_id = ${f.id}`)).toHaveLength(0);
+    const retry = await back(k, f.auth, body(), "k-crash-a-0001");
+    expect(retry.statusCode).toBe(201);
+    expect(await asService(k.sql, (tx) => tx`select 1 from public.backings where backer_id = ${f.id}`)).toHaveLength(1);
+  });
+
+  it("(b) stopped after the hold committed, before the provider call: a retry resumes the stored backing with one payment", async () => {
+    const f = await createUser(k.sql);
+    const [hold] = await asService(k.sql, (tx) => tx<{ backing_id: string }[]>`
+      select backing_id from public.create_backing_hold(${f.id}, ${ids.novaCampaign}, ${ids.novaPerkDiary}, 1, null, ${POLICY.checkout.holdMinutes}, ${POLICY.checkout.maxUnconfirmedPerUser})`);
+    await asService(k.sql, (tx) => tx`
+      insert into public.api_idempotency (key, user_id, request_hash, state, claimed_at, resource_id)
+      values (${scopedKey(f.id, "k-crash-b-0001")}, ${f.id}, ${requestHash(f.id, body())}, 'in_progress', now(), ${hold.backing_id})`);
+    const r = await back(k, f.auth, body(), "k-crash-b-0001");
+    expect(r.statusCode).toBe(201);
+    expect(r.json().backingId).toBe(hold.backing_id);
+    expect(createCalls(hold.backing_id)).toHaveLength(1);
+    expect(await asService(k.sql, (tx) => tx`select 1 from public.backings where backer_id = ${f.id}`)).toHaveLength(1);
+  });
+
+  it(`(c) an in_progress claim with no backing is re-claimed after ${POLICY.checkout.abandonedClaimMinutes} minutes; a younger one is 409 in_progress`, async () => {
+    const f = await createUser(k.sql);
+    const claim = (key: string, age: string) => asService(k.sql, (tx) => tx`
+      insert into public.api_idempotency (key, user_id, request_hash, state, claimed_at)
+      values (${scopedKey(f.id, key)}, ${f.id}, ${requestHash(f.id, body())}, 'in_progress', now() - ${age}::interval)`);
+    await claim("k-crash-c-young", "30 seconds");
+    await claim("k-crash-c-old01", `${POLICY.checkout.abandonedClaimMinutes + 1} minutes`);
+    const young = await back(k, f.auth, body(), "k-crash-c-young");
+    expect(young.statusCode).toBe(409);
+    expect(young.json().error).toBe("in_progress");
+    const old = await back(k, f.auth, body(), "k-crash-c-old01");
+    expect(old.statusCode).toBe(201);
+  });
+
+  it("(d) resuming a checkout whose hold expired returns a stored 409 checkout_expired and creates no payment", async () => {
+    const f = await createUser(k.sql);
+    k.provider.failNext("createPayment", "retry");
+    const first = await back(k, f.auth, body(), "k-expired-d-01");
+    expect(first.statusCode).toBe(502);
+    const [b] = await asService(k.sql, (tx) => tx<{ id: string }[]>`select id from public.backings where backer_id = ${f.id}`);
+    const callsBefore = createCalls(b.id).length;
+    await asService(k.sql, (tx) => tx`update public.backings set hold_expires_at = now() - interval '1 second' where id = ${b.id}`);
+    const resumed = await back(k, f.auth, body(), "k-expired-d-01");
+    expect(resumed.statusCode).toBe(409);
+    expect(resumed.json().error).toBe("checkout_expired");
+    expect(createCalls(b.id)).toHaveLength(callsBefore);
+    const claim = await one(k.sql, (tx) => tx<{ state: string; status_code: number }[]>`select state, status_code from public.api_idempotency where key = ${scopedKey(f.id, "k-expired-d-01")}`);
+    expect(claim).toMatchObject({ state: "done", status_code: 409 });
+    // Even if the hold were somehow live again, the stored outcome is what the key replays.
+    await asService(k.sql, (tx) => tx`update public.backings set hold_expires_at = now() + interval '5 minutes' where id = ${b.id}`);
+    expect((await back(k, f.auth, body(), "k-expired-d-01")).json().error).toBe("checkout_expired");
+    expect(createCalls(b.id)).toHaveLength(callsBefore);
+  });
+
+  it("(d') a hold that dies while the provider call is in flight is not given the payment: 409 and the payment is cancelled", async () => {
+    const f = await createUser(k.sql);
+    const dying: PaymentProvider = Object.create(k.provider);
+    dying.createPayment = async (input) => {
+      const r = await k.provider.createPayment(input);
+      await asService(k.sql, (tx) => tx`select public.release_backing_hold(${input.backingId}, 'test: expired during provider call')`);
+      return r;
+    };
+    const app = await buildApp({ ...k.deps, provider: dying });
+    const r = await app.inject({ method: "POST", url: "/api/v1/backings", headers: { authorization: f.auth, "idempotency-key": "k-dying-hold-01" }, payload: body() });
+    await app.close();
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toBe("checkout_expired");
+    const [b] = await asService(k.sql, (tx) => tx<{ id: string; payment_ref: string | null }[]>`select id, payment_ref from public.backings where backer_id = ${f.id}`);
+    expect(b.payment_ref).toBeNull();
+    expect(k.provider.calls.some((c) => c.op === "cancelPayment" && c.input === `sbx_pi_${b.id}`)).toBe(true);
+  });
+
+  it("(e) a hold whose payment ref was never stored is looked up at the provider and cancelled before its units return", async () => {
+    const f = await createUser(k.sql);
+    const r = await back(k, f.auth, { campaignId: ids.solCampaign, perkId: ids.solPerkGA });
+    const id = r.json().backingId as string;
+    await asService(k.sql, (tx) => tx`update public.backings set payment_ref = null where id = ${id}`); // the crash: ref never stored
+    const finds = () => k.provider.calls.filter((c) => c.op === "findPayment" && (c.input as { backingId: string }).backingId === id).length;
+    // Just expired: not searched yet (the provider's search index may lag).
+    await tick(k, new Date(Date.now() + (POLICY.checkout.holdMinutes + 1) * 60_000));
+    expect(finds()).toBe(0);
+    expect((await one(k.sql, (tx) => tx<{ status: string }[]>`select status::text from public.backings where id = ${id}`)).status).toBe("pending_payment");
+    const units = await perkClaimed(ids.solPerkGA);
+    await tick(k, new Date(Date.now() + (POLICY.checkout.holdMinutes + POLICY.checkout.expiryLookupGraceMinutes + 1) * 60_000));
+    expect(finds()).toBe(1);
+    expect(k.provider.calls.some((c) => c.op === "cancelPayment" && c.input === `sbx_pi_${id}`)).toBe(true);
+    const b = await one(k.sql, (tx) => tx<{ status: string; payment_ref: string }[]>`select status::text, payment_ref from public.backings where id = ${id}`);
+    expect(b).toEqual({ status: "canceled", payment_ref: `sbx_pi_${id}` });
+    expect(await perkClaimed(ids.solPerkGA)).toBe(units - 1);
+  });
+
+  it("(f) a resumed checkout sends the provider exactly the same parameters, whatever the retry's correlation id", async () => {
+    const f = await createUser(k.sql);
+    const send = (corr: string) => k.app.inject({
+      method: "POST", url: "/api/v1/backings",
+      headers: { authorization: f.auth, "idempotency-key": "k-determ-f-01", "x-correlation-id": corr }, payload: body(),
+    });
+    k.provider.failNext("createPayment", "retry");
+    expect((await send("corr-first-request-01")).statusCode).toBe(502);
+    const second = await send("corr-second-request-02");
+    expect(second.statusCode).toBe(201);
+    const calls = createCalls(second.json().backingId);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].input).toEqual(calls[0].input);
+    expect(calls[0].input).toMatchObject({
+      backingId: second.json().backingId, campaignId: ids.novaCampaign, amountMinor: 1000,
+      idempotencyKey: `payment:${second.json().backingId}`, correlationId: "corr-first-request-01",
+      description: "Take the band on the road — Digital thank-you + tour diary",
+    });
   });
 });
 
@@ -138,18 +287,54 @@ describe("FR-PAY-003: a capture the platform can't accept is refunded in full", 
     await asService(k.sql, (tx) => tx`update public.campaigns set ends_at = ${before.ends_at} where id = ${VELVET}`);
   });
 
-  it("captured amount differs from the backing: refunded in full and a reconciliation break is opened", async () => {
+  it("captured amount differs from the backing: refunded in full from what was captured and a reconciliation break is opened", async () => {
     const f = await createUser(k.sql);
     const r = await back(k, f.auth, { campaignId: ids.novaCampaign, perkId: ids.novaPerkDiary });
     const backingId = r.json().backingId as string;
+    const liabilityBefore = (await balances(k.sql, ids.novaCampaign)).backer_liability ?? 0;
     await pay(k, backingId, "succeed", 1500); // perk is $10
+    const pending = await one(k.sql, (tx) => tx<{ status: string; captured_minor: bigint; captured_currency: string; processing_fee_minor: bigint }[]>`
+      select status::text, captured_minor, captured_currency, processing_fee_minor from public.backings where id = ${backingId}`);
+    expect(pending.status).toBe("refund_pending");
+    expect(n(pending.captured_minor)).toBe(1500);
+    expect(pending.captured_currency).toBe("usd");
+    expect(n(pending.processing_fee_minor)).toBe(processingFeeMinor(1500));
+    expect((await balances(k.sql, ids.novaCampaign)).backer_liability).toBe(liabilityBefore - 1500);
+    // A confirmation of the expected amount (1000) is refused: the backer is owed what was captured.
+    await expect(asService(k.sql, (tx) => tx`select public.record_refund_confirmed(${backingId}, 're_test', 1000, 'test-refund-1000')`)).rejects.toThrow(/refund_amount_mismatch/);
     await tick(k);
     const b = await one(k.sql, (tx) => tx<{ status: string; captured_minor: bigint }[]>`select status::text, captured_minor from public.backings where id = ${backingId}`);
     expect(b.status).toBe("refunded");
     expect(n(b.captured_minor)).toBe(1500);
+    const refund = k.provider.calls.find((c) => c.op === "refund" && (c.input as { backingId: string }).backingId === backingId);
+    expect((refund?.input as { amountMinor: number }).amountMinor).toBe(1500);
+    const leg = await one(k.sql, (tx) => tx<{ amount_minor: bigint }[]>`
+      select e.amount_minor from public.ledger_transactions t join public.ledger_entries e on e.transaction_id = t.id
+        join public.ledger_accounts a on a.id = e.account_id and a.kind = 'backer_liability'
+       where t.backing_id = ${backingId} and t.kind = 'backing.refunded'`);
+    expect(n(leg.amount_minor)).toBe(1500); // debits backer_liability by what was captured
+    expect((await balances(k.sql, ids.novaCampaign)).backer_liability).toBe(liabilityBefore);
     const brk = await one(k.sql, (tx) => tx<{ kind: string; amount_minor: bigint }[]>`select kind, amount_minor from public.recon_breaks where refs ->> 'backing_id' = ${backingId}`);
     expect(brk.kind).toBe("amount_mismatch");
     expect(n(brk.amount_minor)).toBe(500);
+  });
+});
+
+describe("FR-PAY-001 bullet 4: the deadline releases open holds", () => {
+  it("an unpaid hold on a campaign whose deadline passed is cancelled with the provider and its units return", async () => {
+    const LOW_ENDS = "a60cb7d4-c5ca-571d-863b-ba8f7d1dc60e";
+    const VINYL = "b6658093-c8cb-5edd-b884-e7f4b3f55fb8";
+    const f = await createUser(k.sql);
+    const r = await back(k, f.auth, { campaignId: LOW_ENDS, perkId: VINYL, quantity: 2 });
+    const id = r.json().backingId as string;
+    const units = await perkClaimed(VINYL);
+    await asService(k.sql, (tx) => tx`update public.campaigns set ends_at = now() - interval '1 second' where id = ${LOW_ENDS}`);
+    await tick(k); // the hold itself is still unexpired; the deadline releases it
+    const b = await one(k.sql, (tx) => tx<{ status: string; units_held: boolean }[]>`select status::text, units_held from public.backings where id = ${id}`);
+    expect(b).toEqual({ status: "canceled", units_held: false });
+    expect(await perkClaimed(VINYL)).toBe(units - 2);
+    expect(k.provider.calls.some((c) => c.op === "cancelPayment" && c.input === `sbx_pi_${id}`)).toBe(true);
+    expect((await pay(k, id)).json().error).toBe("checkout_expired");
   });
 });
 
