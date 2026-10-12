@@ -21,6 +21,35 @@ export interface RegCfEvent {
   data: Record<string, unknown>;
 }
 
+export interface RegCfFundMove {
+  id: string;
+  tradeId: string;
+  amount: number;
+  /** pending | settled | returned */
+  status: string;
+  externalId?: string;
+}
+export interface RegCfTrade {
+  id: string;
+  /** created | funding | funded | returned | refunding | refunded | cancelled */
+  status: string;
+  offeringId: string;
+  amount: number;
+  externalId: string;
+  fundMoves: RegCfFundMove[];
+}
+export interface RegCfTransaction {
+  id: string;
+  kind: "fund_move" | "refund" | "disbursement" | "deposit" | "payout";
+  status: string;
+  amount: number;
+  externalId: string | null;
+  tradeId: string | null;
+  returnCode: string | null;
+  reference: string | null;
+  at: string;
+}
+
 export type KycDecision = "approved" | "rejected";
 export type PayoutRecipient = "investor" | "issuer" | "platform";
 
@@ -35,6 +64,14 @@ export interface RegCfProvider {
   createLink(i: { accountId: string; partyId: string }, idem: string): Promise<{ id: string }>;
   createTrade(i: { offeringId: string; accountId: string; units: number; unitPrice: number; amount: number; externalId: string }, idem: string): Promise<{ id: string }>;
   fundTrade(tradeId: string, i: { amount: number; externalId: string }, idem: string): Promise<{ id: string; status: string }>;
+  /** The trade and its fund moves (design §4.3, §5 resume guard (e)). */
+  getTrade(tradeId: string): Promise<RegCfTrade>;
+  /** Look a trade up by our investment id (sent as externalId at createTrade). Never creates anything. Null: no trade. */
+  findTrade(q: { externalId: string }): Promise<RegCfTrade | null>;
+  /** Void a trade with no fund move (key `cancel_trade:<investment_id>`). Refused `trade_funded` once a fund move exists. */
+  cancelTrade(tradeId: string, idem: string): Promise<{ id: string; status: string }>;
+  /** Every escrow (offering) or collection-account movement, for per-transaction ref matching (design §5.1). */
+  listTransactions(q: { offeringId: string; since?: string } | { collectionAccountId: string; since?: string }): Promise<RegCfTransaction[]>;
   refundTrade(tradeId: string, i: { amount: number; externalId: string }, idem: string): Promise<{ id: string }>;
   disburseToIssuer(offeringId: string, i: { amount: number; externalId: string }, idem: string): Promise<{ id: string }>;
   getEscrow(offeringId: string): Promise<{ balance: number; status: string }>;

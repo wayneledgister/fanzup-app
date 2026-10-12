@@ -81,7 +81,16 @@ export function buildServer(cfg: ServerConfig, engine?: MockEscrowEngine) {
   app.post("/v1/accounts", async (req, reply) => reply.status(201).send(eng.createAccount(body(req), idem(req))));
   app.post("/v1/links", async (req, reply) => reply.status(201).send(eng.createLink(body(req), idem(req))));
   app.post("/v1/trades", async (req, reply) => reply.status(201).send(eng.createTrade(body(req), idem(req))));
+  app.get<{ Querystring: { externalId?: string } }>("/v1/trades", async (req) => {
+    const t = eng.findTrade({ externalId: String(req.query.externalId ?? "") });
+    return { data: t ? [t] : [] };
+  });
   app.get<{ Params: { id: string } }>("/v1/trades/:id", async (req) => eng.getTrade(req.params.id));
+  app.post<{ Params: { id: string } }>("/v1/trades/:id/cancel", async (req) => eng.cancelTrade(req.params.id, idem(req)));
+  app.get<{ Params: { id: string }; Querystring: { since?: string } }>("/v1/offerings/:id/transactions", async (req) =>
+    eng.listTransactions({ offeringId: req.params.id, since: req.query.since }));
+  app.get<{ Params: { id: string }; Querystring: { since?: string } }>("/v1/collection-accounts/:id/transactions", async (req) =>
+    eng.listTransactions({ collectionAccountId: req.params.id, since: req.query.since }));
   app.post<{ Params: { id: string } }>("/v1/trades/:id/fund", async (req, reply) => reply.status(201).send(eng.fundTrade(req.params.id, body(req), idem(req))));
   app.post<{ Params: { id: string } }>("/v1/trades/:id/refund", async (req, reply) => reply.status(201).send(eng.refundTrade(req.params.id, body(req), idem(req))));
   app.post("/v1/collection-accounts", async (req, reply) => reply.status(201).send(eng.createCollectionAccount(body(req), idem(req))));

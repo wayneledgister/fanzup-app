@@ -17,4 +17,16 @@ Layer 2 needs an escrow agent, KYC/AML on investors, trades, fund moves, a close
 - A `northcapital` adapter can replace the mock without touching domain code; the remaining work is mapping their field names, their webhook signature scheme, and their asynchronous statuses.
 - The interface includes lookups the money rules depend on (PR #10 review round 3, design §4.3, §5.1): find a trade by our investment id, void an unfunded trade, and list escrow and collection-account transactions for ref matching. A real adapter must provide equivalents (or the provider must, through its API) before it can replace the mock.
 - Two services to run locally (`pnpm dev` starts both).
+
+## Prerequisites for a real adapter
+A provider can replace the mock only if, through its API or the adapter:
+1. **Idempotency keys are permanent** (or at least outlive every retry, lookup and reconciliation window we use). The
+   mock keeps them forever — they never expire with time and survive restarts; only an admin reset clears them
+   (`apps/mock-escrow/README.md`). Our keys (`trade:`, `fund:`, `cancel_trade:`, `refund:inv:`, `refund:fund:`,
+   `disburse:`, `payout:`, `close:`, `deposit:`) each name exactly one money movement ever (design §5); a provider that
+   forgets a key after N hours could move money twice on a late retry.
+2. Trades can be found by our id (`findTrade` by `externalId`) and voided while unfunded (`cancelTrade`, refused once a
+   fund move exists).
+3. Escrow and collection-account movements can be listed with their ids, amounts and our `externalId`
+   (`listTransactions`).
 - The mock's behaviour is our reading of a public workflow, not a contract; drift is the main risk (L2-Q4: get sandbox access before any partner demo claims fidelity).
