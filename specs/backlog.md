@@ -41,3 +41,24 @@ One row per condition carried forward in `gates/G2-design.md` pass 2 ("Condition
 | Pseudonymisable audit vs deletion (see N7) and address purge after dispute windows | G1 cond. 4 (partly resolved) | Deletion and immutable audit coexist | S | 2026-10-11 |
 | Checkout friction decision revisited with funnel data (G1-B chose full account first) | G1 cond. 6 (partly resolved) | Conversion cost of full account is measured, not assumed | S | 2026-10-11 |
 | Replace remaining judge-words with checkable criteria; label E1 constraints | G1 cond. 12 (partly resolved) | Every criterion is testable | S | 2026-10-11 |
+
+## Carried from the independent PR reviews (2026-10-11/12) — approved with these minors open
+| Item | Origin | Value hypothesis | Size | Added |
+|---|---|---|---|---|
+| Sign-up/reset password rule in the browser matches Supabase (≥10 chars, lower+upper+digit); map Supabase errors to human copy | PR #9 review round 3 | No "passes the form, then rejected with raw error" on the golden journey | S | 2026-10-12 |
+| Expired-link copy says the real link lifetime (1 h) or raise `otp_expiry` to 24 h and document it | PR #9 review round 3 | No promise the beta doesn't keep | S | 2026-10-12 |
+| Carry `?ref=` attribution across tabs/devices on the sign-up path (inside `next`, or localStorage with TTL) | PR #9 review round 3 | FR-ANL-001 source attribution survives email confirmation | S | 2026-10-12 |
+| Handle the Stripe 3-D Secure return (`payment_intent`/`redirect_status`) on checkout mount → wait for capture | PR #9 review round 3 | 3DS payments land on confirmation, not "Payment not confirmed" | S | 2026-10-12 |
+| Log-in: separate copy for rate limits (429) and network errors | PR #9 review round 3 | Fans aren't sent to reset a correct password | S | 2026-10-12 |
+| Delayed privileged actions re-check that the actor is still staff before executing | PR #8 review round 2 | Removing an operator stops their scheduled money actions | S | 2026-10-12 |
+| `request_backing_refund` owner check in SQL (or correct the design text) | PR #8 review round 2 | SQL backstop for reviewer ≠ owner on refunds | S | 2026-10-12 |
+| Notification sends rethrow on transport failure so the outbox retries (needed once a real email provider exists) | PR #8 review round 2 | No silently stranded emails | S | 2026-10-12 |
+| Funnel events: tests for oversized body (413) and non-public campaign (404); strict UUID check for `anon_id` | PR #8 review round 2 | T-016 acceptance criteria exercised | S | 2026-10-12 |
+| Pre-M1 data upgrade: queue `tranche.release` for funded campaigns with a verified, unreleased tranche 1; claim perk units for pre-M1 pending rows captured after upgrade | PR #7 review round 4 | Safe upgrade of a DB that already holds pre-M1 data (hosted DB has none today) | S | 2026-10-12 |
+| M1 weekly-review test (and week boundary) independent of the DB session time zone | Reviews (local Postgres in America/Chicago) | No false failures near Monday 00:00 UTC | S | 2026-10-12 |
+| L2: CHARGED_OFF / DEFAULT holding copy per state (charged off → further payouts unlikely, may be zero) | PR #13 review round 3 | Investor risk copy matches the collection state (Brand §7.4) | S | 2026-10-12 |
+| L2: maturity shown as months/years without fractions everywhere (`illustrationPeriod`) | PR #13 review round 3 | Accurate deal terms | S | 2026-10-12 |
+| L2: flag-off cancel-only list also shows funded-past-cut-off and refund-pending investments read-only | PR #13 review round 3 | Investors can see money still in flight while the flag is off | S | 2026-10-12 |
+| L2: staff nav items "Pools (Layer 2)" / "Investor KYC" visible on the completion signal; `role="alert"` on LoadGate errors | PR #13 review round 3 | Staff reach flag-off money views without typing URLs | S | 2026-10-12 |
+| L2: verify `cap_overflow_minor` against fan share − Σ payouts at commit | PR #11 review round 2 | Waterfall data stored only after SQL check | S | 2026-10-12 |
+| M1: on real Stripe, confirm wait-for-funds payout retries aren't replaying a stored `balance_insufficient` for 24 h (use the attempt generation if so) | PR #7 fixer note | Payouts resume as soon as the float is topped up | S | 2026-10-12 |
