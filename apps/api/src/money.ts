@@ -2,6 +2,7 @@
  * Time-based and queued money work (design 02 §6). All state changes and ledger postings happen inside the SQL
  * functions; this file sequences them with the provider. Every step is idempotent and bounded.
  */
+import { POLICY } from "@fanzup/shared/policy";
 import { asService, type Sql } from "./db";
 import { newCorrelationId, runWithCtx } from "./context";
 import type { PaymentProvider } from "./provider/types";
@@ -38,19 +39,33 @@ export async function settleDueCampaigns(sql: Sql, now = new Date()) {
 /**
  * FR-PAY-001: expired checkout holds (and holds on campaigns past their deadline) are cancelled with the provider,
  * then their units go back. A payment that already succeeded is left for the inbox (late-capture refund path).
+ * A hold whose payment ref was never stored (crash between createPayment and storing it, design §5) is looked up at
+ * the provider by backing id first — only once it is `expiryLookupGraceMinutes` past expiry, so the provider's
+ * search index has caught up — and its ref stored before it is cancelled.
  */
 export async function expireHolds(sql: Sql, provider: PaymentProvider, now = new Date(), limit = 100) {
+  const lookupBefore = new Date(now.getTime() - POLICY.checkout.expiryLookupGraceMinutes * 60_000);
   const rows = await asService(sql, (tx) => tx<{ id: string; payment_ref: string | null; correlation_id: string | null }[]>`
     select b.id, b.payment_ref, b.correlation_id
       from public.backings b join public.campaigns c on c.id = b.campaign_id
-     where b.status = 'pending_payment' and (b.hold_expires_at <= ${now} or c.ends_at <= ${now} or c.status <> 'live')
+     where b.status = 'pending_payment'
+       and ((b.payment_ref is not null and (b.hold_expires_at <= ${now} or c.ends_at <= ${now} or c.status <> 'live'))
+         or (b.payment_ref is null and b.hold_expires_at <= ${lookupBefore}))
      order by b.hold_expires_at limit ${limit}`);
   let released = 0;
   for (const b of rows) {
     await runWithCtx({ ...SYSTEM, correlationId: b.correlation_id }, async () => {
       try {
-        if (b.payment_ref) {
-          const r = await provider.cancelPayment(b.payment_ref);
+        let ref = b.payment_ref;
+        if (!ref) {
+          const found = await provider.findPayment({ backingId: b.id });
+          if (found) {
+            ref = found.paymentRef;
+            await asService(sql, (tx) => tx`update public.backings set payment_ref = ${ref} where id = ${b.id} and payment_ref is null`);
+          }
+        }
+        if (ref) {
+          const r = await provider.cancelPayment(ref);
           if (r === "already_succeeded") return; // the capture event will arrive and be refunded if late
         }
         const [{ ok }] = await asService(sql, (tx) => tx<{ ok: boolean }[]>`select public.release_backing_hold(${b.id}, 'expired') as ok`);

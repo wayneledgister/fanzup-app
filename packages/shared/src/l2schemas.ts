@@ -42,6 +42,15 @@ export const PoolDraftRequest = z.object({
 });
 export type PoolDraftRequest = z.input<typeof PoolDraftRequest>;
 
+/**
+ * Issuer attestation (design §4.1; L2-Q12): Reg CF sales in the preceding 12 months by the creator, its 227.100(c)
+ * affiliates and predecessors on other platforms. Asked at submit and re-attested at launch; self-reported, pending counsel.
+ */
+export const PoolSubmitRequest = z.object({ otherRegCfSales12mMinor: Cents.max(1e14) });
+export type PoolSubmitRequest = z.infer<typeof PoolSubmitRequest>;
+export const PoolLaunchRequest = z.object({ otherRegCfSales12mMinor: Cents.max(1e14), legalName: z.string().min(2).max(120).optional() });
+export type PoolLaunchRequest = z.infer<typeof PoolLaunchRequest>;
+
 export const StatementRequest = z.object({
   periodLabel: z.string().min(2).max(40),
   periodStart: Day,
@@ -151,6 +160,11 @@ export interface InvestmentView {
   collectionState: CollectionState;
   riskBadge: RiskBadge | null;
   canCancelUntil: string | null;
+  /** Set when the investor asked to cancel and the refund waits on the fund move or a provider lookup (`cancel_pending`). */
+  cancelRequestedAt?: string | null;
+  /** 227.303(d) fields for the confirmation page: the cancel-by instant (deadline − cut-off) and the issuer name (pending L2-Q2). */
+  cancelBy?: string | null;
+  issuerName?: string;
   payouts: { label: string; amountMinor: number; status: string; paidAt: string | null; taxForm: string | null }[];
 }
 

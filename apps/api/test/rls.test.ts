@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { asService, asUser, type Sql } from "../src/db";
 import { runWithCtx } from "../src/context";
 import { freshDb, ids } from "./helpers";
@@ -35,7 +37,13 @@ describe("row level security", () => {
   });
   it("clients can't call money functions", async () => {
     await expect(asUser(sql, fan, (tx) => tx`select public.settle_campaign(${ids.novaCampaign})`)).rejects.toThrow(/permission denied/);
-    await expect(asUser(sql, fan, (tx) => tx`select public.record_backing_captured(gen_random_uuid(), 'x', 0, 'x')`)).rejects.toThrow(/permission denied/);
+    await expect(asUser(sql, fan, (tx) => tx`select public.apply_payment_captured(gen_random_uuid(), 'x', 1, 'usd', 0, 'x')`)).rejects.toThrow(/permission denied/);
+    await expect(asUser(sql, fan, (tx) => tx`select public.apply_stray_capture(gen_random_uuid(), 'x', 1, 'usd', 0, gen_random_uuid())`)).rejects.toThrow(/permission denied/);
+    await expect(asUser(sql, fan, (tx) => tx`select public.record_refund_confirmed(gen_random_uuid(), 'x', 1, 'x')`)).rejects.toThrow(/permission denied/);
+  });
+  it("the pre-M1 capture and refund functions are gone (every path goes through the M1 functions)", async () => {
+    const rows = await sql`select proname from pg_proc where pronamespace = 'public'::regnamespace and proname in ('record_backing_captured', 'record_backing_refunded')`;
+    expect(rows).toHaveLength(0);
   });
   it("artists can edit their own draft campaigns, not live ones", async () => {
     const [d] = await asUser(sql, nova, (tx) => tx<{ id: string }[]>`
@@ -69,5 +77,26 @@ describe("row level security", () => {
     }
     await expect(asUser(sql, fan, (tx) => tx`select payout_account_ref from public.artists`)).rejects.toThrow(/permission denied/);
     expect((await asUser(sql, null, (tx) => tx`select id, name from public.artists`)).length).toBeGreaterThan(0);
+  });
+});
+
+// T-017 guard (NFR-SEC-07, design §9): the seed (demo users with a published password, incl. a staff reviewer)
+// never reaches a hosted database, and staff is never granted by a migration.
+describe("NFR-SEC-07: no seeded or migrated staff outside local/CI", () => {
+  const root = join(import.meta.dirname, "../../..");
+  it("no GitHub workflow passes --include-seed", () => {
+    const dir = join(root, ".github/workflows");
+    const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/--include-seed/);
+  });
+  it("no migration inserts into public.staff", () => {
+    const dir = join(root, "supabase/migrations");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".sql"));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) {
+      const text = readFileSync(join(dir, f), "utf8").replace(/--.*$/gm, "");
+      expect(text, f).not.toMatch(/insert\s+into\s+("?public"?\s*\.\s*)?"?staff"?[\s(]/i);
+    }
   });
 });

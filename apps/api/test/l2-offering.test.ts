@@ -6,8 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { asService, n } from "../src/db";
 import { reconcileL2Ledger } from "../src/l2/service";
-import { tick, tokenWith } from "./helpers";
-import { ACK, advance, afterDeadline, buy, heldMinor, investor, l2kit, livePool, poolLedger, poolRow, risingCreator, type L2Kit } from "./l2-helpers";
+import { tokenWith } from "./helpers";
+import { ACK, ATTEST, STAFF_ID, advance, afterDeadline, buy, cancel, heldMinor, investor, l2kit, livePool, poolLedger, poolRow, risingCreator, tick, type L2Kit } from "./l2-helpers";
 
 const me = async (k: L2Kit, u: { auth: string }) => (await k.app.inject({ method: "GET", url: "/api/v1/investor/me", headers: { authorization: u.auth } })).json();
 const invStatus = async (k: L2Kit, id: string) => (await asService(k.sql, (tx) => tx<{ s: string }[]>`select status::text as s from public.investments where id = ${id}`))[0].s;
@@ -56,7 +56,7 @@ describe("Reg CF investment limit (01a §3)", () => {
     const pool = await livePool(k, creator);
     const fan = await investor(k, { incomeMinor: 30_000_00, netWorthMinor: 20_000_00 });
     const tries = await Promise.allSettled(
-      Array.from({ length: 8 }, () => asService(k.sql, (tx) => tx`select * from public.reserve_investment(${fan.id}, ${pool}, 20, ${ACK})`)),
+      Array.from({ length: 8 }, () => asService(k.sql, (tx) => tx`select * from public.reserve_investment(${fan.id}, ${pool}, 20, ${ACK}, ${new Date()})`)),
     );
     expect(tries.filter((t) => t.status === "fulfilled")).toHaveLength(2); // 2 × $1,000 fit in $2,500; a third doesn't
     expect(tries.filter((t) => t.status === "rejected").every((t) => (t as PromiseRejectedResult).reason.message === "regcf_limit_exceeded")).toBe(true);
@@ -74,9 +74,9 @@ describe("Reg CF investment limit (01a §3)", () => {
   it("AC-I2: an unfunded reservation expires and frees the limit and the Units", async () => {
     const pool = await livePool(k, creator);
     const fan = await investor(k, { incomeMinor: 30_000_00, netWorthMinor: 20_000_00 });
-    const [r] = await asService(k.sql, (tx) => tx<{ investment_id: string }[]>`select * from public.reserve_investment(${fan.id}, ${pool}, 50, ${ACK})`);
+    const [r] = await asService(k.sql, (tx) => tx<{ investment_id: string }[]>`select * from public.reserve_investment(${fan.id}, ${pool}, 50, ${ACK}, ${new Date()})`);
     expect((await me(k, fan)).remainingMinor).toBe(0);
-    await tick(k, new Date(Date.now() + 31 * 60_000));
+    await tick(k, new Date(Date.now() + 31 * 60_000)); // no provider call was made: expires at once
     expect(await invStatus(k, r.investment_id)).toBe("expired");
     expect((await me(k, fan)).remainingMinor).toBe(2_500_00);
     expect((await poolRow(k.sql, pool)).units_committed).toBe(0);
@@ -98,7 +98,7 @@ describe("Reg CF investment limit (01a §3)", () => {
   it("AC-I5: the database enforces the limit even when the API is bypassed; accredited investors have none", async () => {
     const pool = await livePool(k, creator);
     const fan = await investor(k, { incomeMinor: 30_000_00, netWorthMinor: 20_000_00 });
-    await expect(asService(k.sql, (tx) => tx`select * from public.reserve_investment(${fan.id}, ${pool}, 51, ${ACK})`)).rejects.toThrow("regcf_limit_exceeded");
+    await expect(asService(k.sql, (tx) => tx`select * from public.reserve_investment(${fan.id}, ${pool}, 51, ${ACK}, ${new Date()})`)).rejects.toThrow("regcf_limit_exceeded");
     const rich = await investor(k, { accredited: true });
     expect((await me(k, rich)).limitMinor).toBeNull();
     expect((await buy(k, rich, pool, 300)).statusCode).toBe(201);
@@ -130,7 +130,7 @@ describe("Reg CF investment limit (01a §3)", () => {
     expect(d.json().action.status, d.body).toBe("executed");
     expect((await me(k, held)).kycStatus).toBe("approved");
     expect((await buy(k, held, pool, 1)).statusCode).toBe(201);
-    const self = await k.app.inject({ method: "POST", url: `/api/v1/staff/l2/investors/b40e0a39-c7ef-5798-91f3-504e09b530f4/kyc`, headers: { authorization: k.staff }, payload: { decision: "approved", reason: "Trying to approve myself here" } });
+    const self = await k.app.inject({ method: "POST", url: `/api/v1/staff/l2/investors/${STAFF_ID}/kyc`, headers: { authorization: k.staff }, payload: { decision: "approved", reason: "Trying to approve myself here" } });
     expect(self.statusCode).toBe(403);
   });
 
@@ -167,7 +167,7 @@ describe("Escrow invariants (01a AC-E1…E5)", () => {
     expect(await heldMinor(k.sql, pool)).toBe(10_000_00);
     // E3: before the deadline nothing can be released.
     const [t2] = await asService(k.sql, (tx) => tx<{ id: string }[]>`select id from public.pool_tranches where pool_id = ${pool} and seq = 2`);
-    await expect(asService(k.sql, (tx) => tx`select public.verify_pool_tranche(${t2.id}, ${"b40e0a39-c7ef-5798-91f3-504e09b530f4"})`)).rejects.toThrow("pool_not_funded");
+    await expect(asService(k.sql, (tx) => tx`select public.verify_pool_tranche(${t2.id}, ${STAFF_ID}, ${new Date()})`)).rejects.toThrow("pool_not_funded");
     expect((await poolLedger(k.sql, pool)).pool_issuer_payable ?? 0).toBe(0);
 
     await tick(k, await afterDeadline(k.sql, pool));
@@ -184,7 +184,7 @@ describe("Escrow invariants (01a AC-E1…E5)", () => {
     // E4: tranche 2 needs evidence, then a verifier who isn't the owner.
     const ev = await k.app.inject({ method: "POST", url: `/api/v1/creator/pool-tranches/${t2.id}/evidence`, headers: { authorization: creator.auth }, payload: { notes: "Masters delivered to the distributor", links: ["https://example.com/masters"] } });
     expect(ev.statusCode, ev.body).toBe(201);
-    await expect(asService(k.sql, (tx) => tx`select public.verify_pool_tranche(${t2.id}, ${creator.id})`)).rejects.toThrow("reviewer_is_owner");
+    await expect(asService(k.sql, (tx) => tx`select public.verify_pool_tranche(${t2.id}, ${creator.id}, ${new Date()})`)).rejects.toThrow("reviewer_is_owner");
     const v = await k.app.inject({ method: "POST", url: `/api/v1/staff/l2/pool-tranches/${t2.id}/verify`, headers: { authorization: k.staff }, payload: { reason: "Master files checked against the tracklist" } });
     expect(v.json().action.status).toBe("scheduled"); // $5,000 > single-operator delay threshold
     await tick(k, new Date(Date.now() + 25 * 3_600_000));
@@ -193,7 +193,7 @@ describe("Escrow invariants (01a AC-E1…E5)", () => {
     expect(led.pool_escrow, "AC-E5 escrow ends at zero").toBe(0);
     expect(led.pool_issuer_payable).toBe(0);
     await assertE1(k, pool);
-    expect((await reconcileL2Ledger(k.deps, pool)).diffMinor).toBe(0);
+    expect((await reconcileL2Ledger(k, { poolId: pool, now: k.clock })).diffMinor).toBe(0);
   });
 
   it("AC-E2: below target at the deadline → every investor refunded in full; escrow and provider back to zero", async () => {
@@ -224,8 +224,8 @@ describe("Escrow invariants (01a AC-E1…E5)", () => {
     const fan = await investor(k, { accredited: true });
     const r = await buy(k, fan, pool, 10);
     await advance(k, 3);
-    const c = await k.app.inject({ method: "POST", url: `/api/v1/investments/${r.json().investmentId}/cancel`, headers: { authorization: fan.auth } });
-    expect(c.json().status, c.body).toBe("refund_pending");
+    const c = await cancel(k, fan, r.json().investmentId);
+    expect(c.json(), c.body).toMatchObject({ result: "cancelled", investment: { status: "refund_pending", statusReason: "cancelled_by_investor" } });
     await advance(k, 3);
     expect(await invStatus(k, r.json().investmentId)).toBe("refunded");
     await assertE1(k, pool);
@@ -248,7 +248,7 @@ describe("Escrow invariants (01a AC-E1…E5)", () => {
     await advance(k, 3);
     expect(await invStatus(k, late.json().investmentId)).toBe("refunded");
     expect(await invStatus(k, r.json().investmentId)).toBe("issued");
-    expect((await reconcileL2Ledger(k.deps, pool)).diffMinor).toBe(0);
+    expect((await reconcileL2Ledger(k, { poolId: pool, now: k.clock })).diffMinor).toBe(0);
   });
 
   it("duplicate webhook deliveries are harmless", async () => {
@@ -264,16 +264,22 @@ describe("Escrow invariants (01a AC-E1…E5)", () => {
   });
 
   it("staff can't approve a Pool they own (FR-ID-003)", async () => {
-    const staffId = "b40e0a39-c7ef-5798-91f3-504e09b530f4";
-    const [a] = await asService(k.sql, (tx) => tx<{ id: string }[]>`
-      insert into public.artists (owner_id, slug, name, tier, identity_status) values (${staffId}, ${"staff-art-" + randomUUID().slice(0, 6)}, 'Staff Band', 'Rising', 'verified') returning id`);
+    const staffId = STAFF_ID;
+    // Created out of band while single-operator mode is briefly off (the artists trigger refuses it otherwise).
+    const [a] = await asService(k.sql, async (tx) => {
+      await tx`insert into public.platform_settings (key, value) values ('single_operator_mode', 'false') on conflict (key) do update set value = 'false'`;
+      const rows = await tx<{ id: string }[]>`
+        insert into public.artists (owner_id, slug, name, tier, identity_status) values (${staffId}, ${"staff-art-" + randomUUID().slice(0, 6)}, 'Staff Band', 'Rising', 'verified') returning id`;
+      await tx`update public.platform_settings set value = 'true' where key = 'single_operator_mode'`;
+      return rows;
+    });
     const staffAuth = `Bearer ${await tokenWith(staffId, { aal: "aal2" })}`;
     const c = await k.app.inject({ method: "POST", url: "/api/v1/creator/pools", headers: { authorization: staffAuth }, payload: (await import("./l2-helpers")).draft() });
     expect(c.statusCode, c.body).toBe(201);
-    await k.app.inject({ method: "POST", url: `/api/v1/creator/pools/${c.json().id}/submit`, headers: { authorization: staffAuth } });
+    await k.app.inject({ method: "POST", url: `/api/v1/creator/pools/${c.json().id}/submit`, headers: { authorization: staffAuth }, payload: ATTEST });
     const r = await k.app.inject({ method: "POST", url: `/api/v1/staff/l2/pools/${c.json().id}/review`, headers: { authorization: k.staff }, payload: { decision: "approved", reason: "Approving my own Pool here" } });
     expect(r.statusCode).toBe(403);
-    expect(r.json().error).toBe("reviewer_is_owner");
+    expect(r.json()).toMatchObject({ error: "reviewer_is_owner", message: expect.not.stringContaining("campaign") });
     void a;
   });
 });

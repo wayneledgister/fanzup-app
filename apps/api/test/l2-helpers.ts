@@ -3,16 +3,25 @@ import { randomUUID } from "node:crypto";
 import { MockEscrowEngine } from "@fanzup/mock-escrow/engine";
 import { POLICY } from "@fanzup/shared/policy";
 import { InProcessRegCf } from "../src/regcf/inprocess";
+import { RegCfError } from "../src/regcf/types";
 import { asService, n, type Sql } from "../src/db";
-import { createUser, ids, kit, tick, tokenWith, type Kit } from "./helpers";
+import { jobDeps } from "../src/app";
+import { runWorkerTick } from "../src/jobs";
+import { createUser, ids, kit, tokenWith, type Kit } from "./helpers";
 
 export const WEBHOOK_SECRET = "test_regcf_webhook_secret_123";
 export const ACK = POLICY.l2.riskAckVersion;
+export const STAFF_ID = ids.reviewer;
 
 export interface L2Kit extends Kit {
   engine: MockEscrowEngine;
   regcf: InProcessRegCf;
   staff: string;
+  /**
+   * The test's clock (design §4.2 one clock): every tick runs at it, so ops queued at a later instant (a settlement at
+   * the deadline) still run on the next tick. `livePool` starts a new timeline at real time.
+   */
+  clock: Date;
 }
 
 export async function l2kit(opts: { flag?: boolean; seed?: boolean } = {}): Promise<L2Kit> {
@@ -24,17 +33,53 @@ export async function l2kit(opts: { flag?: boolean; seed?: boolean } = {}): Prom
     return r.statusCode === 200;
   };
   if (opts.flag !== false) await setFlag(k.sql, true);
-  return { ...k, engine, regcf, staff: `Bearer ${await tokenWith(ids.reviewer, { aal: "aal2" })}` };
+  return { ...k, engine, regcf, staff: `Bearer ${await tokenWith(ids.reviewer, { aal: "aal2" })}`, clock: new Date() };
 }
 
 export const setFlag = (sql: Sql, on: boolean) =>
   asService(sql, (tx) => tx`update public.platform_settings set value = ${tx.json(on)} where key = 'flag.layer2'`);
 
-/** Worker tick, provider clock forward (KYC decisions, settlements → webhooks), worker tick again (at `at`, default now). */
+/**
+ * One worker tick (M1 steps + the Layer 2 step) at `at` (which becomes the kit clock), or at the kit clock — never behind
+ * the mock provider's virtual clock, whose event times stamp what the webhooks queue.
+ */
+export async function tick(k: L2Kit, at?: Date) {
+  if (at) k.clock = at;
+  else if (k.engine.now() > k.clock.getTime()) k.clock = new Date(k.engine.now());
+  return runWorkerTick(jobDeps(k.deps), k.clock, { recon: false });
+}
+
+/** Worker tick, provider clock forward (KYC decisions, settlements → webhooks), worker tick again. */
 export async function advance(k: L2Kit, seconds = 5, at?: Date) {
   await tick(k, at); // run queued ops first so the provider has something to settle
   await k.engine.advance(seconds);
-  return tick(k, at);
+  k.clock = new Date(k.clock.getTime() + seconds * 1000);
+  return tick(k);
+}
+
+/** Make the next call of `op` succeed at the provider but lose its response (a crash after the call). */
+export function crashAfter(k: L2Kit, op: "createTrade" | "fundTrade") {
+  const target = k.regcf as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  const orig = target[op];
+  target[op] = async (...a: unknown[]) => {
+    target[op] = orig;
+    await orig(...a);
+    throw new RegCfError("retry", "network", `${op} response lost (test)`);
+  };
+}
+
+/** Count calls of provider lookups made through the kit's adapter. */
+export function countCalls(k: L2Kit, ops: string[]) {
+  const counts: Record<string, number> = Object.fromEntries(ops.map((o) => [o, 0]));
+  const target = k.regcf as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+  for (const op of ops) {
+    const orig = target[op];
+    target[op] = (...a: unknown[]) => {
+      counts[op]++;
+      return orig(...a);
+    };
+  }
+  return counts;
 }
 
 export async function risingCreator(k: Kit, tier: "Starter" | "Rising" | "Established" = "Rising") {
@@ -76,18 +121,26 @@ export const draft = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-/** Draft → submit → staff approves Form C + executes collection → creator launches. Returns the live Pool id. */
-export async function livePool(k: L2Kit, creator: { auth: string }, over: Record<string, unknown> = {}) {
+export const ATTEST = { otherRegCfSales12mMinor: 0 };
+
+/** Draft → submit → staff approves Form C + executes collection → creator launches. Returns the Pool id. */
+export async function approvedPool(k: L2Kit, creator: { auth: string }, over: Record<string, unknown> = {}) {
   const c = await k.app.inject({ method: "POST", url: "/api/v1/creator/pools", headers: { authorization: creator.auth }, payload: draft(over) });
   if (c.statusCode !== 201) throw new Error(`create ${c.statusCode} ${c.body}`);
   const id = c.json().id as string;
-  const s = await k.app.inject({ method: "POST", url: `/api/v1/creator/pools/${id}/submit`, headers: { authorization: creator.auth } });
+  const s = await k.app.inject({ method: "POST", url: `/api/v1/creator/pools/${id}/submit`, headers: { authorization: creator.auth }, payload: ATTEST });
   if (s.statusCode !== 200) throw new Error(`submit ${s.statusCode} ${s.body}`);
   const r = await k.app.inject({ method: "POST", url: `/api/v1/staff/l2/pools/${id}/review`, headers: { authorization: k.staff }, payload: { decision: "approved", reason: "Form C matches the Pool data" } });
   if (r.statusCode !== 200 || r.json().action.status !== "executed") throw new Error(`review ${r.statusCode} ${r.body}`);
   const x = await k.app.inject({ method: "POST", url: `/api/v1/staff/l2/pools/${id}/collection/execute`, headers: { authorization: k.staff }, payload: { reason: "Letter of direction countersigned (mock)" } });
   if (x.statusCode !== 200) throw new Error(`execute ${x.statusCode} ${x.body}`);
-  const l = await k.app.inject({ method: "POST", url: `/api/v1/creator/pools/${id}/launch`, headers: { authorization: creator.auth } });
+  return id;
+}
+
+export async function livePool(k: L2Kit, creator: { auth: string }, over: Record<string, unknown> = {}) {
+  k.clock = new Date();
+  const id = await approvedPool(k, creator, over);
+  const l = await k.app.inject({ method: "POST", url: `/api/v1/creator/pools/${id}/launch`, headers: { authorization: creator.auth }, payload: ATTEST });
   if (l.statusCode !== 200) throw new Error(`launch ${l.statusCode} ${l.body}`);
   return id;
 }
@@ -95,10 +148,20 @@ export async function livePool(k: L2Kit, creator: { auth: string }, over: Record
 export const buy = (k: L2Kit, u: { auth: string }, poolId: string, units: number, key = `inv-${randomUUID()}`) =>
   k.app.inject({ method: "POST", url: `/api/v1/pools/${poolId}/investments`, headers: { authorization: u.auth, "idempotency-key": key }, payload: { units, riskAckVersion: ACK } });
 
+export const cancel = (k: L2Kit, u: { auth: string }, investmentId: string) =>
+  k.app.inject({ method: "POST", url: `/api/v1/investments/${investmentId}/cancel`, headers: { authorization: u.auth } });
+
 export async function poolRow(sql: Sql, id: string) {
-  const [p] = await asService(sql, (tx) => tx<{ status: string; raised_minor: bigint; units_committed: number; ends_at: Date; offering: string; collection: string; collection_state: string }[]>`
-    select status::text, raised_minor, units_committed, ends_at, provider_offering_ref as offering, provider_collection_ref as collection, collection_state::text from public.pools where id = ${id}`);
+  const [p] = await asService(sql, (tx) => tx<{ status: string; raised_minor: bigint; units_committed: number; ends_at: Date; offering: string; collection: string; collection_state: string; closed_at: Date | null; matures_at: Date | null }[]>`
+    select status::text, raised_minor, units_committed, ends_at, provider_offering_ref as offering, provider_collection_ref as collection, collection_state::text, closed_at, matures_at
+      from public.pools where id = ${id}`);
   return p;
+}
+
+export async function invRow(sql: Sql, id: string) {
+  const [i] = await asService(sql, (tx) => tx<{ status: string; status_reason: string | null; provider_fund_ref: string | null; provider_trade_ref: string | null; cancel_requested_at: Date | null; provider_call_started_at: Date | null; reserve_expires_at: Date }[]>`
+    select status::text, status_reason, provider_fund_ref, provider_trade_ref, cancel_requested_at, provider_call_started_at, reserve_expires_at from public.investments where id = ${id}`);
+  return i;
 }
 
 export async function poolLedger(sql: Sql, id: string) {
@@ -107,12 +170,23 @@ export async function poolLedger(sql: Sql, id: string) {
   return Object.fromEntries(rows.map((r) => [r.kind, n(r.b)])) as Record<string, number>;
 }
 
-/** Σ funded-and-held investments of a Pool (AC-E1 left side). */
+/** AC-E1 left side: Σ funded_received_minor of funded + refund_pending investments + open strays (design §3). */
 export async function heldMinor(sql: Sql, id: string) {
-  const [r] = await asService(sql, (tx) => tx<{ s: bigint }[]>`select coalesce(sum(amount_minor), 0) as s from public.investments where pool_id = ${id} and status in ('funded', 'refund_pending')`);
+  const [r] = await asService(sql, (tx) => tx<{ s: bigint }[]>`
+    select coalesce((select sum(funded_received_minor) from public.investments where pool_id = ${id} and status in ('funded', 'refund_pending')), 0)
+         + coalesce((select sum(amount_minor) from public.pool_stray_fund_moves where pool_id = ${id} and refunded_at is null), 0) as s`);
   return n(r.s);
 }
 
 export async function afterDeadline(sql: Sql, poolId: string, extraMs = 3_600_000) {
   return new Date((await poolRow(sql, poolId)).ends_at.getTime() + extraMs);
+}
+
+export async function openBreaks(sql: Sql, poolId: string) {
+  return asService(sql, (tx) => tx<{ kind: string; amount_minor: bigint; dedupe_key: string }[]>`
+    select kind, amount_minor, dedupe_key from public.pool_breaks where pool_id = ${poolId} and resolved_at is null order by kind`);
+}
+
+export async function fundMovesAtMock(k: L2Kit, investmentId: string) {
+  return k.engine.list("fundMove", (f) => f.externalId === investmentId);
 }

@@ -69,6 +69,11 @@ export function buildServer(cfg: ServerConfig, engine?: MockEscrowEngine) {
   app.post("/v1/issuers", async (req, reply) => reply.status(201).send(eng.createIssuer(body(req), idem(req))));
   app.post("/v1/offerings", async (req, reply) => reply.status(201).send(eng.createOffering(body(req), idem(req))));
   app.get<{ Params: { id: string } }>("/v1/offerings/:id", async (req) => eng.get("offering", req.params.id));
+  app.get<{ Querystring: { externalId?: string } }>("/v1/offerings", async (req) => {
+    const o = eng.findOffering({ externalId: String(req.query.externalId ?? "") });
+    return { data: o ? [o] : [] };
+  });
+  app.post<{ Params: { id: string } }>("/v1/offerings/:id/end-date", async (req) => eng.updateOffering(req.params.id, body(req), idem(req)));
   app.get<{ Params: { id: string } }>("/v1/offerings/:id/escrow", async (req) => eng.getEscrow(req.params.id));
   app.post<{ Params: { id: string } }>("/v1/offerings/:id/close", async (req) => eng.closeOffering(req.params.id, idem(req)));
   app.post<{ Params: { id: string } }>("/v1/offerings/:id/disbursements", async (req, reply) => reply.status(201).send(eng.disburseToIssuer(req.params.id, body(req), idem(req))));
@@ -81,9 +86,19 @@ export function buildServer(cfg: ServerConfig, engine?: MockEscrowEngine) {
   app.post("/v1/accounts", async (req, reply) => reply.status(201).send(eng.createAccount(body(req), idem(req))));
   app.post("/v1/links", async (req, reply) => reply.status(201).send(eng.createLink(body(req), idem(req))));
   app.post("/v1/trades", async (req, reply) => reply.status(201).send(eng.createTrade(body(req), idem(req))));
+  app.get<{ Querystring: { externalId?: string } }>("/v1/trades", async (req) => {
+    const t = eng.findTrade({ externalId: String(req.query.externalId ?? "") });
+    return { data: t ? [t] : [] };
+  });
   app.get<{ Params: { id: string } }>("/v1/trades/:id", async (req) => eng.getTrade(req.params.id));
+  app.post<{ Params: { id: string } }>("/v1/trades/:id/cancel", async (req) => eng.cancelTrade(req.params.id, idem(req)));
+  app.get<{ Params: { id: string }; Querystring: { since?: string } }>("/v1/offerings/:id/transactions", async (req) =>
+    eng.listTransactions({ offeringId: req.params.id, since: req.query.since }));
+  app.get<{ Params: { id: string }; Querystring: { since?: string } }>("/v1/collection-accounts/:id/transactions", async (req) =>
+    eng.listTransactions({ collectionAccountId: req.params.id, since: req.query.since }));
   app.post<{ Params: { id: string } }>("/v1/trades/:id/fund", async (req, reply) => reply.status(201).send(eng.fundTrade(req.params.id, body(req), idem(req))));
   app.post<{ Params: { id: string } }>("/v1/trades/:id/refund", async (req, reply) => reply.status(201).send(eng.refundTrade(req.params.id, body(req), idem(req))));
+  app.post<{ Params: { id: string } }>("/v1/fund-moves/:id/refund", async (req, reply) => reply.status(201).send(eng.refundFundMove(req.params.id, body(req), idem(req))));
   app.post("/v1/collection-accounts", async (req, reply) => reply.status(201).send(eng.createCollectionAccount(body(req), idem(req))));
   app.get<{ Params: { id: string } }>("/v1/collection-accounts/:id", async (req) => eng.getCollectionAccount(req.params.id));
   app.post<{ Params: { id: string } }>("/v1/collection-accounts/:id/deposits", async (req, reply) => reply.status(201).send(eng.simulateDeposit(req.params.id, body(req), idem(req))));
@@ -91,6 +106,7 @@ export function buildServer(cfg: ServerConfig, engine?: MockEscrowEngine) {
 
   app.post("/admin/advance", async (req) => eng.advance(Number(body<{ seconds?: number }>(req).seconds ?? 0)));
   app.post("/admin/tick", async () => eng.tick());
+  app.post<{ Params: { id: string } }>("/admin/refunds/:id/fail", async (req) => eng.failRefund(req.params.id, body<{ returnCode?: string }>(req).returnCode));
   app.post("/admin/reset", async (req) => {
     eng.reset();
     if (body<{ fixtures?: boolean }>(req).fixtures && cfg.fixtures) eng.loadFixture(JSON.parse(readFileSync(cfg.fixtures, "utf8")));

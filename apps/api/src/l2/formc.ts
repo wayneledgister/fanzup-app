@@ -6,6 +6,10 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, REVENUE_TYPE_COPY, RISK_BADGE_COPY, riskBadge, type CollectionMechanism, type RevenueType } from "@fanzup/shared/l2";
 import { POLICY } from "@fanzup/shared/policy";
+import { L2_DEMO_LINE } from "./notices";
+
+/** Shown on the Form C and (PR #13) the Pool page and purchase step until an intermediary is chosen (L2-Q3). */
+export const L2_INTERMEDIARY_LINE = "Intermediary: pending — L2-Q3";
 
 export interface FormCInput {
   poolId: string;
@@ -46,10 +50,12 @@ const STANDARD_RISKS = [
 export function buildFormC(p: FormCInput) {
   const badge = riskBadge(p.collectionMechanism, p.revenueTypes);
   const body = {
-    notice: "DEMO — mock Form C generated from the Pool's data. Not filed with the SEC. Not an offer of securities.",
+    // D-2 sentence verbatim as the first line (design §5.2, round 5 finding 6; L2-T-016), then what this document is.
+    notice: `${L2_DEMO_LINE} Mock Form C generated from the Pool's data; not filed with the SEC.`,
     form: "Form C (mock)",
     issuer: { name: `${p.artistName} (issuer entity pending — L2-Q2)`, creatorTier: p.tier },
-    intermediary: "To be named (L2-Q3). FanZuP provides technology only.",
+    // D-4, finding 7 (L2-T-025): no intermediary exists yet; never claim one.
+    intermediary: L2_INTERMEDIARY_LINE,
     offering: {
       securityType: "Revenue-share Units (contractual right to a share of collected royalties)",
       units: p.unitsTotal,

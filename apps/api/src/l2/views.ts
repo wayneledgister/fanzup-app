@@ -85,6 +85,7 @@ type InvRow = {
   id: string; pool_id: string; slug: string; title: string; artist_display: string; units: number; unit_price_minor: bigint; amount_minor: bigint; status: string;
   status_reason: string | null; created_at: Date; funded_at: Date | null; issued_at: Date | null; lockup_ends_at: Date | null; cap_minor: bigint; distributed_minor: bigint;
   received: bigint; refunded_at: Date | null; pool_status: string; ends_at: Date | null; matures_at: Date | null; collection_state: string; risk_badge: string | null;
+  cancel_requested_at: Date | null; issuer_name: string;
 };
 
 export async function investmentsFor(sql: Sql, userId: string, investmentId?: string): Promise<InvestmentView[]> {
@@ -92,8 +93,9 @@ export async function investmentsFor(sql: Sql, userId: string, investmentId?: st
     select i.id, i.pool_id, p.slug::text, p.title, p.artist_display, i.units, i.unit_price_minor, i.amount_minor, i.status::text, i.status_reason, i.created_at,
            i.funded_at, i.issued_at, i.lockup_ends_at, i.cap_minor, i.distributed_minor,
            coalesce((select sum(amount_minor) from public.distribution_payouts d where d.investment_id = i.id and d.status = 'paid'), 0) as received,
-           i.refunded_at, p.status::text as pool_status, p.ends_at, p.matures_at, p.collection_state::text, p.risk_badge::text
-      from public.investments i join public.pools p on p.id = i.pool_id
+           i.refunded_at, p.status::text as pool_status, p.ends_at, p.matures_at, p.collection_state::text, p.risk_badge::text,
+           i.cancel_requested_at, coalesce(iss.legal_name, p.artist_display) as issuer_name
+      from public.investments i join public.pools p on p.id = i.pool_id left join public.issuers iss on iss.id = p.issuer_id
      where i.investor_id = ${userId} and (${investmentId ?? null}::uuid is null or i.id = ${investmentId ?? null}::uuid)
        and (i.status not in ('expired', 'cancelled') or ${investmentId ?? null}::uuid is not null)
      order by i.created_at desc`);
@@ -109,7 +111,10 @@ export async function investmentsFor(sql: Sql, userId: string, investmentId?: st
     issuedAt: iso(r.issued_at), lockupEndsAt: iso(r.lockup_ends_at), capMinor: n(r.cap_minor), distributedMinor: n(r.distributed_minor), receivedMinor: n(r.received),
     refundedAt: iso(r.refunded_at), poolStatus: r.pool_status as never, poolEndsAt: iso(r.ends_at), maturesAt: iso(r.matures_at),
     collectionState: r.collection_state as never, riskBadge: r.risk_badge as never,
-    canCancelUntil: r.pool_status === "live" && r.ends_at && ["reserved", "funded"].includes(r.status) ? new Date(r.ends_at.getTime() - cutoffMs).toISOString() : null,
+    canCancelUntil: r.pool_status === "live" && r.ends_at && !r.cancel_requested_at && ["reserved", "funding", "funded"].includes(r.status) ? new Date(r.ends_at.getTime() - cutoffMs).toISOString() : null,
+    cancelRequestedAt: iso(r.cancel_requested_at),
+    cancelBy: r.ends_at ? new Date(r.ends_at.getTime() - cutoffMs).toISOString() : null,
+    issuerName: r.issuer_name,
     payouts: payouts.filter((x) => x.investment_id === r.id).map((x) => ({ label: x.label, amountMinor: n(x.amount_minor), status: x.status, paidAt: iso(x.paid_at), taxForm: x.tax_form })),
   }));
 }
@@ -162,7 +167,7 @@ export async function staffQueue(sql: Sql) {
       select 'milestone_verification', t.id, t.pool_id, 'Milestone ' || t.seq || ' of ' || p.title, now() from public.pool_tranches t join public.pools p on p.id = t.pool_id where t.status = 'evidence_submitted'
       union all
       select 'distribution_due', p.id, p.id, p.title || ': ' || (-public.pool_balance('pool_revenue_unallocated', p.id))::text || ' cents collected, not yet distributed', now()
-        from public.pools p where p.status = 'funded' and public.pool_balance('pool_revenue_unallocated', p.id) < 0
+        from public.pools p where p.status in ('funded', 'matured') and public.pool_balance('pool_revenue_unallocated', p.id) < 0
       union all
       select 'break', b.id, b.pool_id, b.kind || ' ' || b.amount_minor, b.opened_at from public.pool_breaks b where b.resolved_at is null
       union all

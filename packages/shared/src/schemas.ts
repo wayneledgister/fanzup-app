@@ -15,7 +15,8 @@ export const BackCampaignRequest = z.object({
 export type BackCampaignRequest = z.infer<typeof BackCampaignRequest>;
 
 export const FunnelEventRequest = z.object({
-  name: z.enum(["perk_selected", "checkout_started"]),
+  /** Only `perk_selected` is client-side; `checkout_started` is recorded by the backing trigger (design §4.2). */
+  name: z.literal("perk_selected"),
   campaignId: z.string().uuid(),
   perkId: z.string().uuid().optional(),
   anonId: z.string().uuid(),
@@ -36,7 +37,9 @@ export const PublicConfig = z.object({
   provider: z.enum(["sandbox", "stripe-test"]),
   testMode: z.boolean(),
   stripePublishableKey: z.string().nullable(),
-  /** Server-side flags (FR-PLT-001). Optional so older API builds still parse. */
+  /** Current Terms/Privacy versions; the sign-up form sends these (design §3.7). */
+  legal: z.object({ termsVersion: z.string(), privacyVersion: z.string() }),
+  /** The server's view of feature flags (FR-PLT-001; L2 design §2). Layer 2 is on only with the mock provider + DB flag. */
   flags: z.object({ layer2: z.boolean() }).optional(),
 });
 export type PublicConfig = z.infer<typeof PublicConfig>;
@@ -143,3 +146,7 @@ export const Me = z.object({
   legal: z.object({ termsVersion: z.string(), privacyVersion: z.string() }),
 });
 export type Me = z.infer<typeof Me>;
+
+/** `GET /staff/queue?type=` (design §4.2). `payouts`: releases waiting on a payout account, funds, a recon pause or an earlier tranche. */
+export const StaffQueueType = z.enum(["review", "verification", "refunds", "payouts", "unmatched", "dead_letters", "pool_dead_letters", "pool_breaks", "breaks", "failed_events", "scheduled"]);
+export type StaffQueueType = z.infer<typeof StaffQueueType>;

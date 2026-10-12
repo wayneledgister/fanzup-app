@@ -36,6 +36,7 @@ const REFUND_REASONS: Record<string, string> = {
   campaign_closed: "your payment arrived after the campaign had closed",
   hold_expired: "your payment arrived after your checkout had expired",
   amount_mismatch: "the amount charged didn't match your backing",
+  currency_mismatch: "the payment was in a different currency from your backing",
   staff_refund: "our support team refunded it",
 };
 
@@ -90,11 +91,14 @@ interface Recipient {
 async function enqueue(sql: Sql, transport: Transport, template: TemplateId, subjectId: string, recipients: Recipient[]) {
   for (const r of recipients) {
     const dedupe = `${template}:${subjectId}:${r.userId}`;
+    // A redelivery re-sends unless the earlier attempt reached `sent` (a failed or interrupted send is retried).
     const [row] = await asService(sql, (tx) => tx<{ id: string }[]>`
       insert into public.notifications (template, template_version, user_id, subject_id, dedupe_key, transport)
       values (${template}, ${TEMPLATES[template]}, ${r.userId}, ${subjectId}, ${dedupe}, 'log')
-      on conflict (dedupe_key) do nothing returning id`);
-    if (!row) continue; // already sent (outbox redelivery)
+      on conflict (dedupe_key) do update set status = 'queued', error = null, template_version = excluded.template_version
+        where public.notifications.status <> 'sent'
+      returning id`);
+    if (!row) continue; // already sent
     try {
       await transport({ userId: r.userId, template, rendered: render(template, r.vars) });
       await asService(sql, (tx) => tx`update public.notifications set status = 'sent', sent_at = now() where id = ${row.id}`);
@@ -133,8 +137,8 @@ export function createNotifier(transport: Transport = logTransport): NotifyHandl
           { userId: b.backer_id, vars: { campaign: b.campaign, amount: formatUsd(n(b.captured ?? b.amount)), ref: b.refund_ref } },
         ]);
       }
-      case "notify.campaign_funded":
-      case "notify.campaign_failed": {
+      case "notify.campaign_funded": {
+        // Settlement moved every held backing to `released`; those backers (and the artist) are told.
         const id = String(payload.campaign_id);
         const rows = await asService(sql, (tx) => tx<{ user_id: string; campaign: string; amount: bigint }[]>`
           select b.backer_id as user_id, c.title as campaign, sum(b.captured_minor) as amount
@@ -142,9 +146,23 @@ export function createNotifier(transport: Transport = logTransport): NotifyHandl
            where b.campaign_id = ${id} and b.captured_minor is not null and b.status in ('held', 'released')
            group by b.backer_id, c.title
           union
-          select a.owner_id, c.title, 0 from public.campaigns c join public.artists a on a.id = c.artist_id where c.id = ${id} and ${topic} = 'notify.campaign_funded'`);
-        const template: TemplateId = topic === "notify.campaign_funded" ? "campaign_funded" : "campaign_failed_refund_started";
-        return enqueue(sql, transport, template, id, rows.map((r) => ({ userId: r.user_id, vars: { campaign: r.campaign, amount: formatUsd(n(r.amount)) } })));
+          select a.owner_id, c.title, 0 from public.campaigns c join public.artists a on a.id = c.artist_id where c.id = ${id}`);
+        return enqueue(sql, transport, "campaign_funded", id, rows.map((r) => ({ userId: r.user_id, vars: { campaign: r.campaign, amount: formatUsd(n(r.amount)) } })));
+      }
+      case "notify.campaign_failed": {
+        // Recipients are the backings settlement sent to refund because the campaign failed (PR #7's failed branch:
+        // held → refund_pending + a `backing.refund` outbox row with reason campaign_failed). Selected by that
+        // reason, whatever the refund's status by now (it may already be `refunded`), so a backing refunded earlier
+        // for another reason (staff, late capture) isn't told the campaign failed (PR #8 review fix 8).
+        const id = String(payload.campaign_id);
+        const rows = await asService(sql, (tx) => tx<{ user_id: string; campaign: string; amount: bigint }[]>`
+          select b.backer_id as user_id, c.title as campaign, sum(b.captured_minor) as amount
+            from public.backings b join public.campaigns c on c.id = b.campaign_id
+           where b.campaign_id = ${id} and b.captured_minor is not null and b.status in ('refund_pending', 'refunded')
+             and exists (select 1 from public.outbox o
+                          where o.topic = 'backing.refund' and o.payload ->> 'backing_id' = b.id::text and o.payload ->> 'reason' = 'campaign_failed')
+           group by b.backer_id, c.title`);
+        return enqueue(sql, transport, "campaign_failed_refund_started", id, rows.map((r) => ({ userId: r.user_id, vars: { campaign: r.campaign, amount: formatUsd(n(r.amount)) } })));
       }
       case "notify.milestone_released": {
         const id = String(payload.tranche_id);

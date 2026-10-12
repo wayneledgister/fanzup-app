@@ -40,12 +40,12 @@ export async function request<T>(path: string, init: RequestInit & { auth?: bool
 
 export const api = {
   config: () => request<PublicConfig>("/v1/config", { auth: false }),
-  campaigns: (p: { tab?: "live" | "funded"; type?: string; cursor?: string | null } = {}) => {
+  campaigns: (p: { tab?: "live" | "funded"; type?: string; cursor?: string | null } = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (p.tab) q.set("tab", p.tab);
     if (p.type) q.set("type", p.type);
     if (p.cursor) q.set("cursor", p.cursor);
-    return request<CampaignList>(`/v1/campaigns${q.size ? `?${q}` : ""}`);
+    return request<CampaignList>(`/v1/campaigns${q.size ? `?${q}` : ""}`, { signal });
   },
   campaign: (slug: string) => request<CampaignDetail>(`/v1/campaigns/${encodeURIComponent(slug)}`),
   me: () => request<Me>("/v1/me"),

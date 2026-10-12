@@ -28,6 +28,9 @@ export class HttpMockEscrow implements RegCfProvider {
 
   createIssuer: RegCfProvider["createIssuer"] = (i, idem) => this.call("POST", "/v1/issuers", i, idem);
   createOffering: RegCfProvider["createOffering"] = (i, idem) => this.call("POST", "/v1/offerings", i, idem);
+  findOffering: RegCfProvider["findOffering"] = async (q) =>
+    (await this.call<{ data: Awaited<ReturnType<RegCfProvider["updateOffering"]>>[] }>("GET", `/v1/offerings?externalId=${encodeURIComponent(q.externalId)}`)).data[0] ?? null;
+  updateOffering: RegCfProvider["updateOffering"] = (id, i, idem) => this.call("POST", `/v1/offerings/${encodeURIComponent(id)}/end-date`, i, idem);
   closeOffering: RegCfProvider["closeOffering"] = (id, idem) => this.call("POST", `/v1/offerings/${encodeURIComponent(id)}/close`, {}, idem);
   createParty: RegCfProvider["createParty"] = (i, idem) => this.call("POST", "/v1/parties", i, idem);
   setPartyKyc: RegCfProvider["setPartyKyc"] = (id, kycStatus, idem) => this.call("POST", `/v1/parties/${encodeURIComponent(id)}/kyc`, { kycStatus }, idem);
@@ -35,7 +38,17 @@ export class HttpMockEscrow implements RegCfProvider {
   createLink: RegCfProvider["createLink"] = (i, idem) => this.call("POST", "/v1/links", i, idem);
   createTrade: RegCfProvider["createTrade"] = (i, idem) => this.call("POST", "/v1/trades", i, idem);
   fundTrade: RegCfProvider["fundTrade"] = (id, i, idem) => this.call("POST", `/v1/trades/${encodeURIComponent(id)}/fund`, i, idem);
+  getTrade: RegCfProvider["getTrade"] = (id) => this.call("GET", `/v1/trades/${encodeURIComponent(id)}`);
+  findTrade: RegCfProvider["findTrade"] = async (q) =>
+    (await this.call<{ data: Awaited<ReturnType<RegCfProvider["getTrade"]>>[] }>("GET", `/v1/trades?externalId=${encodeURIComponent(q.externalId)}`)).data[0] ?? null;
+  cancelTrade: RegCfProvider["cancelTrade"] = (id, idem) => this.call("POST", `/v1/trades/${encodeURIComponent(id)}/cancel`, {}, idem);
+  listTransactions: RegCfProvider["listTransactions"] = async (q) => {
+    const base = "offeringId" in q ? `/v1/offerings/${encodeURIComponent(q.offeringId)}` : `/v1/collection-accounts/${encodeURIComponent(q.collectionAccountId)}`;
+    const since = q.since ? `?since=${encodeURIComponent(q.since)}` : "";
+    return (await this.call<{ data: Awaited<ReturnType<RegCfProvider["listTransactions"]>> }>("GET", `${base}/transactions${since}`)).data;
+  };
   refundTrade: RegCfProvider["refundTrade"] = (id, i, idem) => this.call("POST", `/v1/trades/${encodeURIComponent(id)}/refund`, i, idem);
+  refundFundMove: RegCfProvider["refundFundMove"] = (id, i, idem) => this.call("POST", `/v1/fund-moves/${encodeURIComponent(id)}/refund`, i, idem);
   disburseToIssuer: RegCfProvider["disburseToIssuer"] = (id, i, idem) => this.call("POST", `/v1/offerings/${encodeURIComponent(id)}/disbursements`, i, idem);
   getEscrow: RegCfProvider["getEscrow"] = (id) => this.call("GET", `/v1/offerings/${encodeURIComponent(id)}/escrow`);
   createCollectionAccount: RegCfProvider["createCollectionAccount"] = (i, idem) => this.call("POST", "/v1/collection-accounts", i, idem);

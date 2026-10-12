@@ -3,13 +3,10 @@ name: Deploy database migrations
 # Manual fallback only. Migrations normally deploy through Supabase's own GitHub integration
 # (Supabase > Project Settings > Integrations > GitHub, "Deploy to production" on main), which
 # needs no GitHub secrets. Running both on every push would race, so this one never auto-runs.
+# Hosted databases never get supabase/seed.sql: it holds demo users with a published password,
+# including a staff reviewer (NFR-SEC-07). The seed is for local and CI only.
 on:
   workflow_dispatch:
-    inputs:
-      include_seed:
-        description: "Staging only: also load supabase/seed.sql (demo artists + test users). Never used for production."
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -42,12 +39,7 @@ jobs:
       - uses: supabase/setup-cli@v3
         with: { version: latest }
       - run: supabase link --project-ref "$PROJECT_REF"
-      # The Layer 2 demo seed (CR-002) is local/CI only: never let --include-seed carry it to a hosted project.
-      - name: Drop the Layer 2 demo seed from the seed list
-        run: |
-          sed -i 's#, "./seed_layer2.sql"##' supabase/config.toml
-          if grep -q seed_layer2 supabase/config.toml; then echo "::error::seed_layer2.sql is still in the seed list"; exit 1; fi
-      - run: supabase db push ${{ inputs.include_seed && '--include-seed' || '' }}
+      - run: supabase db push
 
   production:
     # Off until a separate production project exists: set repository variable PROD_DEPLOY_ENABLED = true.

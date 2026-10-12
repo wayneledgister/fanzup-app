@@ -30,6 +30,13 @@ export const POLICY = {
     holdMinutes: 15,
     /** FR-TAX-004. Limits card-testing. */
     maxUnconfirmedPerUser: 3,
+    /** FR-PAY-006, design §4.4: an `in_progress` claim with no backing older than this is abandoned and re-claimable. */
+    abandonedClaimMinutes: 2,
+    /**
+     * FR-PAY-001, design §5: a hold whose payment ref was never stored is looked up at the provider (Stripe search on
+     * metadata) only this long after it expired, so the provider's search index has caught up.
+     */
+    expiryLookupGraceMinutes: 5,
   },
   refunds: {
     /** FR-PAY-003, NFR-COMP-05 (E1 Compliance): auto-refunds initiated within this many minutes. */
@@ -57,6 +64,18 @@ export const POLICY = {
     /** FR-PAY-007 (E1 Compliance): $1. */
     materialityMinor: 100,
     maxBreakAgeBusinessDays: 1,
+    /**
+     * Design §7 in-flight allowance: a provider movement tied to an outbound op `sent` less than this many minutes ago,
+     * or to a provider event we received less than this many minutes ago and haven't processed yet, is expected state,
+     * not a break. A `sent` op older than this is looked up at the provider (confirmed there → recorded; not found →
+     * `op_unconfirmed` break) — PR #12 review round 3, for M1 and Layer 2.
+     */
+    inflightGraceMinutes: 30,
+    /**
+     * L2 design §5.1: the per-tick Layer 2 recon skips refunded/withdrawn Pools with nothing open; once every this many
+     * hours it sweeps them too (PR #12 review round 3).
+     */
+    closedPoolSweepHours: 24,
   },
   /** NFR-SEC-13, FR-TAX-004 (E1 Security). Recorded at M1; enforced at M2. */
   rateLimits: { backingPerMinute: 5, backingPerHour: 20, writesPerMinutePerUser: 60, writesPerMinutePerIp: 120 },
@@ -64,7 +83,7 @@ export const POLICY = {
   /** FR-PRV-001. Placeholder documents until counsel-approved versions (P0b). */
   legal: { termsVersion: "2026-10-03-beta", privacyVersion: "2026-10-03-beta" },
 
-  // ── Layer 2 (CR-002, demo on mock rails). Mirrored in platform_settings by migration 20261005000200 (sync test). ──
+  // ── Layer 2 (CR-002, demo on mock rails). Mirrored in platform_settings by migration 20261011000300 (sync test). ──
   /**
    * Reg CF investor limits — REGULATORY figures, 17 CFR 227.100(a)(2) as amended (inflation adjustment effective
    * 2022-09-20). Verified 2026-10-03 against the SEC's "Regulation Crowdfunding inflation adjustments" notice
@@ -83,6 +102,11 @@ export const POLICY = {
     verifiedOn: "2026-10-03",
     /** Issuer cap per 12 months (227.100(a)(1)); the creator's tier cap (tiers.ts) is lower and applies first. */
     issuerCapMinor: 5_000_000_00,
+    /**
+     * 227.303(e)(3)(i): the issuer can't receive funds until at least 21 days after the offering information is
+     * posted, so a Pool's deadline is never less than 21 days after launch (PR #10 review, finding 2; L2-Q10).
+     */
+    minOfferingDays: 21,
   },
   l2: {
     /** Policy default: an unfunded Unit reservation holds the investor's limit and the Units this long. */
@@ -95,7 +119,15 @@ export const POLICY = {
     lockupMonths: 12,
     /** Policy defaults for the creator wizard (FR-L2-CR-003). */
     defaults: { returnCapBps: 15_000, maturityMonths: 60, distribution: "quarterly" as const, fansBps: 3_000, platformBps: 500 },
-    deadlineDays: { min: 14, max: 60 },
+    /** Pool deadline bounds; the minimum follows regCf.minOfferingDays. */
+    deadlineDays: { min: 21, max: 60 },
+    /**
+     * Design §4.3: a reservation whose provider call started is looked up at the provider (findTrade/getTrade) only
+     * this long after it expired or the investor asked to cancel, so an in-progress purchase request finishes first.
+     */
+    expiryLookupGraceMinutes: 5,
+    /** Design §5.2 (227.304(d) timing): a refund op not yet sent this many business days after it was owed opens refund_overdue. */
+    refundDirectBusinessDays: 5,
     /** Royalty periods follow the distribution schedule; a period's cash is due this long after it ends (01b §5). */
     periodMonths: 3,
     settlementDueDays: 45,

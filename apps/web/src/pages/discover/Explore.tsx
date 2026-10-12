@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Compass, RefreshCw, SearchX, WifiOff } from "lucide-react";
 import { Button, Callout, Container, EmptyState, PageHeader } from "@/components/brand";
@@ -23,25 +23,37 @@ export default function Explore() {
   const type = (TYPES as readonly string[]).includes(params.get("type") ?? "") ? (params.get("type") as (typeof TYPES)[number]) : "All";
   const [items, setItems] = useState<CampaignCard[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "error" | "more">("loading");
+  // "more-error": a "Show more" page failed; the loaded list stays and its retry resumes from `cursor`.
+  const [state, setState] = useState<"loading" | "ready" | "error" | "more" | "more-error">("loading");
+  // One controller per (tab, type) view: switching aborts the old view's requests so a late response can't land in the new one.
+  const view = useRef<AbortController | null>(null);
 
   const load = useCallback(
     async (from: string | null) => {
+      const ctl = view.current;
+      if (!ctl || ctl.signal.aborted) return;
       setState(from ? "more" : "loading");
       try {
-        const r = await api.campaigns({ tab, type: type === "All" ? undefined : type, cursor: from });
+        const r = await api.campaigns({ tab, type: type === "All" ? undefined : type, cursor: from }, ctl.signal);
+        if (ctl.signal.aborted) return;
         setItems((prev) => (from ? [...prev, ...r.campaigns] : r.campaigns));
         setCursor(r.nextCursor);
         setState("ready");
       } catch {
-        setState("error");
+        if (ctl.signal.aborted) return;
+        setState(from ? "more-error" : "error");
       }
     },
     [tab, type],
   );
 
   useEffect(() => {
+    const ctl = new AbortController();
+    view.current = ctl;
+    setItems([]);
+    setCursor(null);
     void load(null);
+    return () => ctl.abort();
   }, [load]);
 
   const set = (k: string, v: string | null) => {
@@ -97,7 +109,7 @@ export default function Explore() {
         </Callout>
       )}
 
-      {(state === "ready" || state === "more") && items.length === 0 && (
+      {state === "ready" && items.length === 0 && (
         <EmptyState icon={tab === "live" ? <Compass /> : <SearchX />} title={tab === "live" ? "No live campaigns right now" : "No funded campaigns yet"}>
           {type !== "All" ? "Try another type, or look at all campaigns." : "New campaigns are reviewed before they go live. Check back soon."}
         </EmptyState>
@@ -109,10 +121,13 @@ export default function Explore() {
         </div>
       )}
 
-      {cursor && state !== "loading" && (
-        <div className="flex justify-center">
+      {cursor && state !== "loading" && state !== "error" && (
+        <div className="flex flex-col items-center gap-3">
+          {state === "more-error" && (
+            <p className="text-sm text-muted" role="status">We couldn't load more campaigns. Check your connection and try again.</p>
+          )}
           <Button variant="secondary" onClick={() => void load(cursor)} disabled={state === "more"}>
-            {state === "more" ? "Loading…" : "Show more"}
+            {state === "more" ? "Loading…" : state === "more-error" ? <><RefreshCw /> Retry</> : "Show more"}
           </Button>
         </div>
       )}

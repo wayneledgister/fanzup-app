@@ -5,13 +5,22 @@
  *   initiated ──provider ok──────────────────────────► confirmed        (payouts: the transfer response confirms)
  *   any error → classified: retry (counted, backoff, dead at max) · wait_funds (not counted) · permanent (failed)
  *
- * The op row is committed before the provider is called; a retry asks the provider for the original attempt first;
- * the ledger posts only on confirmation and only the exact amount. No DB lock is held across a provider call.
+ * The op row is committed before the provider is called; EVERY run asks the provider for an earlier attempt first
+ * (whatever `attempts` says — the call may have acted before we recorded anything); the ledger posts only on
+ * confirmation and only the exact amount. No DB lock is held across a provider call. A payout's amount is re-derived
+ * from the ledger right before its first provider call and frozen from then on (never a stale amount).
+ * A `permanent` error fails the op with an alert; only an amount mismatch also opens a recon break (design §5).
+ *
+ * Attempt generations (PR #12 review round 5; design §5 "Attempt generations"): the provider key is
+ * `attemptKey(idempotency_key, attempt_gen)` and lookups match only the current generation. A movement the provider
+ * reports failed/canceled (lookup, the call's own response, the `refund.failed` webhook, recon) is NEVER re-adopted and
+ * never "sent": the op goes `failed` (alert) with the ref appended to `failed_refs`. `outbound_op.replay` of such an op
+ * starts the next generation, so the runner issues exactly one new movement under a fresh key.
  */
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n, type Sql, type Tx } from "./db";
 import { runWithCtx } from "./context";
-import { ProviderError, type PaymentProvider } from "./provider";
+import { attemptKey, isFailedMovement, ProviderError, type PaymentProvider } from "./provider";
 import { log, redact } from "./log";
 import { isPayoutPaused } from "./recon";
 
@@ -20,33 +29,104 @@ export interface OpRow {
   kind: "refund" | "payout";
   subject_id: string;
   campaign_id: string;
+  /** Set only for a stray-capture refund (design §3.5.1): the payment to refund; subject_id is the provider event. */
+  payment_ref: string | null;
   amount_minor: bigint;
   idempotency_key: string;
   status: string;
   provider_ref: string | null;
+  /** Set just before the first provider call; a payout's amount is frozen from then on. */
+  call_started_at: Date | null;
   attempts: number;
+  /** Attempt generation (design §5): provider key `attemptKey(idempotency_key, attempt_gen)`. */
+  attempt_gen: number;
+  /** Provider movements reported failed for this op: `{ gen, ref, status, via, at }`. */
+  failed_refs: { gen: number; ref: string; status: string; via: string; at: string }[];
   correlation_id: string | null;
   created_at: Date;
 }
 
-/** Create (once) the refund op for a backing. Amount = what was actually captured. */
+/**
+ * The provider reported this op's movement failed/canceled (no money moved): op `failed` + alert, the ref appended to
+ * `failed_refs` with its generation — never re-adopted, never "sent", never posted. Applies only while the op is still
+ * on that generation and not confirmed, so a stale report about an earlier generation can't fail a newer attempt.
+ * Shared by the runner (lookup / call response), the `refund.failed` webhook (inbox.ts) and recon's lookup (recon.ts).
+ */
+export async function recordFailedMovement(
+  sql: Sql, op: Pick<OpRow, "id" | "kind">, f: { gen: number; ref: string; status: string; via: string; lastError: string },
+): Promise<boolean> {
+  const entry = { gen: f.gen, ref: f.ref, status: f.status, via: f.via, at: new Date().toISOString() };
+  const [row] = await asService(sql, (tx) => tx<{ id: string }[]>`
+    update public.outbound_ops
+       set status = 'failed', last_error = ${redact(f.lastError)}, lease_until = null, waiting = null,
+           failed_refs = case when failed_refs @> ${tx.json([{ gen: f.gen, ref: f.ref }])} then failed_refs else failed_refs || ${tx.json([entry])} end
+     where id = ${op.id} and status <> 'confirmed' and attempt_gen = ${f.gen}
+     returning id`);
+  if (row) {
+    log("alert", `${op.kind}.failed`, { opId: op.id, providerRef: f.ref, status: f.status, attempt: f.gen, via: f.via });
+    return true;
+  }
+  // Not updated: either a stale report about an earlier generation (harmless), or the provider failed a movement it
+  // had already reported as succeeded on the current generation (e.g. a Stripe refund failing after `succeeded`).
+  // The latter means the ledger shows money out that came back — page on-call, as the L2 twin does.
+  const [cur] = await asService(sql, (tx) => tx<{ status: string; attempt_gen: number }[]>`
+    select status, attempt_gen from public.outbound_ops where id = ${op.id}`);
+  if (cur && cur.status === "confirmed" && cur.attempt_gen === f.gen) {
+    log("alert", `${op.kind}.failed_after_confirmed`, { opId: op.id, providerRef: f.ref, status: f.status, attempt: f.gen, via: f.via });
+  } else {
+    log("warn", "outbound.failed_movement_stale", { opId: op.id, providerRef: f.ref, attempt: f.gen, via: f.via });
+  }
+  return false;
+}
+
+/** Create (once) the refund op for a backing. Amount = what was actually captured (captured_minor). */
 export async function ensureRefundOp(tx: Tx, backingId: string, reason: string | null) {
   await tx`
     insert into public.outbound_ops (kind, subject_id, campaign_id, amount_minor, idempotency_key, reason)
     select 'refund', b.id, b.campaign_id, b.captured_minor, 'refund:' || b.id, ${reason}
       from public.backings b
-     where b.id = ${backingId} and b.status in ('held', 'refund_pending') and b.captured_minor is not null
+     where b.id = ${backingId} and b.status = 'refund_pending' and b.captured_minor is not null
     on conflict (kind, subject_id) do nothing`;
 }
 
-/** Create (once) the payout op for a verified tranche. Amount = what the rules say is owed now. */
+/**
+ * Create (once) the payout op for a verified tranche — only when every earlier tranche is already released, because
+ * what a tranche is owed (`tranche_release_amount`) depends on the earlier releases (the last tranche gets whatever
+ * `artist_payable` still holds). A tranche verified while an earlier one is still paying gets its op when that one
+ * releases: `record_tranche_released` re-queues `tranche.release` for it (PR #7 review round 3; design §3.5, §5).
+ */
 export async function ensurePayoutOp(tx: Tx, trancheId: string) {
   await tx`
     insert into public.outbound_ops (kind, subject_id, campaign_id, amount_minor, idempotency_key)
     select 'payout', t.id, t.campaign_id, public.tranche_release_amount(t.id), 'release:' || t.id
       from public.campaign_tranches t
      where t.id = ${trancheId} and t.status = 'verified' and public.tranche_release_amount(t.id) > 0
+       and not exists (select 1 from public.campaign_tranches x where x.campaign_id = t.campaign_id and x.seq < t.seq and x.status <> 'released')
     on conflict (kind, subject_id) do nothing`;
+}
+
+/**
+ * Just before a payout's provider call (no transfer found for the op): re-derive what the ledger will accept at
+ * confirmation and record that the call has started, in one transaction. Before the first call the op amount is
+ * brought up to date; once a call has started it never changes, and a differing amount fails the op instead of
+ * sending a stale figure (design §5). Returns the amount to send.
+ */
+async function startPayoutCall(sql: Sql, op: OpRow): Promise<number> {
+  return asService(sql, async (tx) => {
+    const [row] = await tx<{ amount_minor: bigint; call_started_at: Date | null; owed: bigint | null }[]>`
+      select o.amount_minor, o.call_started_at, public.tranche_release_amount(o.subject_id) as owed
+        from public.outbound_ops o where o.id = ${op.id} for update`;
+    const owed = n(row.owed ?? 0);
+    if (owed <= 0) throw new ProviderError("permanent", "payout_nothing_owed", "Nothing is owed for this tranche");
+    if (owed !== n(row.amount_minor)) {
+      if (row.call_started_at) {
+        throw new ProviderError("permanent", "payout_amount_changed", `Owed ${owed} differs from ${n(row.amount_minor)} already sent to the provider`);
+      }
+      log("warn", "outbound.payout_amount_updated", { opId: op.id, from: n(row.amount_minor), to: owed });
+    }
+    await tx`update public.outbound_ops set amount_minor = ${owed}, call_started_at = coalesce(call_started_at, now()) where id = ${op.id}`;
+    return owed;
+  });
 }
 
 /** Run due ops one at a time. Each op is leased for 5 minutes so two workers never run the same op. */
@@ -75,11 +155,27 @@ export async function runOp(sql: Sql, provider: PaymentProvider, op: OpRow) {
   const amount = n(op.amount_minor);
   try {
     if (op.kind === "refund") {
-      const [b] = await asService(sql, (tx) => tx<{ payment_ref: string | null }[]>`select payment_ref from public.backings where id = ${op.subject_id}`);
-      if (!b?.payment_ref) throw new ProviderError("permanent", "no_payment_ref", "Backing has no payment to refund");
-      const prior = op.attempts > 0 || op.provider_ref ? await provider.findRefund({ paymentRef: b.payment_ref, opId: op.id }) : null;
-      const res = prior ?? (await provider.refund({ paymentRef: b.payment_ref, amountMinor: amount, idempotencyKey: op.idempotency_key, opId: op.id, backingId: op.subject_id, campaignId: op.campaign_id }));
-      if (res.amountMinor !== amount) throw new ProviderError("permanent", "amount_mismatch", `provider refunded ${res.amountMinor}, op is ${amount}`);
+      // A stray-capture refund names its payment on the op; a backing refund reads it from the backing.
+      let paymentRef = op.payment_ref;
+      if (!paymentRef) {
+        const [b] = await asService(sql, (tx) => tx<{ payment_ref: string | null }[]>`select payment_ref from public.backings where id = ${op.subject_id}`);
+        paymentRef = b?.payment_ref ?? null;
+      }
+      if (!paymentRef) throw new ProviderError("permanent", "no_payment_ref", "Backing has no payment to refund");
+      // Lookup before (re-)call, current generation only; the call uses the generation's key (design §5).
+      const attempt = op.attempt_gen ?? 0;
+      const res =
+        (await provider.findRefund({ paymentRef, opId: op.id, attempt })) ??
+        (await provider.refund({
+          paymentRef, amountMinor: amount, idempotencyKey: attemptKey(op.idempotency_key, attempt), opId: op.id, attempt,
+          backingId: op.payment_ref ? null : op.subject_id, campaignId: op.campaign_id,
+        }));
+      if (isFailedMovement(res.status)) {
+        // Failed/canceled at the provider: not success, not "sent" — never re-adopted (review round 5, PR #12).
+        await recordFailedMovement(sql, op, { gen: attempt, ref: res.refundRef, status: String(res.status), via: "runner", lastError: `refund failed: ${res.status}` });
+        return;
+      }
+      if (res.amountMinor !== amount) return failOpOnAmountMismatch(sql, op, res.refundRef, res.amountMinor);
       // Only move initiated → sent: the confirmation event may already have marked it confirmed.
       await asService(sql, (tx) => tx`
         update public.outbound_ops set status = 'sent', provider_ref = ${res.refundRef}, attempts = attempts + 1, waiting = null, lease_until = null, last_error = null
@@ -96,21 +192,62 @@ export async function runOp(sql: Sql, provider: PaymentProvider, op: OpRow) {
        where t.id = ${op.subject_id}`);
     if (t.earlier_pending) return defer(sql, op, "earlier_tranche", 30);
     if (!t.payout_ref) return defer(sql, op, "payout_account", 15 * 60);
-    const prior = op.attempts > 0 || op.provider_ref ? await provider.findTransfer({ campaignId: op.campaign_id, opId: op.id }) : null;
-    const res = prior ?? (await provider.transfer({ campaignId: op.campaign_id, trancheId: op.subject_id, destination: t.payout_ref, amountMinor: amount, idempotencyKey: op.idempotency_key, opId: op.id }));
-    await confirmPayout(sql, op, res.transferRef, res.amountMinor);
+    const attempt = op.attempt_gen ?? 0;
+    let res = await provider.findTransfer({ campaignId: op.campaign_id, opId: op.id, attempt });
+    if (!res) {
+      // Never send a stale amount: what is owed is re-derived from the ledger right before the call (design §5).
+      const sendAmount = await startPayoutCall(sql, op);
+      op = { ...op, amount_minor: BigInt(sendAmount) };
+      res = await provider.transfer({
+        campaignId: op.campaign_id, trancheId: op.subject_id, destination: t.payout_ref, amountMinor: sendAmount,
+        idempotencyKey: attemptKey(op.idempotency_key, attempt), opId: op.id, attempt,
+      });
+    }
+    if (res.amountMinor !== n(op.amount_minor)) return failOpOnAmountMismatch(sql, op, res.transferRef, res.amountMinor);
+    try {
+      await confirmPayout(sql, op, res.transferRef, res.amountMinor);
+    } catch (e) {
+      // Keep the provider's ref on the op whatever happens next: the money has moved.
+      await asService(sql, (tx) => tx`update public.outbound_ops set provider_ref = ${res.transferRef} where id = ${op.id} and provider_ref is null`);
+      throw e;
+    }
   } catch (e) {
     await recordFailure(sql, op, e);
   }
 }
 
+/**
+ * The provider moved a different amount than the op (refund response, refund event or transfer): the op fails with
+ * the provider's ref kept, a recon break opens, and staff decide — never "fixed" in place (design §5).
+ */
+export async function failOpOnAmountMismatch(
+  sql: Sql, op: Pick<OpRow, "id" | "kind" | "campaign_id" | "amount_minor">, providerRef: string, providerAmount: number,
+  breakAmount = providerAmount - n(op.amount_minor), why = `provider moved ${providerAmount}, op is ${n(op.amount_minor)}`,
+) {
+  const msg = redact(`amount_mismatch: ${why}`);
+  await asService(sql, async (tx) => {
+    await tx`update public.outbound_ops set status = 'failed', provider_ref = ${providerRef}, last_error = ${msg}, lease_until = null
+             where id = ${op.id} and status <> 'confirmed'`;
+    await tx`insert into public.recon_breaks (dedupe_key, kind, campaign_id, amount_minor, refs)
+             values (${"op_amount:" + op.id}, 'amount_mismatch', ${op.campaign_id}, ${breakAmount},
+                     ${tx.json({ op_id: op.id, provider_ref: providerRef, expected_minor: n(op.amount_minor), provider_minor: providerAmount })})
+             on conflict do nothing`;
+  });
+  log("alert", "outbound.amount_mismatch", { opId: op.id, kind: op.kind, providerRef, providerAmount });
+}
+
+/**
+ * Classify and record a failed run. Never touches a `confirmed` op: a confirmation (e.g. `transfer.created` or a
+ * refund event) can land while the provider call is still failing.
+ */
 async function recordFailure(sql: Sql, op: OpRow, e: unknown) {
   const err = e instanceof ProviderError ? e : new ProviderError(isRuleViolation(e) ? "permanent" : "retry", errCode(e), String((e as Error)?.message ?? e));
   const msg = redact(`${err.code}: ${err.message}`);
   if (err.cls === "wait_funds") {
     // Waiting for available balance doesn't consume attempts (G2 blocker 1). After a week it becomes a recon break.
     await asService(sql, async (tx) => {
-      await tx`update public.outbound_ops set waiting = 'funds', last_error = ${msg}, lease_until = null, next_attempt_at = now() + interval '15 minutes' where id = ${op.id}`;
+      await tx`update public.outbound_ops set waiting = 'funds', last_error = ${msg}, lease_until = null, next_attempt_at = now() + interval '15 minutes'
+               where id = ${op.id} and status <> 'confirmed'`;
       if (Date.now() - op.created_at.getTime() > POLICY.outbound.waitFundsBreakDays * 86_400_000) {
         await tx`insert into public.recon_breaks (dedupe_key, kind, campaign_id, amount_minor, refs)
                  values (${"waiting_funds:" + op.id}, 'waiting_funds', ${op.campaign_id}, ${n(op.amount_minor)}, ${tx.json({ op_id: op.id })})
@@ -120,14 +257,13 @@ async function recordFailure(sql: Sql, op: OpRow, e: unknown) {
     return;
   }
   if (err.cls === "permanent") {
-    await asService(sql, async (tx) => {
-      await tx`update public.outbound_ops set status = 'failed', last_error = ${msg}, lease_until = null where id = ${op.id}`;
-      if (err.code === "amount_mismatch" || err.code === "payout_amount_mismatch") {
-        await tx`insert into public.recon_breaks (dedupe_key, kind, campaign_id, amount_minor, refs)
-                 values (${"op_amount:" + op.id}, 'amount_mismatch', ${op.campaign_id}, ${n(op.amount_minor)}, ${tx.json({ op_id: op.id, error: msg })})
-                 on conflict do nothing`;
-      }
-    });
+    if (err.code === "amount_mismatch" || err.code === "payout_amount_mismatch") {
+      const [cur] = await asService(sql, (tx) => tx<{ provider_ref: string | null }[]>`select provider_ref from public.outbound_ops where id = ${op.id}`);
+      // The ledger refused the amount (e.g. payout ≠ what is owed): the whole op amount is in question.
+      return failOpOnAmountMismatch(sql, op, cur?.provider_ref ?? "", n(op.amount_minor), n(op.amount_minor), msg);
+    }
+    // Failed + alert only; no recon break, no payout pause. Staff replay with a reason after fixing the cause.
+    await asService(sql, (tx) => tx`update public.outbound_ops set status = 'failed', last_error = ${msg}, lease_until = null where id = ${op.id} and status <> 'confirmed'`);
     log("alert", "outbound.failed", { opId: op.id, kind: op.kind, code: err.code });
     return;
   }
@@ -138,7 +274,7 @@ async function recordFailure(sql: Sql, op: OpRow, e: unknown) {
     update public.outbound_ops
        set attempts = ${attempts}, status = ${dead ? "dead" : "initiated"}, last_error = ${msg}, lease_until = null,
            next_attempt_at = now() + make_interval(secs => ${backoff})
-     where id = ${op.id}`);
+     where id = ${op.id} and status <> 'confirmed'`);
   if (dead) log("alert", "outbound.dead_letter", { opId: op.id, kind: op.kind, attempts }); // pages on-call once alerting exists (design §12)
 }
 
@@ -151,13 +287,33 @@ export async function confirmPayout(sql: Sql, op: Pick<OpRow, "id" | "subject_id
   });
 }
 
-/** Refund confirmed by the provider's event; applies whatever state the op is in (the event can beat our own commit). */
-export async function confirmRefund(sql: Sql, op: Pick<OpRow, "id" | "subject_id" | "idempotency_key">, refundRef: string, amountMinor: number) {
+/**
+ * Refund confirmed by the provider's event; applies whatever state the op is in (the event can beat our own commit).
+ * A stray-capture refund (op.payment_ref set) posts through record_stray_refund_confirmed.
+ */
+export async function confirmRefund(sql: Sql, op: Pick<OpRow, "id" | "subject_id" | "idempotency_key" | "payment_ref">, refundRef: string, amountMinor: number) {
   await asService(sql, async (tx) => {
-    await tx`select public.record_refund_confirmed(${op.subject_id}, ${refundRef}, ${amountMinor}, ${op.idempotency_key})`;
+    if (op.payment_ref) await tx`select public.record_stray_refund_confirmed(${op.payment_ref}, ${refundRef}, ${amountMinor}, ${op.idempotency_key})`;
+    else await tx`select public.record_refund_confirmed(${op.subject_id}, ${refundRef}, ${amountMinor}, ${op.idempotency_key})`;
     await tx`update public.outbound_ops set status = 'confirmed', provider_ref = ${refundRef}, waiting = null, lease_until = null, last_error = null
              where id = ${op.id}`;
   });
+}
+
+/**
+ * A refund confirmation (the provider's event, or recon's lookup of a `sent` op whose event never came): post it, or —
+ * when the provider refunded a different amount than the op — fail the op and open a break, never "fix" it (design §5).
+ */
+export async function confirmRefundOrFlag(sql: Sql, op: Pick<OpRow, "id" | "kind" | "subject_id" | "campaign_id" | "amount_minor" | "idempotency_key" | "payment_ref">, refundRef: string, amountMinor: number) {
+  try {
+    await confirmRefund(sql, op, refundRef, amountMinor);
+  } catch (e) {
+    if ((e as { code?: string }).code === "P0001" && (e as { message?: string }).message === "refund_amount_mismatch") {
+      await failOpOnAmountMismatch(sql, op, refundRef, amountMinor);
+      return;
+    }
+    throw e;
+  }
 }
 
 const isRuleViolation = (e: unknown) => (e as { code?: string })?.code === "P0001";

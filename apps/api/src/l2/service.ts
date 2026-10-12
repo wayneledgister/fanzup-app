@@ -1,26 +1,28 @@
 /**
  * Layer 2 sequencing (design §4–§7). Money state changes happen only inside the SQL functions; this module calls them
- * in order with the Reg CF provider. The one computation done here is the Waterfall allocation (pure, shared), which
- * the SQL commit re-verifies (collected-only, conservation, cap, split).
+ * in order with the Reg CF provider, passing ONE clock (`now`, the request's or the worker tick's) into every money
+ * function (design §4.2). The one computation done here is the Waterfall allocation (pure, shared), which the SQL
+ * commit re-verifies (collected-only, conservation, cap, split).
+ *
+ * Purchase and reservation expiry: ./purchase.ts. Ledger ⇄ provider reconciliation: ./recon.ts.
  */
 import { createHash } from "node:crypto";
-import { allocateWaterfall, canonicalJson, type CertificationRequest, type InvestRequest, type KycStartRequest, type PoolDraftRequest, type StatementRequest } from "@fanzup/shared";
+import { allocateWaterfall, canonicalJson, type CertificationRequest, type KycStartRequest, type PoolDraftRequest, type StatementRequest } from "@fanzup/shared";
 import { CertificationRequest as CertSchema, PoolDraftRequest as DraftSchema } from "@fanzup/shared/l2schemas";
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n, type Sql, type Tx } from "../db";
 import { currentCtx, newCorrelationId, runWithCtx } from "../context";
 import { HttpError } from "../lib/auth";
 import { log, redact } from "../log";
-import { RegCfError, type RegCfProvider } from "../regcf";
+import type { RegCfProvider } from "../regcf";
 import { buildFormC } from "./formc";
 import { runDuePoolOps } from "./ops";
 import { regcfOf, type L2Deps } from "./gate";
+import { expireReservations, providerDown } from "./purchase";
+import { reconcileL2Ledger } from "./recon";
 
-const providerDown = (e: unknown) => {
-  if (e instanceof HttpError) return e;
-  if (e instanceof RegCfError && e.cls === "permanent") return new HttpError(409, `provider_${e.code}`, e.message);
-  return new HttpError(502, "provider_unavailable", "We couldn't reach the escrow provider. Nothing was charged — try again.");
-};
+export { invest, expireReservations } from "./purchase";
+export { reconcileL2Ledger } from "./recon";
 
 // ── Investor onboarding ──────────────────────────────────────────────
 export async function startKyc(d: L2Deps, userId: string, body: KycStartRequest) {
@@ -47,25 +49,35 @@ export async function startKyc(d: L2Deps, userId: string, body: KycStartRequest)
   }
 }
 
+/**
+ * Income / net-worth attestation (FR-L2-INV-002). The state of residence is the one the identity check was started
+ * with: once the provider party exists, the certification can't change it (round-1 review, PR #12).
+ */
 export async function certify(sql: Sql, userId: string, raw: CertificationRequest) {
   const b = CertSchema.parse(raw);
   await asService(sql, async (tx) => {
+    const [cur] = await tx<{ state: string | null; party: string | null }[]>`
+      select state, provider_party_ref as party from public.investor_profiles where user_id = ${userId} for update`;
+    if (cur?.party && b.state && b.state !== cur.state) {
+      throw new HttpError(409, "state_locked", "Your state of residence was set when your identity check started. Contact support to change it.");
+    }
     await tx`
       insert into public.investor_profiles (user_id, annual_income_minor, net_worth_minor, accredited, elsewhere_12m_minor, certified_at, state)
       values (${userId}, ${b.annualIncomeMinor}, ${b.netWorthMinor}, ${b.accredited}, ${b.elsewhereMinor}, now(), ${b.state ?? null})
       on conflict (user_id) do update set annual_income_minor = excluded.annual_income_minor, net_worth_minor = excluded.net_worth_minor,
              accredited = excluded.accredited, elsewhere_12m_minor = excluded.elsewhere_12m_minor, certified_at = now(),
-             state = coalesce(excluded.state, public.investor_profiles.state)`;
+             state = case when public.investor_profiles.provider_party_ref is null then coalesce(excluded.state, public.investor_profiles.state)
+                          else public.investor_profiles.state end`;
     // Audit holds flags only — never the figures (L2 gate condition 6).
     await tx`insert into public.audit_events (action, entity, entity_id, data) values ('investor.certified', 'investor', ${userId}, ${tx.json({ accredited: b.accredited })})`;
   });
   return investorMe(sql, userId);
 }
 
-export async function investorMe(sql: Sql, userId: string) {
+export async function investorMe(sql: Sql, userId: string, now = new Date()) {
   const [r] = await asService(sql, (tx) => tx<{ kyc_status: string | null; state: string | null; certified: boolean; accredited: boolean; lim: bigint | null; used: bigint }[]>`
     select ip.kyc_status::text, ip.state, ip.certified_at is not null as certified, coalesce(ip.accredited, false) as accredited,
-           public.regcf_investor_limit(${userId}) as lim, public.regcf_usage(${userId}) as used
+           public.regcf_investor_limit(${userId}) as lim, public.regcf_usage(${userId}, ${now}) as used
       from (select ${userId}::uuid as id) u left join public.investor_profiles ip on ip.user_id = u.id`);
   const limit = r.lim == null ? null : n(r.lim);
   const used = n(r.used);
@@ -79,57 +91,6 @@ export async function investorMe(sql: Sql, userId: string) {
     remainingMinor: !r.certified ? 0 : limit == null ? null : Math.max(0, limit - used),
     regCf: { verifiedOn: POLICY.regCf.verifiedOn },
   };
-}
-
-// ── Purchase (FR-L2-INV-004): claim-first idempotency (M1 pattern) ─────
-type Claim = { request_hash: string; response: unknown; status_code: number | null; state: string; resource_id: string | null };
-
-export async function invest(d: L2Deps, userId: string, poolId: string, key: string, body: InvestRequest) {
-  const regcf = regcfOf(d);
-  const hash = createHash("sha256").update(JSON.stringify({ u: userId, poolId, body })).digest("hex");
-  const scoped = `investments:${userId}:${key}`;
-  const [mine] = await asService(d.sql, (tx) => tx<{ key: string }[]>`
-    insert into public.api_idempotency (key, user_id, request_hash, state) values (${scoped}, ${userId}, ${hash}, 'in_progress')
-    on conflict (key) do nothing returning key`);
-  let invId: string | null = null;
-  if (!mine) {
-    const [prior] = await asService(d.sql, (tx) => tx<Claim[]>`select request_hash, response, status_code, state, resource_id from public.api_idempotency where key = ${scoped}`);
-    if (prior.request_hash !== hash) throw new HttpError(422, "idempotency_key_reused", "That Idempotency-Key was used for a different request.");
-    if (prior.state === "done" && prior.response) return { status: prior.status_code ?? 201, body: prior.response };
-    if (!prior.resource_id) throw new HttpError(409, "in_progress", "This purchase is already being processed. Wait a moment and try again.");
-    invId = prior.resource_id;
-  }
-  if (!invId) {
-    try {
-      const [r] = await asService(d.sql, async (tx) => {
-        const rows = await tx<{ investment_id: string }[]>`select * from public.reserve_investment(${userId}, ${poolId}, ${body.units}, ${body.riskAckVersion})`;
-        await tx`update public.api_idempotency set resource_id = ${rows[0].investment_id} where key = ${scoped}`;
-        return rows;
-      });
-      invId = r.investment_id;
-    } catch (e) {
-      await asService(d.sql, (tx) => tx`delete from public.api_idempotency where key = ${scoped} and resource_id is null`);
-      throw e;
-    }
-  }
-  const [i] = await asService(d.sql, (tx) => tx<{ status: string; units: number; amount: bigint; unit_price: bigint; offering: string; account: string }[]>`
-    select i.status::text, i.units, i.amount_minor as amount, i.unit_price_minor as unit_price, p.provider_offering_ref as offering, ip.provider_account_ref as account
-      from public.investments i join public.pools p on p.id = i.pool_id join public.investor_profiles ip on ip.user_id = i.investor_id
-     where i.id = ${invId}`);
-  if (i.status === "expired" || i.status === "cancelled") throw new HttpError(409, "reservation_expired", "Your reservation expired. Start again from the Pool page.");
-  if (i.status === "reserved") {
-    try {
-      const trade = await regcf.createTrade({ offeringId: i.offering, accountId: i.account, units: i.units, unitPrice: n(i.unit_price), amount: n(i.amount), externalId: invId }, `trade:${invId}`);
-      const fund = await regcf.fundTrade(trade.id, { amount: n(i.amount), externalId: invId }, `fund:${invId}`);
-      await asService(d.sql, (tx) => tx`select public.mark_investment_funding(${invId}, ${trade.id}, ${fund.id})`);
-    } catch (e) {
-      throw providerDown(e);
-    }
-  }
-  const [now] = await asService(d.sql, (tx) => tx<{ status: string }[]>`select status::text from public.investments where id = ${invId}`);
-  const response = { investmentId: invId, status: now.status, amountMinor: n(i.amount), units: i.units };
-  await asService(d.sql, (tx) => tx`update public.api_idempotency set response = ${tx.json(response as never)}, status_code = 201, state = 'done' where key = ${scoped}`);
-  return { status: 201, body: response };
 }
 
 // ── Creator: drafts, submit, launch (FR-L2-CR-001…005) ───────────────
@@ -189,11 +150,13 @@ export async function createPoolDraft(sql: Sql, userId: string, raw: PoolDraftRe
   }
 }
 
+/** Edits are conditional updates under the Pool row lock; the SQL terms guard refuses them outside draft/revisions. */
 export async function updatePoolDraft(sql: Sql, userId: string, poolId: string, raw: PoolDraftRequest) {
-  const pool = await ownPool(sql, userId, poolId);
-  if (!["draft", "revisions_requested"].includes(pool.status)) throw new HttpError(409, "pool_not_editable", "Only drafts and Pools with requested revisions can be edited.");
+  await ownPool(sql, userId, poolId);
   const { b, creatorBps, target } = validateDraft(raw);
   await asService(sql, async (tx) => {
+    const [p] = await tx<{ status: string }[]>`select status::text from public.pools where id = ${poolId} for update`;
+    if (!["draft", "revisions_requested"].includes(p.status)) throw new HttpError(409, "pool_not_editable", "Only drafts and Pools with requested revisions can be edited.");
     await tx`update public.pools set slug = ${b.slug}, title = ${b.title}, artist_display = coalesce(${b.artistDisplay ?? null}, artist_display), genre = ${b.genre ?? null},
                release_date = ${b.releaseDate ?? null}, tracklist = ${tx.json(b.tracklist)}, story = ${b.story ?? null}, risks = ${b.risks ?? null},
                use_of_funds = ${tx.json(b.useOfFunds as never)}, revenue_types = ${b.revenueTypes}::public.revenue_type[], fans_bps = ${b.fansBps}, creator_bps = ${creatorBps},
@@ -213,18 +176,23 @@ export async function ownPool(sql: Sql, userId: string, poolId: string) {
   return p;
 }
 
-export async function formCInput(sql: Sql, poolId: string) {
-  const [p] = await asService(sql, (tx) => tx<{
-    id: string; title: string; artist_display: string; artist_name: string; tier: string; release_date: Date | null; tracklist: string[]; story: string | null; risks: string | null;
-    use_of_funds: { label: string; amountMinor: number }[]; revenue_types: string[]; fans_bps: number; creator_bps: number; platform_bps: number; units_total: number;
-    unit_price_minor: bigint; min_units: number; target_minor: bigint; duration_days: number; return_cap_bps: number; maturity_months: number; collection_mechanism: string;
-  }[]>`
-    select p.id, p.title, p.artist_display, a.name as artist_name, a.tier::text, p.release_date, p.tracklist, p.story, p.risks, p.use_of_funds,
-           p.revenue_types::text[] as revenue_types, p.fans_bps, p.creator_bps, p.platform_bps, p.units_total, p.unit_price_minor, p.min_units, p.target_minor,
-           p.duration_days, p.return_cap_bps, p.maturity_months, p.collection_mechanism::text
-      from public.pools p join public.artists a on a.id = p.artist_id where p.id = ${poolId}`);
-  const tranches = await asService(sql, (tx) => tx<{ seq: number; pct: number; milestone: string | null; target_date: Date | null }[]>`
-    select seq, pct, milestone, target_date from public.pool_tranches where pool_id = ${poolId} order by seq`);
+/** The mock Form C of a Pool, built from its current row (inside `tx` when given, e.g. under the submit locks). */
+export async function formCInput(sqlOrTx: Sql | Tx, poolId: string) {
+  const read = async (tx: Tx) => {
+    const [p] = await tx<{
+      id: string; title: string; artist_display: string; artist_name: string; tier: string; release_date: Date | null; tracklist: string[]; story: string | null; risks: string | null;
+      use_of_funds: { label: string; amountMinor: number }[]; revenue_types: string[]; fans_bps: number; creator_bps: number; platform_bps: number; units_total: number;
+      unit_price_minor: bigint; min_units: number; target_minor: bigint; duration_days: number; return_cap_bps: number; maturity_months: number; collection_mechanism: string;
+    }[]>`
+      select p.id, p.title, p.artist_display, a.name as artist_name, a.tier::text, p.release_date, p.tracklist, p.story, p.risks, p.use_of_funds,
+             p.revenue_types::text[] as revenue_types, p.fans_bps, p.creator_bps, p.platform_bps, p.units_total, p.unit_price_minor, p.min_units, p.target_minor,
+             p.duration_days, p.return_cap_bps, p.maturity_months, p.collection_mechanism::text
+        from public.pools p join public.artists a on a.id = p.artist_id where p.id = ${poolId}`;
+    const tranches = await tx<{ seq: number; pct: number; milestone: string | null; target_date: Date | null }[]>`
+      select seq, pct, milestone, target_date from public.pool_tranches where pool_id = ${poolId} order by seq`;
+    return { p, tranches };
+  };
+  const { p, tranches } = "savepoint" in (sqlOrTx as object) ? await read(sqlOrTx as Tx) : await asService(sqlOrTx as Sql, read);
   return buildFormC({
     poolId: p.id, title: p.title, artistDisplay: p.artist_display, artistName: p.artist_name, tier: p.tier,
     releaseDate: p.release_date ? p.release_date.toISOString().slice(0, 10) : null, tracklist: p.tracklist, story: p.story, risks: p.risks,
@@ -235,46 +203,82 @@ export async function formCInput(sql: Sql, poolId: string) {
   });
 }
 
-export async function submitPool(sql: Sql, userId: string, poolId: string) {
+/**
+ * Submit for Form C review. The Form C is built INSIDE the transaction that holds the owner's artist locks and the Pool
+ * lock (the same order submit_pool takes, §4.2), so the document and `terms_sha256` describe the same terms: a PATCH
+ * racing the submit either lands before it (and is in both) or is refused by the terms guard (round-1 review, PR #12).
+ */
+export async function submitPool(sql: Sql, userId: string, poolId: string, otherRegCfSales12mMinor: number, now = new Date()) {
   await ownPool(sql, userId, poolId);
-  const fc = await formCInput(sql, poolId);
-  await asService(sql, (tx) => tx`select public.submit_pool(${poolId}, ${userId}, ${tx.json(fc.body as never)}, ${fc.sha256})`);
-  return { status: "in_review", formC: { sha256: fc.sha256 }, reviewEstimate: POLICY.campaign.reviewEstimate };
+  const sha = await asService(sql, async (tx) => {
+    await tx`select public.l2_lock_owner_artists(${poolId})`;
+    await tx`select 1 from public.pools where id = ${poolId} for update`;
+    const fc = await formCInput(tx, poolId);
+    await tx`select public.submit_pool(${poolId}, ${userId}, ${tx.json(fc.body as never)}, ${fc.sha256}, ${otherRegCfSales12mMinor}, ${now})`;
+    return fc.sha256;
+  });
+  return { status: "in_review", formC: { sha256: sha }, reviewEstimate: POLICY.campaign.reviewEstimate };
 }
 
-export async function launchPool(d: L2Deps, userId: string, poolId: string) {
+/**
+ * Launch (design §5 "Launch"): provider issuer / offering / collection account with keys `issuer:<artist>`,
+ * `offering:<pool>`, `collection:<pool>` and parameters derived only from stored rows — the offering's end date is the
+ * Pool's planned deadline (`l2_plan_launch`, persisted before any provider call) and the same value is passed to
+ * `launch_pool` as the Pool's `ends_at`, so a retried launch replays the same objects and both deadlines match
+ * (round-1 review and review round 2, PR #12). A retry whose plan leaves less than `min_offering_days` (or has passed)
+ * gets a new plan; the offering, looked up by our Pool id first (`findOffering`), is then moved to it with
+ * `updateOffering` (key `offering_end:<pool>:<deadline>`), so every live Pool has ends_at − starts_at ≥ min_offering_days
+ * and the provider's end date is still the Pool's (review round 3). `launch_pool` re-checks the cap with the
+ * re-attested outside figure and refuses a short window (`launch_window_too_short`).
+ */
+export async function launchPool(d: L2Deps, userId: string, poolId: string, body: { otherRegCfSales12mMinor: number; legalName?: string }, now = new Date()) {
   const regcf = regcfOf(d);
   await ownPool(d.sql, userId, poolId);
-  const [p] = await asService(d.sql, (tx) => tx<{ status: string; title: string; artist_id: string; artist_name: string; target: bigint; max: bigint; price: bigint; days: number; executed: boolean }[]>`
+  const [p] = await asService(d.sql, (tx) => tx<{ status: string; title: string; artist_id: string; artist_name: string; target: bigint; max: bigint; price: bigint; days: number; executed: boolean; legal_name: string | null }[]>`
     select p.status::text, p.title, p.artist_id, a.name as artist_name, p.target_minor as target, p.max_minor as max, p.unit_price_minor as price, p.duration_days as days,
-           exists (select 1 from public.collection_mechanisms m where m.pool_id = p.id and m.status = 'executed') as executed
+           exists (select 1 from public.collection_mechanisms m where m.pool_id = p.id and m.status = 'executed') as executed,
+           (select i.legal_name from public.issuers i where i.artist_id = p.artist_id) as legal_name
       from public.pools p join public.artists a on a.id = p.artist_id where p.id = ${poolId}`);
   if (p.status !== "approved") throw new HttpError(409, "pool_not_approved", "A Pool must pass Form C review before it can go live.");
   if (!p.executed) throw new HttpError(409, "collection_not_executed", "The collection agreement must be executed before the Pool can go live.");
-  const legalName = `${p.artist_name} Music LLC (demo issuer)`;
+  const legalName = p.legal_name ?? body.legalName ?? `${p.artist_name} Music LLC (demo issuer)`;
+  // One stored deadline (review rounds 2–3, PR #12): planned (launch time + duration) and persisted before any provider
+  // call, re-planned only when less than min_offering_days remain; the provider's end date and the Pool's ends_at are
+  // this value, on the first try and on every retry.
+  const [plan] = await asService(d.sql, (tx) => tx<{ ends: Date }[]>`select public.l2_plan_launch(${poolId}, ${userId}, ${now}) as ends`);
+  const endsAt = plan.ends;
+  const endDate = endsAt.toISOString();
   let refs: { issuer: string; offering: string; collection: string };
   try {
     const issuer = await regcf.createIssuer({ name: legalName, entityType: "LLC", externalId: p.artist_id }, `issuer:${p.artist_id}`);
-    const endDate = new Date(Date.now() + p.days * 86_400_000).toISOString().slice(0, 10);
-    const offering = await regcf.createOffering({ issuerId: issuer.id, name: p.title, targetAmount: n(p.target), maxAmount: n(p.max), unitPrice: n(p.price), endDate, externalId: poolId }, `offering:${poolId}`);
+    // Look the offering up first: an earlier attempt may have created it under an earlier plan (its end date then moves to
+    // this plan). Not found: create it (a create under the same key replays the same body, since the plan is the same).
+    const found = await regcf.findOffering({ externalId: poolId });
+    const offering = found ?? await regcf.createOffering({ issuerId: issuer.id, name: p.title, targetAmount: n(p.target), maxAmount: n(p.max), unitPrice: n(p.price), endDate, externalId: poolId }, `offering:${poolId}`);
+    if (found && Date.parse(found.endDate) !== endsAt.getTime()) await regcf.updateOffering(found.id, { endDate }, `offering_end:${poolId}:${endDate}`);
     const ca = await regcf.createCollectionAccount({ offeringId: offering.id, externalId: poolId }, `collection:${poolId}`);
     refs = { issuer: issuer.id, offering: offering.id, collection: ca.id };
   } catch (e) {
     throw providerDown(e);
   }
-  const [r] = await asService(d.sql, (tx) => tx<{ ends: Date }[]>`select public.launch_pool(${poolId}, ${userId}, ${refs.issuer}, ${refs.offering}, ${refs.collection}, ${legalName}) as ends`);
+  const [r] = await asService(d.sql, (tx) => tx<{ ends: Date }[]>`
+    select public.launch_pool(${poolId}, ${userId}, ${refs.issuer}, ${refs.offering}, ${refs.collection}, ${legalName}, ${body.otherRegCfSales12mMinor}, ${now}, ${endsAt}) as ends`);
   return { status: "live", endsAt: r.ends.toISOString() };
 }
 
+/**
+ * Creator royalty statement (FR-L2-REV-001). Always `SELF_REPORTED` (round 2, finding 9): `API_VERIFIED` is reserved for
+ * a distributor feed the demo doesn't build. Funded or matured Pools only; the SQL trigger requires the period to be
+ * exactly one expected window (`period_not_expected`) ending before maturity (`pool_matured`).
+ */
 export async function addStatement(sql: Sql, userId: string, poolId: string, b: StatementRequest) {
   const own = await ownPool(sql, userId, poolId);
-  if (own.status !== "funded") throw new HttpError(409, "pool_not_funded", "Royalty statements are added once the Pool has funded.");
-  const [p] = await asService(sql, (tx) => tx<{ revenue_types: string[]; mechanism: string }[]>`
-    select revenue_types::text[] as revenue_types, collection_mechanism::text as mechanism from public.pools where id = ${poolId}`);
+  if (own.status !== "funded" && own.status !== "matured") throw new HttpError(409, "pool_not_funded", "Royalty statements are added once the Pool has funded.");
+  const [p] = await asService(sql, (tx) => tx<{ revenue_types: string[] }[]>`select revenue_types::text[] as revenue_types from public.pools where id = ${poolId}`);
   if (b.periodEnd <= b.periodStart) throw new HttpError(400, "invalid_period", "The period must end after it starts.");
   const gross = b.lines.reduce((s, l) => s + l.amountMinor, 0);
   const covered = b.lines.filter((l) => p.revenue_types.includes(l.revenueType)).reduce((s, l) => s + l.amountMinor, 0);
-  const verification = p.mechanism === "SELF_REPORT" ? "SELF_REPORTED" : "API_VERIFIED";
+  const verification = "SELF_REPORTED";
   const sha = createHash("sha256").update(canonicalJson({ poolId, ...b })).digest("hex");
   try {
     const [s] = await asService(sql, async (tx) => {
@@ -289,6 +293,13 @@ export async function addStatement(sql: Sql, userId: string, poolId: string, b: 
     if ((e as { code?: string }).code === "23505") throw new HttpError(409, "statement_exists", "A statement for that period is already on file.");
     throw e;
   }
+}
+
+/** The Pool's expected royalty periods (statements must name one of them). */
+export async function periodWindows(sql: Sql, poolId: string) {
+  const rows = await asService(sql, (tx) => tx<{ seq: number; period_start: Date; period_end: Date; due_at: Date }[]>`
+    select seq, period_start, period_end, due_at from public.l2_period_windows(${poolId})`);
+  return rows.map((w) => ({ seq: w.seq, periodStart: w.period_start.toISOString().slice(0, 10), periodEnd: w.period_end.toISOString().slice(0, 10), dueAt: w.due_at.toISOString() }));
 }
 
 // ── Waterfall (design §7) ─────────────────────────────────────────────
@@ -314,6 +325,10 @@ export async function computeDistribution(sql: Sql, poolId: string, label: strin
   return { poolId, label, poolStatus: p.status, input, allocation, fanPoolMinor: result.fanPoolMinor, allCapped: result.allCapped, hash };
 }
 
+/**
+ * Commit (design §7): recompute from current DB state with `allocateWaterfall()`; refuse `run_stale` unless the hash
+ * equals the dry-run's (a replay of an already committed run with that label and hash returns it).
+ */
 export async function commitDistribution(sql: Sql, poolId: string, label: string, expectedHash: string, actorId: string, now = new Date()) {
   const run = await computeDistribution(sql, poolId, label);
   if (run.hash !== expectedHash) {
@@ -326,64 +341,51 @@ export async function commitDistribution(sql: Sql, poolId: string, label: string
   return { runId: r.id, hash: run.hash, replayed: false };
 }
 
-// ── Ledger ⇄ provider (AC-E1 / collection mirror) ─────────────────────
-export async function reconcileL2Ledger(d: L2Deps, poolId?: string) {
-  const regcf = regcfOf(d);
-  const pools = await asService(d.sql, (tx) => tx<{ id: string; offering: string; collection: string | null; escrow: bigint; coll: bigint }[]>`
-    select id, provider_offering_ref as offering, provider_collection_ref as collection,
-           public.pool_balance('pool_escrow', id) as escrow, public.pool_balance('pool_collection', id) as coll
-      from public.pools where provider_offering_ref is not null and (${poolId ?? null}::uuid is null or id = ${poolId ?? null}::uuid)`);
-  const out: { poolId: string; escrow: { ledgerMinor: number; providerMinor: number; diffMinor: number }; collection: { ledgerMinor: number; providerMinor: number; diffMinor: number } }[] = [];
-  for (const p of pools) {
-    const esc = await regcf.getEscrow(p.offering);
-    const col = p.collection ? await regcf.getCollectionAccount(p.collection) : { balance: 0 };
-    const row = {
-      poolId: p.id,
-      escrow: { ledgerMinor: n(p.escrow), providerMinor: esc.balance, diffMinor: esc.balance - n(p.escrow) },
-      collection: { ledgerMinor: n(p.coll), providerMinor: col.balance, diffMinor: col.balance - n(p.coll) },
-    };
-    out.push(row);
-    await asService(d.sql, async (tx) => {
-      for (const [kind, diff] of [["escrow_diff", row.escrow.diffMinor], ["collection_diff", row.collection.diffMinor]] as const) {
-        const key = `${kind}:${p.id}`;
-        if (diff !== 0) {
-          await tx`insert into public.pool_breaks (pool_id, kind, dedupe_key, amount_minor, refs) values (${p.id}, ${kind}, ${key}, ${diff}, ${tx.json(row as never)})
-                   on conflict (dedupe_key) where resolved_at is null do update set amount_minor = excluded.amount_minor, refs = excluded.refs`;
-        } else {
-          await tx`update public.pool_breaks set resolved_at = now(), resolution = 'cleared_by_run' where dedupe_key = ${key} and resolved_at is null`;
-        }
-      }
-    });
-  }
-  return { pools: out, diffMinor: out.reduce((s, r) => s + Math.abs(r.escrow.diffMinor) + Math.abs(r.collection.diffMinor), 0) };
-}
-
-// ── Worker step (design §5) ───────────────────────────────────────────
+// ── Worker step (design §2, §4.3, §5, §6, §7) ─────────────────────────
+/**
+ * One Layer 2 tick at `now`. Runs whenever a Reg CF provider is configured, flag on or off (completion paths, design §2):
+ * reservation expiry (with provider lookups), settlement of due Pools, maturity, the `pool_ops` runner, revenue
+ * reconciliation of funded and matured Pools, then L2 ledger ⇄ provider recon (after expiry, same `now`).
+ */
 export async function l2Tick(d: L2Deps & { regcf?: RegCfProvider }, now = new Date()) {
   if (!d.regcf) return null;
-  const [on] = await asService(d.sql, (tx) => tx<{ on: boolean }[]>`select public.l2_enabled() as on`);
-  if (!on.on) return null;
+  const regcf = d.regcf;
   return runWithCtx({ actorId: null, actorKind: "system:worker", aal: null }, async () => {
-    const [{ expired }] = await asService(d.sql, (tx) => tx<{ expired: number }[]>`select public.expire_investment_reservations(${now}) as expired`);
+    const expiry = await expireReservations({ sql: d.sql, regcf }, now);
     const due = await asService(d.sql, (tx) => tx<{ id: string }[]>`select id from public.pools where status = 'live' and ends_at <= ${now} order by ends_at limit 50`);
     const settled: { id: string; outcome: string }[] = [];
     for (const { id } of due) {
       try {
-        const [r] = await runWithCtx({ correlationId: newCorrelationId() }, () => asService(d.sql, (tx) => tx<{ o: string }[]>`select public.settle_pool(${id}, ${now})::text as o`));
+        const [r] = await runWithCtx({ correlationId: newCorrelationId() }, () => asService(d.sql, async (tx) => {
+          const rows = await tx<{ o: string }[]>`select public.settle_pool(${id}, ${now})::text as o`;
+          // The creator hears about a failed Pool with their own notice (round-1 review, PR #12).
+          if (rows[0].o === "failed") await tx`select public.l2_notify('pool_failed_creator', ${tx.json({ pool_id: id })}, ${"pool_failed_creator:" + id})`;
+          return rows;
+        }));
         settled.push({ id, outcome: r.o });
       } catch (e) {
         log("alert", "pool.settlement_failed", { poolId: id, error: redact(String((e as Error).message ?? e)) });
       }
     }
-    const ops = await runDuePoolOps({ sql: d.sql, regcf: d.regcf! });
-    const funded = await asService(d.sql, (tx) => tx<{ id: string }[]>`select id from public.pools where status = 'funded'`);
-    for (const { id } of funded) {
+    // Expiry again for rows on Pools that just settled (counted reservations wait for their lookup grace).
+    if (settled.length) await expireReservations({ sql: d.sql, regcf }, now);
+    const [{ matured }] = await asService(d.sql, (tx) => tx<{ matured: number }[]>`select public.mature_due_pools(${now}) as matured`);
+    const ops = await runDuePoolOps({ sql: d.sql, regcf }, now);
+    const collecting = await asService(d.sql, (tx) => tx<{ id: string }[]>`select id from public.pools where status in ('funded', 'matured') order by id`);
+    for (const { id } of collecting) {
       try {
         await asService(d.sql, (tx) => tx`select public.reconcile_pool_revenue(${id}, ${now})`);
       } catch (e) {
         log("warn", "pool.revenue_recon_failed", { poolId: id, error: redact(String((e as Error).message ?? e)) });
       }
     }
-    return { expired, settled, ops, correlationId: currentCtx()?.correlationId };
+    let recon: { diffMinor: number; breaks: number } | null = null;
+    try {
+      const r = await reconcileL2Ledger({ sql: d.sql, regcf }, { now });
+      recon = { diffMinor: r.diffMinor, breaks: r.breaks.length };
+    } catch (e) {
+      log("warn", "l2_recon.failed", { error: redact(String((e as Error).message ?? e)) });
+    }
+    return { expiry, settled, matured, ops, recon, correlationId: currentCtx()?.correlationId };
   });
 }

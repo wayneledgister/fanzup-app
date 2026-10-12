@@ -4,7 +4,7 @@ Everything that can be done in code is already in the repo. These are the steps 
 
 **Time:**
 - Part A (local): about 30 minutes
-- Parts B–E (hosted): about 1–2 hours
+- Parts B–E (hosted): about 1–2 hours; Part F (exit test 8 on the hosted app) after them
 - Part G (escrow partner): weeks, and it runs alongside everything else
 
 **Layout:**
@@ -93,7 +93,7 @@ The tests need a Postgres server they can create and drop scratch databases on. 
 ```bash
 TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres pnpm test
 ```
-**✅ Check:** 26 tests pass. They cover:
+**✅ Check:** every test passes (the count grows with each PR; CI's API job runs the same suite). They cover:
 - the ledger always balancing
 - funded and failed flows
 - idempotency
@@ -113,7 +113,7 @@ TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres pnpm t
 ### B2. Auth settings (both projects): Dashboard → Authentication
 1. **URL Configuration:**
    - Site URL = your web URL. Use the Vercel URL from Part D for now; switch to your domain later.
-   - Add the same URL to **Redirect URLs**.
+   - Add the pattern `https://<your-site>/**` to **Redirect URLs** (with the `/**`: the confirmation link returns to `/verify-email?next=…`, design §12.2). Local and CI patterns are already in `supabase/config.toml`.
 2. **Sign In / Providers → Email:**
    - **Confirm email:** on
    - **Secure password change:** on
@@ -127,12 +127,24 @@ pnpm exec supabase login                          # opens the browser once
 pnpm exec supabase link --project-ref <staging-ref>   # asks for the DB password
 pnpm exec supabase db push                        # applies supabase/migrations
 ```
-- **Staging only:** to load the test users and campaigns, run `pnpm exec supabase db push --include-seed`.
-- **Production:** never load the seed. Its users have a published password.
+- **Hosted databases (staging and production) never get the seed.** `supabase/seed.sql` is for local and CI only: its users have a published password and it includes a staff reviewer. A hosted project starts empty; you create your own account through the app's sign-up page (B4).
 - Do **not** push to prod by hand. After Part E, GitHub does it with your approval.
 
+### B3a. Check the hosted project has no seeded users (each hosted project, before B4)
+**Why:** every seeded user shares the published password `FanzupDev123` (A3), and `reviewer@fanzup.test` is staff. If the seed ever reached a hosted project, anyone could sign in as that reviewer, enrol their own TOTP factor on it (it has none) and get full staff powers — refunds, verifications, replays. In **SQL Editor**:
+```sql
+select email from auth.users where email like '%@fanzup.test';
+select * from public.staff;
+```
+**✅ Check:** the first returns no rows; the second returns no rows (or, after B4, only yours). If any seeded user exists, remove its staff power first, then the users:
+```sql
+delete from public.staff where user_id in (select id from auth.users where email like '%@fanzup.test');
+delete from auth.users where email like '%@fanzup.test';
+```
+If the second delete is refused (seed artists, campaigns or backings still reference those users), the whole seed ran. The staff power is already gone; the clean fix is a fresh project (B1) with B3 run against it. Don't use `supabase db reset --linked` — it loads the seed again.
+
 ### B4. Make yourself a reviewer
-In **SQL Editor** on staging, after signing up through the app or Auth → Add user:
+Do B3a first. Then sign up through the app's sign-up page. **The real sign-up page only exists once PR #9 (`feat/m1-web-e2e`) is merged and deployed** — before that, `/signup` is the prototype's mock and creates no account; the 18+ trigger arrives with PR #8's migrations. (After M1, "Add user" in the Supabase dashboard is refused by design: the new-user trigger requires the 18+ attestation the sign-up form sends.) Then enrol TOTP with the operator script (M1 has no enrolment screen; Part F): `pnpm m1:operator --api https://<your-site>/api --supabase-url https://<ref>.supabase.co --anon-key <publishable key> --email <you> totp-enrol`, and, in **SQL Editor**:
 ```sql
 insert into public.staff (user_id, role)
 select id, 'admin' from auth.users where email = 'wayne.ledg@gmail.com';
@@ -158,10 +170,13 @@ select pg_has_role('postgres','service_role','member') as svc,
 3. **Local:** run `stripe listen --forward-to localhost:8787/api/v1/webhooks/stripe` and put the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET`. Set `ESCROW_PROVIDER=stripe-test` (the old name `stripe-dev` still works). Pay with test card `4000 0000 0000 0077` so funds are available for artist transfers immediately; other test cards leave transfers waiting for funds.
 4. **Hosted, after Part D (Vercel):**
    - Go to Developers → **Webhooks** → Add endpoint `https://<your-vercel-domain>/api/v1/webhooks/stripe`.
-   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `refund.created`, `refund.updated`, `refund.failed` and `transfer.created`.
+   - Subscribe to `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `refund.created`, `refund.updated`, `refund.failed` and `transfer.created` — one platform endpoint; no Connect-events endpoint is needed (design §12.1).
    - Put its signing secret in Vercel as `STRIPE_WEBHOOK_SECRET`.
 5. Copy the **publishable key** (`pk_test_…`) into `STRIPE_PUBLISHABLE_KEY` (API) — the web app reads it from `/api/v1/config`.
 6. Turn on **Connect** (Express accounts) in test mode; artists onboard their payout account from the app.
+
+7. **Keep a float of FanZuP's own money in the Stripe test platform balance** (Balance → Add funds, in test mode). FanZuP absorbs the card fee on every refund, so without a float the balance ends up short of what artists are owed and their payouts wait for funds (design §12.1).
+8. **Set the payout schedule to manual** for the test-mode run (Settings → **Payouts** → Payout schedule → **Manual**, in test mode). Reconciliation compares the ledger with every movement in the Stripe balance and excludes only top-ups (the float in step 7, reported as `platform_adjustments_minor`). An automatic payout to your bank, a Stripe fee or a dispute has no ledger posting, so each one shows in the total diff and opens an `unmatched_provider_txn` break, which pauses artist payouts (design §7). With manual payouts, the money backers paid stays in the balance and exit test 8 can diff to zero. If a payout did go out, resolve its break with a reason and note it in the worklog.
 
 > **Fail closed (FR-PAY-008, M1).** A deployed API refuses to start with the sandbox provider or any non-test key. Until the Stripe test variables above are set, hosted `/api` answers **503 "misconfigured"** naming the missing variable. That's deliberate.
 
@@ -198,7 +213,7 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 
 3. **Deploy**, then check:
    - `https://<your-app>.vercel.app/api/health` returns `{"ok":true,…}`
-   - `https://<your-app>.vercel.app/campaigns/nova-live-band-tour` loads the page, not a 404
+   - `https://<your-app>.vercel.app/explore` loads the page, not a 404 (deep links fall back to the app; the hosted database has no demo campaigns)
 4. Put the Vercel URL into Supabase → Authentication → **Site URL** and **Redirect URLs** (B2).
 
 ### D2. Render (worker only)
@@ -206,7 +221,8 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 2. Fill in:
    - `DATABASE_URL`: Supabase → **Connect** → **Session pooler** (port **5432**). Render connects over IPv4, and the shared pooler is Supabase's IPv4 route.
    - `SUPABASE_URL`
-   - `STRIPE_SECRET_KEY`
+   - `STRIPE_SECRET_KEY` (the same `sk_test_…` key as Vercel)
+   - That's all. The worker doesn't receive webhooks, so it does **not** need `STRIPE_WEBHOOK_SECRET` (only the Vercel API does, and it refuses to start without it). `NODE_ENV`, `ESCROW_PROVIDER=stripe-test`, `DEPLOY_ENV=staging` and `DB_POOL_MAX` come from `render.yaml`.
 3. In the service → **Settings → Build & Deploy**, set **Auto-Deploy** to **"After CI checks pass"**.
 4. **✅ Check:** the logs show `{"msg":"worker.start",…}`, and a `worker.tick` line appears whenever there's work to do.
 
@@ -215,15 +231,35 @@ The browser calls the API at the same-origin `/api`, so there's no CORS and no A
 ---
 
 ## Part E: GitHub settings (repo → Settings)
-1. **Environments:** create **`staging`** and **`production`**.
+> **How migrations reach the hosted database:** Supabase's own GitHub integration (Supabase → Project Settings → Integrations → GitHub, "Deploy to production" on `main`) applies `supabase/migrations/` when a change merges to `main`. It needs no GitHub secrets. The **Deploy database migrations** workflow below is a **manual fallback only**; it never runs on push, so the two can't race. Steps 1–2 are needed only if you want that fallback.
+
+1. **Environments (fallback only):** create **`staging`** and **`production`**.
    - On `production`, tick **Required reviewers** and add yourself. Every prod migration then waits for your click.
    - In each environment add:
      - **secret** `SUPABASE_ACCESS_TOKEN`: create at supabase.com/dashboard/account/tokens
      - **secret** `SUPABASE_DB_PASSWORD`: that project's password
      - **variable** `SUPABASE_PROJECT_REF`: that project's ref
-2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema (and, on staging, the demo data) without a local clone, go to **Actions → Deploy database migrations → Run workflow** and tick *include_seed*.
+2. **Secrets and variables → Actions → Variables (repository):** add `DB_DEPLOY_ENABLED` = `true`. The migration-deploy workflow stays switched off until you do this. Production deploys are switched off separately: add `PROD_DEPLOY_ENABLED` = `true` only once a separate `fanzup-prod` project exists. To push the schema without a local clone, go to **Actions → Deploy database migrations → Run workflow**. It applies migrations only; it never loads the seed.
 3. **Branches → add rule for `main`:** require a pull request and the status checks **"Web · typecheck, copy rules, build"** and **"API · migrations, ledger, RLS, flow tests"**. These check names appear after the first CI run.
-4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, the **Deploy database migrations** workflow runs on staging, then waits for your approval before production.
+4. **✅ Check:** open a small PR. Both CI jobs run and turn green. After you merge a change under `supabase/migrations/`, Supabase's GitHub integration applies it to the hosted project (check Supabase → Database → Migrations). Use **Actions → Deploy database migrations → Run workflow** only if the integration is off.
+
+---
+
+## Part F: Exit test 8 — one Stripe test-mode run on the hosted app
+M1 has no staff or artist screens, so the non-fan half of the journey runs from your Mac with the operator script (`scripts/m1-operator.ts`, design §12.6). It talks to the hosted API like the app does. **Your email goes on the command line; your password and TOTP codes are only ever typed at its prompts** (hidden), and the tokens it gets stay in its memory — nothing is written to disk or printed.
+
+Common flags (all public values): `--api https://<your-site>/api --supabase-url https://<ref>.supabase.co --anon-key <publishable key>`. You can put the last two in `SUPABASE_URL` / `SUPABASE_ANON_KEY` instead. Run `pnpm m1:operator … ` with no command to get a prompt that keeps your session (`help` lists commands); with a command it runs just that one.
+
+You need **two accounts**, both made on the app's sign-up page: yours (staff, B4) and a separate **artist** account (in single-operator mode staff can't own an artist, and a reviewer can't act on their own campaign).
+
+1. **Staff second factor (once):** `pnpm m1:operator <flags> --email <you> totp-enrol` → add the printed `otpauth://` URI (or the secret) to your authenticator app, type the code it shows. Then grant yourself staff (B4 SQL).
+2. **Artist setup:** `pnpm m1:operator <flags> --email <artist> artist-setup` → creates the artist profile, prints the Stripe Connect onboarding link (finish it in the browser; the script re-checks until the payout account is verified), creates a campaign with one perk and two milestones, and submits it. Note the campaign id it prints.
+3. **Review:** `pnpm m1:operator <flags> --email <you>` then at the prompt `staff review <campaignId>` (password + current TOTP code once per session, then a typed reason).
+4. **Publish:** `pnpm m1:operator <flags> --email <artist> publish <campaignId>`.
+5. **Back it as a fan** in the browser (a third account, test card `4000 0000 0000 0077`), enough to meet the goal.
+6. **After the deadline:** the worker settles it and pays milestone 1. The artist finds milestone 2's id with `… --email <artist> campaign <campaignId>` and submits evidence: `… --email <artist> evidence <trancheId> https://<link>`; you verify it: `staff verify <trancheId>`.
+7. **Check:** `staff recon run` (ledger ↔ Stripe test balance must diff to zero; your float from C7 shows separately as `platformAdjustmentsMinor` — any other unexplained movement is a break, see C8), `staff queue dead_letters` (empty), and `staff trace <correlationId>` with the id the verify printed (the payout op and the release).
+Record the run (dates, correlation ids, recon result) in `specs/04-worklog.md`.
 
 ---
 

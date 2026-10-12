@@ -1,5 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import { POLICY } from "@fanzup/shared/policy";
+import type { PublicConfig } from "@fanzup/shared/schemas";
 import type { Env } from "./env";
 import { asService, type Sql } from "./db";
 import type { PaymentProvider } from "./provider";
@@ -20,7 +22,7 @@ import { artistRoutes } from "./routes/artist";
 import { staffRoutes } from "./routes/staff";
 import { executeDueActions } from "./staff";
 import type { RegCfProvider } from "./regcf";
-import { l2CreatorRoutes, l2DevRoutes, l2FanRoutes, l2StaffRoutes } from "./l2/routes";
+import { l2CreatorRoutes, l2DevRoutes, l2FanRoutes, l2InvestorRoutes, l2StaffReadRoutes, l2StaffRoutes } from "./l2/routes";
 import { l2On } from "./l2/gate";
 import { l2Tick } from "./l2/service";
 
@@ -39,6 +41,9 @@ export interface Deps {
   extraSteps?: JobDeps["extraSteps"];
 }
 
+/** Vercel puts exactly one proxy in front of the function (design §9). Same rule as Fastify `trustProxy: <number>`. */
+export const TRUSTED_PROXY_HOPS = 1;
+
 const defaultNotifier = createNotifier();
 export const jobDeps = (d: Deps): JobDeps => ({ sql: d.sql, provider: d.provider, notify: d.notify ?? defaultNotifier, extraSteps: [...(d.extraSteps ?? []), (now) => executeDueActions(d, now), ...(d.regcf ? [(now: Date) => l2Tick(d, now)] : [])] });
 
@@ -53,8 +58,10 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
             serializers: { req: (req) => ({ method: req.method, url: pathOnly(req.url), id: req.id }) },
           },
     bodyLimit: 64 * 1024,
-    // Behind Vercel's proxy: req.ip comes from X-Forwarded-For (recorded with consents, FR-PRV-001).
-    trustProxy: true,
+    // Behind Vercel's edge: exactly one proxy hop, so req.ip is the address that hop saw (the right-most
+    // X-Forwarded-For entry), not a value the client wrote further left. Recorded with consents (FR-PRV-001).
+    // If another proxy is ever put in front (e.g. a CDN), raise this to the real hop count (design §9).
+    trustProxy: (_addr: string, hop: number) => hop < TRUSTED_PROXY_HOPS,
     genReqId: (req) => acceptCorrelationId(req.headers["x-correlation-id"]),
   });
 
@@ -116,12 +123,15 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     }
   });
 
-  app.get(`${API_PREFIX}/v1/config`, async () => ({
+  // Design §4.2/§3.7: the sign-up form sends the current document versions it reads from here, so the web build
+  // never hard-codes them (the new-user trigger refuses any other version).
+  app.get(`${API_PREFIX}/v1/config`, async (): Promise<PublicConfig> => ({
     provider: deps.provider.name,
     testMode: deps.provider.testMode,
     stripePublishableKey: deps.provider.publishableKey,
     // FR-PLT-001: the server's view of the flags (the web app's ?flags= override reveals mock-only screens, never data).
     flags: { layer2: await l2On(deps).catch(() => false) },
+    legal: { termsVersion: POLICY.legal.termsVersion, privacyVersion: POLICY.legal.privacyVersion },
   }));
 
   await app.register(campaignRoutes(deps), { prefix: `${API_PREFIX}/v1` });
@@ -131,9 +141,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   await app.register(artistRoutes(deps), { prefix: `${API_PREFIX}/v1/artist` });
   await app.register(staffRoutes(deps), { prefix: `${API_PREFIX}/v1/staff` });
   await app.register(internalRoutes(deps), { prefix: `${API_PREFIX}/internal` });
-  // Layer 2 (CR-002): every route is behind the server-side layer2 gate.
+  // Layer 2 (CR-002; design §2, §9): entry routes behind the server-side layer2 gate (provider + flag); completion
+  // routes (investor cancel / own investment, staff money view / recon / collection state) need the mock provider only.
   await app.register(l2FanRoutes(deps), { prefix: `${API_PREFIX}/v1` });
+  await app.register(l2InvestorRoutes(deps), { prefix: `${API_PREFIX}/v1` });
   await app.register(l2CreatorRoutes(deps), { prefix: `${API_PREFIX}/v1/creator` });
+  await app.register(l2StaffReadRoutes(deps), { prefix: `${API_PREFIX}/v1/staff/l2` });
   await app.register(l2StaffRoutes(deps), { prefix: `${API_PREFIX}/v1/staff/l2` });
   if (!deps.env.deployed && deps.regcf && deps.env.NODE_ENV !== "production") {
     await app.register(l2DevRoutes(deps), { prefix: `${API_PREFIX}/v1/dev/l2` });

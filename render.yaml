@@ -2,6 +2,9 @@
 # The website and API run on Vercel (root vercel.json). This always-on process settles campaigns at their
 # deadline and drains the outbox (refunds, milestone payouts) every 30 seconds.
 # Deploy: Render dashboard → New → Blueprint → this repo.
+# The worker never receives Stripe webhooks, so STRIPE_WEBHOOK_SECRET is NOT needed here (only the Vercel API
+# requires it); `apps/api/src/worker.ts` loads its env with requireWebhookSecret: false. Keep this list in sync
+# with docs/SETUP.md D2 and the "Render worker env" test in apps/api/test/money-rules.test.ts.
 services:
   - type: worker
     name: fanzup-worker

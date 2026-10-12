@@ -20,13 +20,15 @@
     "dev:escrow": "pnpm --filter @fanzup/mock-escrow dev",
     "dev:worker": "pnpm --filter @fanzup/api worker",
     "demo:reset": "supabase db reset && curl -fsS -X POST http://localhost:8790/admin/reset -H 'x-api-key: mock_escrow_dev_key' -H 'content-type: application/json' -d '{\"fixtures\":true}'",
-    "l2:fixture": "pnpm --filter @fanzup/api exec tsx scripts/l2-fixture.ts"
+    "l2:fixture": "pnpm --filter @fanzup/api exec tsx scripts/l2-fixture.ts",
+    "m1:operator": "tsx scripts/m1-operator.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@supabase/supabase-js": "^2.117.2",
     "@types/node": "^22.20.5",
     "otplib": "^12.0.1",
-    "supabase": "^2.119.0"
+    "supabase": "^2.119.0",
+    "tsx": "^4.23.15"
   }
 }
