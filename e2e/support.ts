@@ -96,6 +96,17 @@ export async function staffToken(email: string) {
   return data.session!.access_token;
 }
 
+/**
+ * A fresh TOTP code for a staff user whose factor `staffToken()` enrolled in this run (secret cached per run), for a
+ * browser sign-in that must reach aal2. Waits for the next 30-second step when the current code was just used.
+ */
+export async function staffTotpCode(email: string, opts: { fresh?: boolean } = {}) {
+  if (!existsSync(totpCache(email))) throw new Error(`no TOTP secret cached for ${email}: call staffToken() first`);
+  const { secret } = JSON.parse(readFileSync(totpCache(email), "utf8")) as { secret: string };
+  if (opts.fresh) await new Promise((r) => setTimeout(r, authenticator.timeRemaining() * 1000 + 500));
+  return authenticator.generate(secret);
+}
+
 /** The newest email to `to` in Mailpit, as text + html. */
 export async function latestEmail(to: string, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;

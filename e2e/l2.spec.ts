@@ -2,17 +2,23 @@
  * Layer 2 journeys (CR-002; NFR-L2-04) on mock rails: real Supabase Auth, the API + worker, apps/mock-escrow with
  * signed webhooks, and the web app. Needs the stack started with REGCF_PROVIDER=mock and supabase/seed_layer2.sql.
  *
- *  1. Creator (browser) creates an album Pool → staff (API, aal2) approve the Form C and execute the collection
- *     agreement → creator launches (browser) → a new fan (browser) passes mock KYC, sets their limit, reads the
- *     documents and invests → the Pool funds → royalties are reported, cash arrives, reconciled → a distribution
- *     is committed and paid → the fan sees it in the portfolio. Ledger ⇄ provider reconciles to zero.
- *  2. A Pool misses its target → every investor is refunded; the fan's portfolio shows the refund.
+ *  1. Creator (browser) creates an album Pool (21-day default, issuer attestation) → staff (API, aal2) approve the
+ *     Form C and execute the collection agreement → creator launches (browser, attestation again) → a new fan (browser)
+ *     passes mock KYC, sets their limit, reads the documents (intermediary pending, unsecured line, D-2) and invests →
+ *     the confirmation shows amount, price, Units, issuer and the cancel-by time → the Pool funds → a royalty statement
+ *     for the first scheduled period, cash, reconciliation → staff in the BROWSER at aal2 (TOTP in place) dry-run and
+ *     commit the distribution; the committed run's hash equals the dry-run's → the fan sees it in the portfolio.
+ *     Ledger ⇄ provider reconciles to zero.
+ *  2. A Pool misses its target → every investor is refunded; on the way, a cancel while the payment is still moving
+ *     answers `cancel_pending` and the investment page says so; the confirmation page shows the cancel-by time. With
+ *     the layer2 flag switched off, the investment page still renders, as the cancel-only view (L2-T-038).
  */
-import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { api, poll, SEED_PASSWORD, seedSignIn, staffToken } from "./support";
+import { api, poll, SEED_PASSWORD, seedSignIn, staffToken, staffTotpCode } from "./support";
 
 const run = Date.now().toString(36);
+const D2 = "Demo — not an offer of securities. Mock escrow and data.";
+const INTERMEDIARY = "Intermediary: pending — L2-Q3";
 const shot = async (page: Page, name: string) => {
   if (process.env.SCREENSHOTS_DIR) await page.screenshot({ path: `${process.env.SCREENSHOTS_DIR}/l2-${name}.png`, fullPage: true });
 };
@@ -25,11 +31,25 @@ async function logIn(page: Page, email: string, next: string) {
   await expect(page).toHaveURL(new RegExp(next.replace(/[?]/g, "\\?")));
 }
 
+/** Staff in the browser: password sign-in, then the in-place TOTP step of the staff screens (aal2). */
+async function staffLogIn(page: Page, email: string, next: string) {
+  await logIn(page, email, next);
+  await expect(page.getByTestId("staff-second-factor")).toBeVisible();
+  for (const fresh of [false, true]) {
+    await page.getByLabel("6-digit code").fill(await staffTotpCode(email, { fresh }));
+    await page.getByRole("button", { name: "Verify" }).click();
+    const ok = await page.getByTestId("staff-second-factor").waitFor({ state: "detached", timeout: 10_000 }).then(() => true, () => false);
+    if (ok) return;
+  }
+  throw new Error("staff TOTP step did not complete");
+}
+
 /** Mock provider clock + one worker tick (dev route, mock rails only). */
 const advance = (seconds: number) => api("/dev/l2/advance", { body: { seconds } });
 
 type Money = { ledger: Record<string, number>; pool: { status: string; endsAt: string; id: string } };
 type Action = { action: { status: string } };
+type Investment = { id: string; status: string; cancelRequestedAt: string | null; canCancelUntil: string | null };
 
 test("album royalty Pool: create → Form C → KYC → invest → fund → royalties → distribution in the portfolio", async ({ browser }) => {
   const staff = await staffToken("reviewer@fanzup.test");
@@ -40,7 +60,7 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   const creatorCtx = await browser.newContext();
   const creator = await creatorCtx.newPage();
   await logIn(creator, "nova@fanzup.test", "/creator/pools/new");
-  await expect(creator.getByTestId("layer2-demo-banner")).toHaveText("Demo — not an offer of securities. Mock escrow and data.");
+  await expect(creator.getByTestId("layer2-demo-banner")).toHaveText(D2);
   await creator.getByLabel("Album title").fill(title);
   await creator.getByLabel("Pool address").fill(slug);
   await creator.getByLabel("Tracklist (one per line)").fill("Opening\nSecond song\nClosing");
@@ -49,7 +69,12 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   await expect(creator.getByTestId("target")).toHaveText("$5,000");
   await creator.getByLabel("Units", { exact: true }).fill("200");
   await creator.getByLabel("Unit price ($)").fill("50");
+  // L2-T-020: 21 days by default (the Reg CF minimum).
+  await expect(creator.locator("#t-days")).toHaveValue("21");
   await creator.locator("#tr-m-1").fill("Album mastered");
+  // L2-T-019: issuer attestation at submit, labelled as self-reported pending counsel.
+  await expect(creator.getByTestId("attestation-note")).toContainText("Self-reported, pending counsel (L2-Q12)");
+  await creator.locator("#p-other-sales").fill("0");
   await shot(creator, "1-create");
   await creator.getByTestId("submit-pool").click();
   await expect(creator.getByTestId("creator-pool-status")).toHaveText("in_review");
@@ -61,8 +86,9 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   const exec = await api<Action>(`/staff/l2/pools/${poolId}/collection/execute`, { token: staff, body: { reason: "E2E: distributor letter countersigned (mock)" } });
   expect(exec.body.action.status).toBe("executed");
 
-  // ── Creator launches ─────────────────────────────────────────────────
+  // ── Creator launches (re-attests) ─────────────────────────────────────
   await creator.reload();
+  await creator.locator("#l-other-sales").fill("0");
   await creator.getByTestId("launch-pool").click();
   await expect(creator.getByTestId("creator-pool-status")).toHaveText("live");
 
@@ -71,8 +97,17 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   const fan = await fanCtx.newPage();
   await logIn(fan, "eli@fanzup.test", `/pools/${slug}`);
   await expect(fan.getByTestId("pool-title")).toHaveText(title);
+  await expect(fan.getByTestId("layer2-demo-banner")).toHaveText(D2);
   await expect(fan.getByTestId("payout-illustration")).toContainText("If the album earns nothing");
+  await expect(fan.getByTestId("intermediary-line")).toHaveText(INTERMEDIARY);
+  // L2-T-021: the strongest badge never stands alone.
+  await expect(fan.getByTestId("risk-badge-strongest").first().getByTestId("unsecured-line")).toHaveText("Your claim is unsecured");
   await shot(fan, "2-pool");
+  // Form C view: D-2 sentence and the pending intermediary (L2-T-016, L2-T-025).
+  await fan.goto(`/pools/${slug}/form-c`);
+  await expect(fan.getByTestId("form-c-notice")).toContainText(D2);
+  await expect(fan.getByTestId("form-c-intermediary")).toHaveText(INTERMEDIARY);
+  await fan.goto(`/pools/${slug}`);
   await fan.getByRole("link", { name: /Start investor verification/ }).click();
   await fan.getByLabel("Legal first name").fill("Eli");
   await fan.getByLabel("Legal last name").fill("Santos");
@@ -89,10 +124,19 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   await expect(fan.getByTestId("pool-title")).toHaveText(title);
   await fan.getByTestId("units-input").fill("100");
   await fan.getByTestId("review-documents").click();
+  await expect(fan.getByTestId("intermediary-line")).toHaveText(INTERMEDIARY);
+  await expect(fan.getByTestId("unsecured-line").first()).toBeVisible();
   for (const id of ["ack-risk", "ack-unsecured", "ack-lockup", "ack-formc"]) await fan.locator(`#${id}`).check();
   await shot(fan, "4-documents");
   await fan.getByTestId("confirm-investment").click();
   await expect(fan.getByTestId("confirmation")).toHaveAttribute("data-status", "funded", { timeout: 30_000 });
+  // L2-T-044: the commitment summary (227.303(d) fields).
+  await expect(fan.getByTestId("c-amount")).toHaveText("$5,000");
+  await expect(fan.getByTestId("c-price")).toHaveText("$50");
+  await expect(fan.getByTestId("c-units")).toHaveText("100");
+  await expect(fan.getByTestId("c-issuer")).not.toBeEmpty();
+  await expect(fan.getByTestId("c-cancel-by")).toHaveText(/\d{4}/);
+  await expect(fan.getByTestId("cancel-start")).toBeVisible();
   await shot(fan, "5-confirmation");
 
   // ── Deadline passes: the Pool funds, Units issue, tranche 1 is released ──
@@ -103,19 +147,40 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   const funded = await poll(money, (m) => m.pool.status === "funded" && (m.ledger.pool_escrow ?? 0) === 2_500_00);
   expect(funded.pool.status).toBe("funded");
 
-  // ── Royalties: statement (creator), cash into the collection account (mock), reconciliation ──
+  // ── Royalties: statement for the first scheduled period (creator), cash (mock), reconciliation ──
   const nova = await seedSignIn("nova@fanzup.test");
-  const st = await api(`/creator/pools/${poolId}/statements`, { token: nova, body: { periodLabel: "Quarter 1", periodStart: "2027-01-01", periodEnd: "2027-03-31", lines: [{ revenueType: "master", source: "Mock Distributor", amountMinor: 90_000 }] } });
+  const periods = await api<{ periods: { seq: number; periodStart: string; periodEnd: string }[] }>(`/creator/pools/${poolId}/periods`, { token: nova });
+  const p1 = periods.body.periods[0];
+  expect(p1, JSON.stringify(periods.body)).toBeTruthy();
+  const st = await api(`/creator/pools/${poolId}/statements`, { token: nova, body: { periodLabel: "Period 1", periodStart: p1.periodStart, periodEnd: p1.periodEnd, lines: [{ revenueType: "master", source: "Mock Distributor", amountMinor: 90_000 }] } });
   expect(st.status, JSON.stringify(st.body)).toBe(201);
-  expect((await api(`/staff/l2/pools/${poolId}/deposits`, { token: staff, body: { amountMinor: 90_000, reference: "Quarter 1" } })).status).toBe(200);
+  const dep = await api(`/staff/l2/pools/${poolId}/deposits`, { token: staff, body: { amountMinor: 90_000, reference: "Period 1" } });
+  expect(dep.status, JSON.stringify(dep.body)).toBe(200);
   await advance(5);
-  await poll(async () => (await api(`/staff/l2/pools/${poolId}/recon`, { token: staff, body: {} })).body as { revenue: { unallocated_minor: number } }, (r) => r.revenue.unallocated_minor === 90_000);
+  await poll(async () => (await api(`/staff/l2/pools/${poolId}/recon`, { token: staff, body: {} })).body as { revenue: { unallocated_minor: number } }, (r) => r.revenue?.unallocated_minor === 90_000);
 
-  // ── Waterfall: dry-run → commit (same hash) → payouts settle ─────────
-  const dry = await api<{ hash: string; allocation: { payouts: { amountMinor: number }[] } }>(`/staff/l2/pools/${poolId}/distributions/dry-run`, { token: staff, body: { label: "Quarter 1" } });
+  // ── Waterfall: the API dry-run (amounts), then staff in the browser at aal2: dry-run → commit, same hash ──
+  const dry = await api<{ hash: string; allocation: { payouts: { amountMinor: number }[] } }>(`/staff/l2/pools/${poolId}/distributions/dry-run`, { token: staff, body: { label: "Period 1" } });
   expect(dry.body.allocation.payouts).toEqual([{ investmentId: expect.any(String), amountMinor: 27_000 }]);
-  const commit = await api<Action>(`/staff/l2/pools/${poolId}/distributions/commit`, { token: staff, body: { label: "Quarter 1", hash: dry.body.hash, reason: "E2E: Q1 reconciled to the lockbox" } });
-  expect(commit.body.action.status, JSON.stringify(commit.body)).toBe("executed");
+  const staffCtx = await browser.newContext();
+  const staffPage = await staffCtx.newPage();
+  await staffLogIn(staffPage, "reviewer@fanzup.test", `/admin/pools/${poolId}`);
+  await expect(staffPage.getByTestId("staff-pool-status")).toHaveText("funded");
+  await expect(staffPage.getByTestId("layer2-demo-banner")).toHaveText(D2);
+  // Natural signs: money held and owed read positive; nothing abnormal on a clean Pool.
+  await expect(staffPage.locator("[data-testid=pool-ledger] [data-negative]")).toHaveCount(0);
+  await staffPage.getByLabel("Run label").fill("Period 1");
+  await staffPage.getByTestId("dry-run").click();
+  const shownHash = (await staffPage.getByTestId("dry-run-hash").textContent())!.trim();
+  expect(shownHash).toBe(dry.body.hash);
+  await staffPage.locator("#r-commit-run").fill("E2E: Period 1 reconciled to the lockbox");
+  await staffPage.getByTestId("commit-run").click();
+  await expect(staffPage.getByText("Done.")).toBeVisible();
+  await staffPage.reload();
+  await staffLogInIfAsked(staffPage);
+  const committed = staffPage.locator("[data-testid=run-row][data-label='Period 1']").getByTestId("run-hash");
+  await expect(committed).toHaveText(shownHash);
+  await shot(staffPage, "6-staff-run");
   await advance(5);
   await advance(5);
 
@@ -124,17 +189,31 @@ test("album royalty Pool: create → Form C → KYC → invest → fund → roya
   const row = fan.locator(`[data-testid=holding-row][data-pool='${slug}']`);
   await expect(row).toHaveAttribute("data-status", "issued");
   await expect(row.getByTestId("received")).toHaveText("$270");
-  await shot(fan, "6-portfolio");
+  await expect(row.getByTestId("unsecured-line")).toBeVisible();
+  await shot(fan, "7-portfolio");
   await row.getByRole("link", { name: title }).click();
-  await expect(fan.getByTestId("payouts")).toContainText("Quarter 1");
+  await expect(fan.getByTestId("payouts")).toContainText("Period 1");
   await expect(fan.getByTestId("payouts")).toContainText("1099-DIV");
+  await expect(fan.getByTestId("unsecured-line").first()).toBeVisible();
 
   // ── Ledger ⇄ provider reconcile to the cent ──────────────────────────
   const recon = await api<{ ledger: { diffMinor: number } }>(`/staff/l2/pools/${poolId}/recon`, { token: staff, body: {} });
   expect(recon.body.ledger.diffMinor).toBe(0);
   await creatorCtx.close();
   await fanCtx.close();
+  await staffCtx.close();
 });
+
+/** After a reload the session is still aal2; if the staff step shows again (session refresh race), finish it. */
+async function staffLogInIfAsked(page: Page) {
+  const asked = await page.getByTestId("staff-second-factor").waitFor({ state: "visible", timeout: 3_000 }).then(() => true, () => false);
+  if (!asked) return;
+  for (const fresh of [false, true]) {
+    await page.getByLabel("6-digit code").fill(await staffTotpCode("reviewer@fanzup.test", { fresh }));
+    await page.getByRole("button", { name: "Verify" }).click();
+    if (await page.getByTestId("staff-second-factor").waitFor({ state: "detached", timeout: 10_000 }).then(() => true, () => false)) return;
+  }
+}
 
 test("a Pool that misses its target refunds every investor in full", async ({ page }) => {
   const staff = await staffToken("reviewer@fanzup.test");
@@ -144,24 +223,44 @@ test("a Pool that misses its target refunds every investor in full", async ({ pa
     token: sol,
     body: {
       slug, title: `E2E Miss ${run}`, tracklist: ["One", "Two"], useOfFunds: [{ label: "Studio", amountMinor: 8_000_00 }], revenueTypes: ["master"], fansBps: 3000, platformBps: 500,
-      unitsTotal: 200, unitPriceMinor: 50_00, durationDays: 14, collectionMechanism: "LOCKBOX", tranches: [{ seq: 1, pct: 50 }, { seq: 2, pct: 50, milestone: "Released" }],
+      unitsTotal: 200, unitPriceMinor: 50_00, durationDays: 21, collectionMechanism: "LOCKBOX", tranches: [{ seq: 1, pct: 50 }, { seq: 2, pct: 50, milestone: "Released" }],
     },
   });
   expect(create.status, JSON.stringify(create.body)).toBe(201);
   const id = create.body.id;
-  expect((await api(`/creator/pools/${id}/submit`, { method: "POST", token: sol })).status).toBe(200);
+  const submit = await api(`/creator/pools/${id}/submit`, { token: sol, body: { otherRegCfSales12mMinor: 0 } });
+  expect(submit.status, JSON.stringify(submit.body)).toBe(200);
   await api(`/staff/l2/pools/${id}/review`, { token: staff, body: { decision: "approved", reason: "E2E: Form C matches the Pool data" } });
   await api(`/staff/l2/pools/${id}/collection/execute`, { token: staff, body: { reason: "E2E: lockbox agreement on file (mock)" } });
-  const launch = await api<{ endsAt: string }>(`/creator/pools/${id}/launch`, { method: "POST", token: sol });
+  const launch = await api<{ endsAt: string }>(`/creator/pools/${id}/launch`, { token: sol, body: { otherRegCfSales12mMinor: 0 } });
   expect(launch.status, JSON.stringify(launch.body)).toBe(200);
 
-  // Jordan (fan@, KYC approved in the seed) invests $500 through the browser.
-  await logIn(page, "fan@fanzup.test", `/pools/${slug}`);
+  // Jordan (fan@, KYC approved in the seed) commits $100 through the API and cancels while the payment is still moving
+  // (the mock settles fund moves after a few seconds): the API answers cancel_pending (L2-T-031).
+  const jordan = await seedSignIn("fan@fanzup.test");
+  const pool = await api<{ riskAckVersion: string }>(`/pools/${slug}`, { token: jordan });
+  const small = await api<{ investmentId: string; status: string }>(`/pools/${id}/investments`, { token: jordan, body: { units: 2, riskAckVersion: pool.body.riskAckVersion }, headers: { "idempotency-key": `e2e-small-${run}` } });
+  expect(small.status, JSON.stringify(small.body)).toBe(201);
+  const cancel = await api<{ result: string; investment: Investment }>(`/investments/${small.body.investmentId}/cancel`, { token: jordan, body: {} });
+  expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
+  // `funding` → cancel_pending; if the fund move already settled (slow runner) it's an immediate cancel of a funded investment.
+  expect(["cancel_pending", "cancelled"]).toContain(cancel.body.result);
+
+  // …and invests $500 through the browser.
+  await logIn(page, "fan@fanzup.test", `/investments/${small.body.investmentId}`);
+  if (cancel.body.result === "cancel_pending" && cancel.body.investment.status !== "refund_pending") {
+    const holding = page.getByTestId("holding");
+    await expect(holding).toHaveAttribute("data-status", /cancel_pending|refund_pending|refunded/);
+    if ((await holding.getAttribute("data-status")) === "cancel_pending") await expect(page.getByTestId("holding-help")).toContainText("Cancellation received");
+  }
+  await page.goto(`/pools/${slug}`);
   await page.getByTestId("units-input").fill("10");
   await page.getByTestId("review-documents").click();
   for (const a of ["ack-risk", "ack-unsecured", "ack-lockup", "ack-formc"]) await page.locator(`#${a}`).check();
   await page.getByTestId("confirm-investment").click();
   await expect(page.getByTestId("confirmation")).toHaveAttribute("data-status", "funded", { timeout: 30_000 });
+  await expect(page.getByTestId("c-cancel-by")).toHaveText(/\d{4}/);
+  await expect(page.getByTestId("c-units")).toHaveText("10");
 
   // Deadline passes below target → failed → refunds settle.
   await advance(Math.ceil((new Date(launch.body.endsAt).getTime() - Date.now()) / 1000) + 20 * 60);
@@ -173,10 +272,26 @@ test("a Pool that misses its target refunds every investor in full", async ({ pa
   );
   expect(money.pool.status).toBe("refunded");
   expect(money.ledger.pool_escrow ?? 0).toBe(0);
+  const smallAfter = await api<Investment>(`/investments/${small.body.investmentId}`, { token: jordan });
+  expect(["refunded", "cancelled", "returned"]).toContain(smallAfter.body.status);
   await page.goto("/portfolio");
-  await expect(page.locator(`[data-testid=holding-row][data-pool='${slug}']`)).toHaveAttribute("data-status", "refunded");
-  await shot(page, "7-refunded");
+  const rows = page.locator(`[data-testid=holding-row][data-pool='${slug}']`);
+  await expect(rows.filter({ hasText: "10 Units" })).toHaveAttribute("data-status", "refunded");
+  await shot(page, "8-refunded");
   const recon = await api<{ ledger: { diffMinor: number } }>(`/staff/l2/pools/${id}/recon`, { token: staff, body: {} });
   expect(recon.body.ledger.diffMinor).toBe(0);
-  void randomUUID;
+
+  // Flag off: entry pages close, the investment stays readable as the cancel-only view (completion route).
+  const off = await api<Action>("/staff/flags/layer2", { token: staff, body: { on: false, reason: "E2E: cancel-only view with the flag off" } });
+  expect(off.status, JSON.stringify(off.body)).toBe(200);
+  try {
+    await page.goto(`/investments/${small.body.investmentId}`);
+    await expect(page.getByTestId("cancel-only-view")).toBeVisible();
+    await expect(page.getByTestId("layer2-demo-banner")).toHaveText(D2);
+    await page.goto(`/pools/${slug}`);
+    await expect(page.getByText("Investing isn't open yet")).toBeVisible();
+  } finally {
+    const on = await api<Action>("/staff/flags/layer2", { token: staff, body: { on: true, reason: "E2E: back on after the cancel-only check" } });
+    expect(on.status, JSON.stringify(on.body)).toBe(200);
+  }
 });
