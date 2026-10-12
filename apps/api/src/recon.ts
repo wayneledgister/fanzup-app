@@ -13,8 +13,9 @@
  * about it is a lost confirmation (follow-up to merged M1 code, found in the PR #12 L2 review round 3): before the
  * ledger is read it is looked up at the provider (`findRefund` / `findTransfer`) — confirmed there → recorded through
  * the webhook's SQL path (`confirmRefundOrFlag` / `confirmPayout`, amount asserted); pending there → still in flight;
- * not found → an `op_unconfirmed` break (non-pausing; cleared by the run once the op confirms). Its ref is counted in
- * matching either way.
+ * a refund failed or canceled there → op `failed` + alert, as the `refund.failed` webhook does (staff retry it with
+ * `outbound_op.replay`; review round 4); not found → an `op_unconfirmed` break (non-pausing; cleared by the run once the
+ * op confirms; staff may replay the `sent` op while it is open). Its ref is counted in matching either way.
  */
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n, type Sql } from "./db";
@@ -71,7 +72,6 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
        where o.status = 'sent' and o.updated_at <= ${graceStart} order by o.updated_at`);
     for (const op of stale) {
       if (op.provider_ref && inFlightRefs.has(op.provider_ref)) continue; // its event arrived and is still being processed
-      let state: string = "not_found";
       if (op.kind === "refund") {
         const paymentRef = op.payment_ref ?? op.backing_payment_ref;
         const found = paymentRef ? await provider.findRefund({ paymentRef, opId: op.id }) : null;
@@ -85,7 +85,15 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
           inFlightRefs.add(found.refundRef); // still pending at the provider
           continue;
         }
-        if (found) state = found.status;
+        if (found) {
+          // Failed or canceled at the provider: the same transition as the `refund.failed` webhook (inbox.ts) — op
+          // `failed` + alert — so staff can retry it with `outbound_op.replay` (review round 4, PR #12). No break.
+          const [failed] = await asService(sql, (tx) => tx<{ id: string }[]>`
+            update public.outbound_ops set status = 'failed', last_error = ${"refund failed: " + found.status}
+             where id = ${op.id} and status = 'sent' returning id`);
+          if (failed) log("alert", "refund.failed", { opId: op.id, code: found.status, via: "recon_lookup" });
+          continue;
+        }
       } else {
         const found = await provider.findTransfer({ campaignId: op.campaign_id, opId: op.id });
         if (found) {
@@ -96,7 +104,7 @@ export async function runReconciliation(sql: Sql, provider: PaymentProvider, now
         }
       }
       breaks.push({ kind: "op_unconfirmed", campaignId: op.campaign_id, amountMinor: n(op.amount_minor),
-        refs: { ref: op.id, op_kind: op.kind, provider_ref: op.provider_ref, provider_status: state } });
+        refs: { ref: op.id, op_kind: op.kind, provider_ref: op.provider_ref, provider_status: "not_found" } });
     }
     const allProviderTxns = await provider.listBalanceTransactions();
     const inFlight = allProviderTxns.filter((t) => inFlightRefs.has(t.ref)).map((t) => ({ ref: t.ref, campaignId: t.campaignId, netMinor: t.netMinor }));

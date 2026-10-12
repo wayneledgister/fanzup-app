@@ -5,8 +5,8 @@
  *  - COMPLETION routes sit behind `l2MockGate` (provider configured, flag not required): the investor's own
  *    `GET /investments/:id` and `POST /investments/:id/cancel` (the 227.304(a) right), staff `GET queue`,
  *    `GET pools`, `GET pools/:id/money`, `GET pools/:id/form-c`, `GET investors`, `POST pools/:id/recon`,
- *    `POST pools/:id/collection-state` and `POST pool-ops/:id/replay`, and the signed `regcf` webhook (stored before processing, processed only through
- *    main's claimed inbox).
+ *    `POST pools/:id/collection-state`, `POST pool-ops/:id/replay` and `POST pool-breaks/:id/resolve`, and the signed
+ *    `regcf` webhook (stored before processing, processed only through main's claimed inbox).
  * The flag switch itself (`POST /staff/flags/layer2`) lives in the M1 staff plugin, outside both gates (staff + aal2 +
  * privileged(), `provider_missing` without REGCF_PROVIDER=mock).
  */

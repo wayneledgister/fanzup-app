@@ -90,10 +90,17 @@ const EXECUTORS: Record<ActionName, Executor> = {
     await asService(d.sql, (tx) => tx`update public.provider_events set status = 'failed', attempts = 0, next_attempt_at = now() where id = ${a.subject_id} and status in ('failed', 'dead', 'unmatched')`);
     await processEventById(d.sql, d.provider, a.subject_id!);
   },
+  // A `dead`/`failed` op, or (review round 4, PR #12 — as `pool_op.replay`) a `sent` op while recon has an open
+  // `op_unconfirmed` break on it (the provider has no record of the movement after the in-flight grace). The runner looks
+  // the movement up (`findRefund` / `findTransfer` by op id) before any call, so nothing moves twice.
   "outbound_op.replay": async (d, a) => {
     const [r] = await asService(d.sql, (tx) => tx`
-      update public.outbound_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, last_error = null
-       where id = ${a.subject_id} and status in ('dead', 'failed') returning id`);
+      update public.outbound_ops o set status = 'initiated', next_attempt_at = now(), lease_until = null, last_error = null
+       where o.id = ${a.subject_id}
+         and (o.status in ('dead', 'failed')
+              or (o.status = 'sent' and exists (select 1 from public.recon_breaks b
+                                                 where b.kind = 'op_unconfirmed' and b.resolved_at is null and b.refs ->> 'ref' = o.id::text)))
+       returning o.id`);
     if (!r) throw new HttpError(409, "not_replayable", "Only dead-lettered or failed operations can be replayed.");
   },
   /**
@@ -102,28 +109,34 @@ const EXECUTORS: Record<ActionName, Executor> = {
    * lookup-before-call rules still apply (a disburse amount is frozen once a call started; the provider sees the op's own
    * idempotency key again; and because a call started, the runner looks the movement up at the provider before any
    * re-call). Not a money action: like M1's replay it is never delayed and has no daily limit (a refund owed to an
-   * investor must not wait). An op the provider already moved for a different amount (failed `amount_mismatch`, or
-   * carrying the provider ref of a confirmation) is refused `replay_requires_resolution` while its `amount_mismatch`
-   * break is open or was never raised: staff resolve the break first (`pool_break.resolve`; review round 3, PR #12).
+   * investor must not wait). An op the provider already moved for a different amount is refused
+   * `replay_requires_resolution` until staff resolve its `amount_mismatch` break (`pool_break.resolve`; review round 3):
+   * that is decided ONLY from the op's `amount_mismatch` break (open → refused; resolved → allowed) or a `last_error`
+   * starting `amount_mismatch` with no resolved break — never from `provider_ref` alone, which on a `sent` op is just the
+   * provider's acceptance ref (review round 4, PR #12).
    * A `sent` op is replayable only while recon has an open `op_unconfirmed` break on it (the provider has no record of
-   * the movement after the in-flight grace); the runner looks it up again before any call.
+   * the movement after the in-flight grace); its acceptance ref moves to `accepted_ref` and `provider_ref` is cleared, so
+   * a later dead-letter of the re-call stays replayable. The runner looks the movement up again (by op id) before any
+   * call, so nothing moves twice.
    */
   "pool_op.replay": async (d, a) => {
     const rows = await asService(d.sql, async (tx) => {
-      const [prev] = await tx<{ status: string; provider_ref: string | null; last_error: string | null; open_break: boolean; resolved_break: boolean; unconfirmed: boolean }[]>`
-        select o.status, o.provider_ref, o.last_error,
+      const [prev] = await tx<{ status: string; last_error: string | null; open_break: boolean; resolved_break: boolean; unconfirmed: boolean }[]>`
+        select o.status, o.last_error,
                exists (select 1 from public.pool_breaks b where b.dedupe_key = 'op_unconfirmed:' || o.id::text and b.resolved_at is null) as unconfirmed,
                exists (select 1 from public.pool_breaks b where b.dedupe_key = 'amount_mismatch:' || o.id::text and b.resolved_at is null) as open_break,
                exists (select 1 from public.pool_breaks b where b.dedupe_key = 'amount_mismatch:' || o.id::text and b.resolved_at is not null) as resolved_break
           from public.pool_ops o where o.id = ${a.subject_id} for update`;
       if (prev && ["failed", "dead"].includes(prev.status)) {
-        const moved = prev.provider_ref != null || (prev.last_error ?? "").startsWith("amount_mismatch");
-        if (prev.open_break || (moved && !prev.resolved_break)) {
+        const mismatched = (prev.last_error ?? "").startsWith("amount_mismatch");
+        if (prev.open_break || (mismatched && !prev.resolved_break)) {
           throw new HttpError(409, "replay_requires_resolution", "The provider already moved money for this operation. Resolve its amount-mismatch break before replaying it.");
         }
       }
       const r = await tx<{ id: string }[]>`
-        update public.pool_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, claim_token = null, last_error = null
+        update public.pool_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, claim_token = null, last_error = null,
+               accepted_ref = case when status = 'sent' then coalesce(provider_ref, accepted_ref) else accepted_ref end,
+               provider_ref = case when status = 'sent' then null else provider_ref end
          where id = ${a.subject_id} and (status in ('dead', 'failed') or (status = 'sent' and ${prev?.unconfirmed ?? false})) returning id`;
       if (r.length) {
         await tx`insert into public.audit_events (action, entity, entity_id, data)

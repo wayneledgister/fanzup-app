@@ -9,7 +9,7 @@ import { asService, n } from "../src/db";
 import { ingestEvent, processEventById, processPendingEvents } from "../src/inbox";
 import { runDueOps } from "../src/outbound";
 import { isPayoutPaused, runReconciliation, PAYOUT_PAUSING_KINDS, type ReconResult } from "../src/recon";
-import { afterDeadline, back, createUser, ids, kit, one, pay, tick, type Kit } from "./helpers";
+import { afterDeadline, back, createUser, ids, kit, one, pay, tick, tokenWith, type Kit } from "./helpers";
 
 let k: Kit;
 beforeAll(async () => {
@@ -175,6 +175,12 @@ describe("lost confirmation of a `sent` op (follow-up found in the PR #12 L2 rev
     return { ref, op };
   }
 
+  const replay = async (opId: string, reason: string) =>
+    k.app.inject({ method: "POST", url: `/api/v1/staff/outbound-ops/${opId}/replay`,
+      headers: { authorization: `Bearer ${await tokenWith(ids.reviewer, { aal: "aal2" })}` }, payload: { reason } });
+  const opStatus = async (id: string) =>
+    one(k.sql, (tx) => tx<{ status: string; last_error: string | null }[]>`select status, last_error from public.outbound_ops where id = ${id}`);
+
   it("in flight inside recon.inflightGraceMinutes; after it, looked up with findRefund and confirmed through the SQL path", async () => {
     const { ref, op } = await sentStrayRefund();
     // The confirmation is lost: the event row is marked done without its effect (e.g. a processor bug or a dropped webhook).
@@ -204,8 +210,10 @@ describe("lost confirmation of a `sent` op (follow-up found in the PR #12 L2 rev
     expect((PAYOUT_PAUSING_KINDS as readonly string[]).includes("op_unconfirmed")).toBe(false);
     expect((await one(k.sql, (tx) => tx<{ status: string }[]>`select status from public.outbound_ops where id = ${op.id}`)).status).toBe("sent");
 
-    // Staff replay it (after checking the provider): the refund goes out again and confirms; the break clears.
-    await asService(k.sql, (tx) => tx`update public.outbound_ops set status = 'initiated', next_attempt_at = now() where id = ${op.id}`);
+    // Staff replay the `sent` op while its op_unconfirmed break is open (review round 4, PR #12): the runner looks the
+    // refund up (nothing), sends it again and it confirms; the break clears.
+    const res = await replay(op.id, "Provider has no record of this refund; send it again");
+    expect(res.statusCode, res.body).toBe(200);
     await runDueOps(k.sql, k.provider);
     await processPendingEvents(k.sql, k.provider);
     expect((await one(k.sql, (tx) => tx<{ status: string }[]>`select status from public.outbound_ops where id = ${op.id}`)).status).toBe("confirmed");
@@ -213,5 +221,39 @@ describe("lost confirmation of a `sent` op (follow-up found in the PR #12 L2 rev
     expect(of(after, "op_unconfirmed")).toEqual([]);
     const row = await one(k.sql, (tx) => tx<{ resolution: string }[]>`select resolution from public.recon_breaks where kind = 'op_unconfirmed'`);
     expect(row.resolution).toBe("cleared_by_run");
+  });
+
+  it("a `sent` op is not replayable without an open op_unconfirmed break (still in flight)", async () => {
+    const { op } = await sentStrayRefund();
+    const res = await replay(op.id, "Trying to replay a refund in flight");
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("not_replayable");
+    expect((await opStatus(op.id)).status).toBe("sent");
+  });
+
+  it("a refund the lookup finds failed at the provider: op failed + alert, as the refund.failed webhook (no break); replay retries it", async () => {
+    const { op } = await sentStrayRefund();
+    // The provider's refund failed and its refund.failed webhook was lost; the provider keeps no successful refund.
+    await asService(k.sql, (tx) => tx`delete from public.provider_events where object_ref = ${op.provider_ref} and type = 'refund.succeeded'`);
+    const orig = k.provider.findRefund.bind(k.provider);
+    k.provider.findRefund = async (input) =>
+      input.opId === op.id ? { refundRef: op.provider_ref, amountMinor: 1500, status: "failed" } : orig(input);
+    let r: ReconResult;
+    try {
+      r = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
+    } finally {
+      k.provider.findRefund = orig;
+    }
+    expect(of(r, "op_unconfirmed").filter((b) => b.refs.ref === op.id)).toEqual([]);
+    expect(r.recovered.filter((x) => x.opId === op.id)).toEqual([]);
+    expect(await opStatus(op.id)).toEqual({ status: "failed", last_error: "refund failed: failed" });
+
+    const res = await replay(op.id, "Refund failed at the processor; send it again");
+    expect(res.statusCode, res.body).toBe(200);
+    await runDueOps(k.sql, k.provider);
+    await processPendingEvents(k.sql, k.provider);
+    expect((await opStatus(op.id)).status).toBe("confirmed");
+    const after = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
+    expect(after.breaks.filter((b) => b.refs.ref === op.id)).toEqual([]);
   });
 });
