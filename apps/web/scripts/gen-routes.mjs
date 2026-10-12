@@ -24,7 +24,9 @@ rows.forEach(([, , page], i) => { if (!ids.has(page)) { ids.set(page, `P${ids.si
 out += `\nconst S = (n: ReactNode) => <Suspense fallback={<RouteFallback />}>{n}</Suspense>;\n\nexport const router = createBrowserRouter([\n`;
 for (const [shell, list] of Object.entries(groups)) {
   const children = list.map(({ route, page, flag }) => {
-    const el = flag ? `<FeatureRoute flag="${flag}"><${ids.get(page)} /></FeatureRoute>` : `<${ids.get(page)} />`;
+    // "layer2Completion": a Layer 2 page that also renders on the server's completion signal (flag off; L2-T-038).
+    const el = flag === "layer2Completion" ? `<FeatureRoute flag="layer2" allowCompletion><${ids.get(page)} /></FeatureRoute>`
+      : flag ? `<FeatureRoute flag="${flag}"><${ids.get(page)} /></FeatureRoute>` : `<${ids.get(page)} />`;
     return `      { path: "${route}", element: S(${el}) },`;
   }).join("\n");
   if (shells[shell]) out += `  {\n    element: <${shells[shell]} />,\n    children: [\n${children}\n    ],\n  },\n`;

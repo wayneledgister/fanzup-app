@@ -351,6 +351,13 @@
 ],
 [
 "fan",
+"/investments/:id",
+"invest/InvestmentView",
+"layer2Completion",
+"(new) CR-002 L2-T-038 \u2014 one investment by id; cancel-only view while the layer2 flag is off"
+],
+[
+"fan",
 "/portfolio/:poolId/transfer",
 "invest/SoftTransfer",
 "postBeta",
@@ -682,21 +689,21 @@
 "admin",
 "/admin/pools",
 "admin/Pools",
-"layer2",
+"layer2Completion",
 "(new) CR-002 Layer 2 staff worklist + Pools"
 ],
 [
 "admin",
 "/admin/pools/:id",
 "admin/Pool",
-"layer2",
+"layer2Completion",
 "(new) CR-002 Pool money view, Form C review, Waterfall"
 ],
 [
 "admin",
 "/admin/investors",
 "admin/Investors",
-"layer2",
+"layer2Completion",
 "(new) CR-002 investor KYC manual review"
 ],
 [

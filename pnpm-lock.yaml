@@ -266,12 +266,18 @@ importers:
       tailwindcss:
         specifier: 4.1.12
         version: 4.1.12
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
       typescript:
         specifier: ~5.8.3
         version: 5.8.3
       vite:
         specifier: 6.3.5
         version: 6.3.5(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.30.1)(tsx@4.23.15)
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.30.1)(tsx@4.23.15)
 
   packages/shared:
     dependencies:

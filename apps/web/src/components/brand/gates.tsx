@@ -1,12 +1,12 @@
 import { FlaskConical, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
-import { useFlag, type Flag } from "@/lib/flags";
+import { useFlag, useLayer2Completion, type Flag } from "@/lib/flags";
 import { Container, EmptyState } from "./primitives";
 
 const COPY: Record<Flag, { title: string; body: string }> = {
   layer2: {
     title: "Investing isn't open yet",
-    body: "Investment Pools launch once our registered funding-portal partner is live. Until then you can back campaigns, subscribe, and shop merch and tickets.",
+    body: "Revenue-share Pools aren't available right now. You can still back campaigns, subscribe, and shop merch and tickets.",
   },
   postBeta: {
     title: "Coming after launch",
@@ -14,9 +14,16 @@ const COPY: Record<Flag, { title: string; body: string }> = {
   },
 };
 
-/** Route-level gate: renders a branded "not yet available" page when the flag is off. */
-export function FeatureRoute({ flag, children }: { flag: Flag; children: ReactNode }) {
-  const on = useFlag(flag);
+/**
+ * Route-level gate: renders a branded "not yet available" page when the flag is off.
+ * `allowCompletion` (Layer 2 only; L2 design §2, L2-T-038): the page also renders while the server flag is off if the
+ * server reports its completion routes (`flags.layer2Completion`) — an investor's open investment stays readable and
+ * cancellable. That signal comes only from the server (never a client override) and a deployed server never sends it.
+ */
+export function FeatureRoute({ flag, children, allowCompletion = false }: { flag: Flag; children: ReactNode; allowCompletion?: boolean }) {
+  const flagOn = useFlag(flag);
+  const completion = useLayer2Completion();
+  const on = flagOn || (flag === "layer2" && allowCompletion && completion);
   if (on && flag === "layer2") {
     return (
       <>

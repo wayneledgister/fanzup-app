@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "lint:copy": "node scripts/check-copy.mjs"
+    "lint:copy": "node scripts/check-copy.mjs && tsx scripts/check-l2-render.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fanzup/shared": "workspace:*",
@@ -72,6 +73,8 @@
     "@vitejs/plugin-react": "4.7.0",
     "tailwindcss": "4.1.12",
     "typescript": "~5.8.3",
-    "vite": "6.3.5"
+    "vite": "6.3.5",
+    "vitest": "^3.2.0",
+    "tsx": "^4.20.0"
   }
 }
