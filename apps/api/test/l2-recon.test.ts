@@ -5,7 +5,7 @@
  * a pausing break defers the Pool's disbursement, never its refunds, never an M1 payout), plus the failed-Pool notices
  * (round-1 review: the creator gets a creator notice; investor-cancelled investments get no pool_failed notice).
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { signPayload } from "@fanzup/mock-escrow/signing";
 import { POLICY } from "@fanzup/shared/policy";
@@ -208,7 +208,7 @@ describe("Layer 2 reconciliation kinds and the pause rule (design §5.1)", () =>
     const fan = await investor(k, { accredited: true });
     const r = await buy(k, fan, pool, 2);
     await advance(k, 3);
-    k.regcf.failNext("refundTrade", "permanent", "refund_refused_test");
+    k.regcf.failNext("refundFundMove", "permanent", "refund_refused_test");
     await cancel(k, fan, r.json().investmentId);
     await tick(k);
     const [op] = await asService(k.sql, (tx) => tx<{ status: string }[]>`select status from public.pool_ops where kind = 'refund' and subject_id = ${r.json().investmentId}`);
@@ -218,8 +218,14 @@ describe("Layer 2 reconciliation kinds and the pause rule (design §5.1)", () =>
     k.regcf.failNext("refundFundMove", "permanent", "refund_refused_test");
     strayFundMove(k, (await poolRow(k.sql, pool)).offering, await accountOf(k, fan.id), randomUUID(), 30_00);
     await advance(k, 3);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await reconcileL2Ledger(k, { poolId: pool, now: days(10) });
     expect((await kinds(k, pool)).sort()).toEqual(["refund_overdue", "refund_overdue", "stray_fund_move_aged"]);
+    // The alert fires when each break first opens, not again on every run while it stays open (review round 2, PR #12).
+    await reconcileL2Ledger(k, { poolId: pool, now: days(11) });
+    const overdueAlerts = errors.mock.calls.filter((c) => String(c[0]).includes('"msg":"refund.overdue"'));
+    errors.mockRestore();
+    expect(overdueAlerts).toHaveLength(2);
     // refund_overdue never pauses; stray_fund_move_aged does (material).
     await asService(k.sql, (tx) => tx`update public.pool_breaks set resolved_at = now(), resolution = 'test' where pool_id = ${pool} and kind = 'stray_fund_move_aged'`);
     expect(await isPoolPayoutPaused(k.sql, pool, days(10))).toBe(false);

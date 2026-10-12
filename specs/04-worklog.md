@@ -185,3 +185,12 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - **Tests (`f854ec5`)** — new `l2-purchase` (14), `l2-recon` (9), `l2-ops` (3); `l2-platform` (20), `l2-revenue` (14), `l2-offering` (15), `l2-seed` (4) rewritten for the merged SQL. Run here.
 - Totals run here: API 282/283 (23 files) — the one failure is M1's weekly-review test (this machine's Postgres runs in `America/Chicago` and the run crossed Monday 00:00 UTC; green in CI on UTC). mock-escrow 15/15, shared 59/59, typecheck clean (api, shared, web, mock-escrow), `lint:copy` clean, API build OK.
 - Left for PR #13: the web parts of L2-T-012/-013/-014/-015/-016 (lint rule)/-017/-018/-019/-020/-021/-022/-025/-031/-034/-038/-043/-044.
+
+## 2026-10-11 · L2 PR #12 review round 2 fixes
+- [major] 1 · `pool_op.replay` staff action (`apps/api/src/staff.ts`) + flag-free `POST /staff/l2/pool-ops/:id/replay`; failed/dead pool ops in `/staff/queue` as `pool_dead_letters` (shared `StaffQueueType`). L2-T-046.
+- [minor] 2 · `invest()` guard passes use a fresh clock `max(now, clock())` (injectable for tests). L2-T-047.
+- [minor] 3 · Migration `20261011000800_l2_launch_deadline.sql`: `pools.launch_ends_at`, `l2_plan_launch`, `launch_pool(…, p_ends_at default null)`; launch sends that value as the offering `endDate`. L2-T-048.
+- [minor] 4 · Investment refunds via `refundFundMove(provider_fund_ref)` for the op amount (= `funded_received_minor`); mock engine test hook `setPendingFundMoveAmount`. L2-T-049.
+- [nit] 5 · PR description corrected (no `db-deploy.yml` change; hosted deploys never seed); design §9 flag-scope list completed.
+- [nit] 6 · Per-tick L2 recon skips finished Pools with nothing open; `refund.overdue` logged once per break. L2-T-050.
+- Tests: new `apps/api/test/l2-review-round2.test.ts` (5); `l2-ops`, `l2-recon`, `l2-seed` updated. Totals run here: API 287/288 (24 files) — the one failure is M1's weekly-review test (local Postgres in `America/Chicago`, run crossed Monday 00:00 UTC; green in CI). shared 59/59, mock-escrow 15/15, typecheck clean, `lint:copy` clean.

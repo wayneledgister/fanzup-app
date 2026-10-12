@@ -34,14 +34,15 @@ describe("pool_ops runner (L2-T-027)", () => {
     const [fresh] = await asService(k.sql, (tx) => tx<PoolOpRow[]>`select * from public.l2_claim_pool_ops(${t1}, 20)`);
     expect(fresh.id).toBe(stale.id);
     expect(fresh.claim_token).not.toBe(stale.claim_token);
-    const calls = countCalls(k, ["refundTrade"]);
+    const calls = countCalls(k, ["refundTrade", "refundFundMove"]);
     await runPoolOp(k, fresh, t1);
     const [after] = await asService(k.sql, (tx) => tx<{ status: string; provider_ref: string; claim_token: string | null }[]>`select status, provider_ref, claim_token from public.pool_ops where id = ${fresh.id}`);
     expect(after).toMatchObject({ status: "sent", claim_token: null });
     await runPoolOp(k, stale, t1); // the old claimant wakes up
     const [still] = await asService(k.sql, (tx) => tx<{ status: string; provider_ref: string }[]>`select status, provider_ref from public.pool_ops where id = ${fresh.id}`);
     expect(still).toEqual({ status: "sent", provider_ref: after.provider_ref });
-    expect(calls.refundTrade).toBe(1);
+    // A funded investment is refunded by its stored fund move (review round 2, PR #12), once.
+    expect(calls).toEqual({ refundTrade: 0, refundFundMove: 1 });
     await advance(k, 3);
     expect((await asService(k.sql, (tx) => tx<{ status: string }[]>`select status from public.pool_ops where id = ${fresh.id}`))[0].status).toBe("confirmed");
   });

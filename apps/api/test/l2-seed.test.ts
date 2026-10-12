@@ -34,10 +34,18 @@ describe("Layer 2 demo seed + mock escrow fixture", () => {
 
   it("ledger ⇄ provider: every Pool reconciles with no break (balances, per-transaction refs, counters, liability)", async () => {
     const r = await reconcileL2Ledger(k, { now: new Date() });
-    expect(r.pools).toHaveLength(4);
+    // The per-tick run skips the refunded Pool with nothing open (review round 2, PR #12) …
+    const [refunded] = await asService(k.sql, (tx) => tx<{ id: string }[]>`select id from public.pools where slug = 'afterhours-lp'`);
+    expect(r.pools).toHaveLength(3);
+    expect(r.pools.map((p) => p.poolId)).not.toContain(refunded.id);
     expect(r.diffMinor).toBe(0);
     expect(r.breaks).toEqual([]);
     expect(r.inFlight).toEqual([]);
+    // … and a staff run for that Pool still reconciles it, cleanly.
+    const one = await reconcileL2Ledger(k, { poolId: refunded.id, now: new Date() });
+    expect(one.pools.map((p) => p.poolId)).toEqual([refunded.id]);
+    expect(one.diffMinor).toBe(0);
+    expect(one.breaks).toEqual([]);
   });
 
   it("seeded states: one Pool per badge; ≥ 21-day offerings; SELF_REPORTED statements; attested; matured at the cap", async () => {
