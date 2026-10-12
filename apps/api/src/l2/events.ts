@@ -10,6 +10,7 @@ import { runWithCtx } from "../context";
 import type { EventRow } from "../inbox";
 import type { RegCfEvent, RegCfProvider, RegCfTransaction } from "../regcf";
 import { log, redact } from "../log";
+import { attemptKey } from "../provider/types";
 
 export const REGCF_PROVIDER_NAME = "mock-escrow";
 
@@ -32,7 +33,51 @@ export async function ingestRegCfEvent(sql: Sql, e: RegCfEvent): Promise<{ id: s
 }
 
 type Outcome = "processed" | "ignored" | "unmatched" | "wait";
-export type PoolOpRef = { id: string; kind: string; subject_id: string; pool_id: string; fund_ref: string | null; amount_minor: bigint; idempotency_key: string; correlation_id: string | null; status: string };
+export type PoolOpRef = { id: string; kind: string; subject_id: string; pool_id: string; fund_ref: string | null; amount_minor: bigint; idempotency_key: string; correlation_id: string | null; status: string; attempt_gen: number };
+
+/**
+ * Attempt generations (PR #12 review round 5; design §5 Outbound): a `pool_ops` movement is sent with externalId
+ * `<op id>` (generation 0) or `<op id>:r<gen>`, and provider key `attemptKey(idempotency_key, gen)`. Lookups match the
+ * current generation only; a movement the provider reports failed/returned/canceled is never re-adopted.
+ */
+export const opExternalId = (op: { id: string; attempt_gen?: number | null }) => attemptKey(op.id, op.attempt_gen ?? 0);
+export const opProviderKey = (op: { idempotency_key: string; attempt_gen?: number | null }) => attemptKey(op.idempotency_key, op.attempt_gen ?? 0);
+const OP_EXT_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?::r(\d+))?$/i;
+export const parseOpExternalId = (ext: string): { id: string; gen: number } | null => {
+  const m = OP_EXT_RE.exec(ext);
+  return m ? { id: m[1], gen: m[2] ? Number(m[2]) : 0 } : null;
+};
+
+/**
+ * The provider reported a `pool_ops` movement failed/returned/canceled (no money moved): op `failed` + alert, the ref
+ * appended to `failed_refs` with its generation — never re-adopted, never `sent`, never posted. Applies only while the op
+ * is on that generation and not confirmed (and, from the runner, only under its claim). `pool_op.replay` then starts the
+ * next generation. Shared by the runner's lookup (ops.ts), the `regcf.refund.failed` webhook and recon's lookup.
+ */
+export async function recordPoolFailedMovement(
+  sql: Sql, op: Pick<PoolOpRef, "id" | "kind" | "correlation_id">,
+  f: { gen: number; ref: string; status: string; via: string; lastError: string; claimToken?: string },
+): Promise<boolean> {
+  const entry = { gen: f.gen, ref: f.ref, status: f.status, via: f.via, at: new Date().toISOString() };
+  const row = await runWithCtx({ ...SYS, correlationId: op.correlation_id }, () =>
+    asService(sql, async (tx) => {
+      const [r] = await tx<{ id: string }[]>`
+        update public.pool_ops
+           set status = 'failed', last_error = ${redact(f.lastError)}, lease_until = null, claim_token = null,
+               failed_refs = case when failed_refs @> ${tx.json([{ gen: f.gen, ref: f.ref }])} then failed_refs else failed_refs || ${tx.json([entry])} end
+         where id = ${op.id} and status <> 'confirmed' and attempt_gen = ${f.gen}
+           and (${f.claimToken ?? null}::uuid is null or claim_token = ${f.claimToken ?? null}::uuid)
+         returning id`;
+      if (r) {
+        await tx`insert into public.audit_events (action, entity, entity_id, data)
+                 values ('pool_op.movement_failed', 'pool_op', ${op.id}, ${tx.json(entry)})`;
+      }
+      return r;
+    }));
+  if (row) log("alert", "pool_op.failed", { opId: op.id, kind: op.kind, providerRef: f.ref, status: f.status, attempt: f.gen, via: f.via });
+  else log("warn", "pool_op.failed_movement_stale", { opId: op.id, providerRef: f.ref, attempt: f.gen, via: f.via });
+  return !!row;
+}
 
 const SYS = { actorId: null, actorKind: "system:webhook", aal: null } as const;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -117,7 +162,7 @@ export async function applyFundMoveReturned(sql: Sql, fm: FundMoveEvent & { retu
 async function opById(sql: Sql, id: string, kind: string): Promise<PoolOpRef | null> {
   if (!UUID_RE.test(id)) return null;
   const [op] = await asService(sql, (tx) => tx<PoolOpRef[]>`
-    select id, kind, subject_id, pool_id, fund_ref, amount_minor, idempotency_key, correlation_id, status from public.pool_ops where id = ${id} and kind = ${kind}`);
+    select id, kind, subject_id, pool_id, fund_ref, amount_minor, idempotency_key, correlation_id, status, attempt_gen from public.pool_ops where id = ${id} and kind = ${kind}`);
   return op ?? null;
 }
 
@@ -175,19 +220,21 @@ export async function applyPoolOpSettled(sql: Sql, op: PoolOpRef, ref: string, a
   }
 }
 
-/** The provider transaction kind a `pool_ops` movement creates (its `externalId` is the op id). */
+/** The provider transaction kind a `pool_ops` movement creates (its `externalId` is `opExternalId(op)`). */
 export const OP_TXN_KIND: Record<string, RegCfTransaction["kind"] | undefined> = { refund: "refund", disburse: "disbursement", payout: "payout" };
 
 /**
  * Look up the provider movement of a `pool_ops` row (M1 rule: ask the provider before calling it again): the escrow
- * (refund, disbursement) or collection-account (payout) transaction whose externalId is the op id. Null: none.
+ * (refund, disbursement) or collection-account (payout) transaction whose externalId is the op's CURRENT generation
+ * (`opExternalId`). Null: none. A failed one is returned as such; the caller never treats it as moved.
  */
-export async function findPoolOpTxn(regcf: RegCfProvider, refs: { offering: string; collection: string | null }, op: { id: string; kind: string }) {
+export async function findPoolOpTxn(regcf: RegCfProvider, refs: { offering: string; collection: string | null }, op: { id: string; kind: string; attempt_gen?: number | null }) {
   const kind = OP_TXN_KIND[op.kind];
   if (!kind) return null;
   const q = kind === "payout" ? (refs.collection ? { collectionAccountId: refs.collection } : null) : { offeringId: refs.offering };
   if (!q) return null;
-  return (await regcf.listTransactions(q)).find((t) => t.kind === kind && t.externalId === op.id) ?? null;
+  const ext = opExternalId(op);
+  return (await regcf.listTransactions(q)).find((t) => t.kind === kind && t.externalId === ext) ?? null;
 }
 
 /** The `regcf.*` branch of main's inbox `handle()` (design §5). */
@@ -222,11 +269,28 @@ export async function handleRegCfEvent(sql: Sql, row: EventRow): Promise<Outcome
     case "regcf.disbursement.settled":
     case "regcf.payout.settled": {
       const kind = row.type === "regcf.refund.settled" ? "refund" : row.type === "regcf.disbursement.settled" ? "disburse" : "payout";
-      const op = await opById(sql, ext, kind);
+      const parsed = parseOpExternalId(ext);
+      const op = parsed ? await opById(sql, parsed.id, kind) : null;
       if (!op) return "wait";
       if (op.status === "confirmed") return "processed";
       const ref = String(d.refundId ?? d.disbursementId ?? d.payoutId);
       await applyPoolOpSettled(sql, op, ref, n(d.amount as number), now);
+      return "processed";
+    }
+    case "regcf.refund.failed": {
+      // The bank failed the refund (review round 5, PR #12): nothing left escrow. Op `failed` + alert with the ref in
+      // `failed_refs`; `pool_op.replay` sends ONE new refund under a fresh generation key. A report about an earlier
+      // generation than the op's current one changes nothing.
+      const parsed = parseOpExternalId(ext);
+      const op = parsed ? await opById(sql, parsed.id, "refund") : null;
+      if (!op || !parsed) return "unmatched";
+      if (op.status === "confirmed") {
+        log("alert", "pool_op.failed_after_confirmed", { opId: op.id, providerRef: String(d.refundId) });
+        return "processed";
+      }
+      await recordPoolFailedMovement(sql, op, {
+        gen: parsed.gen, ref: String(d.refundId), status: "failed", via: "webhook", lastError: `refund failed: ${String(d.returnCode ?? "unknown")}`,
+      });
       return "processed";
     }
     case "regcf.deposit.settled": {

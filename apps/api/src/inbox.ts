@@ -6,8 +6,8 @@
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n, type Sql } from "./db";
 import { runWithCtx } from "./context";
-import type { NormalizedEvent, PaymentProvider } from "./provider/types";
-import { confirmPayout, confirmRefundOrFlag, type OpRow } from "./outbound";
+import { attemptOf, type NormalizedEvent, type PaymentProvider } from "./provider/types";
+import { confirmPayout, confirmRefundOrFlag, recordFailedMovement, type OpRow } from "./outbound";
 import { log, redact } from "./log";
 import { handleRegCfEvent } from "./l2/events";
 
@@ -170,10 +170,12 @@ async function handle(sql: Sql, provider: PaymentProvider, row: EventRow): Promi
     case "refund.failed": {
       const op = await opFor(sql, "refund", p, row.object_ref);
       if (!op) return "unmatched";
+      // Op `failed` + alert, the failed ref recorded with its generation (never re-adopted); a report about an earlier
+      // generation than the op's current one changes nothing (design §5 "Attempt generations").
       await runWithCtx({ correlationId: op.correlation_id, actorId: null, actorKind: "system:webhook", aal: null }, () =>
-        asService(sql, (tx) => tx`update public.outbound_ops set status = 'failed', last_error = ${"refund failed: " + (p.failureCode ?? "unknown")} where id = ${op.id} and status <> 'confirmed'`),
-      );
-      log("alert", "refund.failed", { opId: op.id, code: p.failureCode });
+        recordFailedMovement(sql, op, {
+          gen: attemptOf(p.metadata), ref: row.object_ref ?? "", status: "failed", via: "webhook", lastError: "refund failed: " + (p.failureCode ?? "unknown"),
+        }));
       return "processed";
     }
     case "transfer.created": {

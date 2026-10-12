@@ -32,7 +32,8 @@ import { asService, n, type Sql } from "../db";
 import { log, redact } from "../log";
 import { businessDaysSince } from "../recon";
 import type { RegCfProvider, RegCfTransaction } from "../regcf";
-import { applyPoolOpSettled, OP_TXN_KIND, type PoolOpRef } from "./events";
+import { applyPoolOpSettled, OP_TXN_KIND, opExternalId, recordPoolFailedMovement, type PoolOpRef } from "./events";
+import { isFailedMovement } from "../provider/types";
 
 const DERIVED = ["escrow_diff", "collection_diff", "unmatched_provider_txn", "unmatched_ledger_txn", "counter_mismatch", "liability_mismatch", "stray_fund_move_aged", "refund_overdue", "op_unconfirmed"];
 /** platform_settings key holding the clock of the last per-tick sweep of closed Pools. */
@@ -111,11 +112,12 @@ export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, o
     // Lost confirmations (review round 3): a `sent` op past the grace, with no young event about it, is looked up in the
     // provider's list (its movement carries the op id as externalId) before the ledger is read.
     const stale = await asService(sql, (tx) => tx<(PoolOpRef & { provider_ref: string | null; sent_at: Date | null })[]>`
-      select id, kind, subject_id, pool_id, fund_ref, amount_minor, idempotency_key, correlation_id, status, provider_ref, sent_at
+      select id, kind, subject_id, pool_id, fund_ref, amount_minor, idempotency_key, correlation_id, status, attempt_gen, provider_ref, sent_at
         from public.pool_ops where pool_id = ${pool.id} and status = 'sent' and (sent_at is null or sent_at <= ${graceStart})`);
     for (const op of stale) {
       if (op.provider_ref && inFlightRefs.has(op.provider_ref)) continue; // its event arrived and is still being processed
-      const t = txns.find((x) => x.kind === OP_TXN_KIND[op.kind] && (x.externalId === op.id || x.id === op.provider_ref));
+      // Current generation only (review round 5): an earlier generation's failed movement is never re-adopted.
+      const t = txns.find((x) => x.kind === OP_TXN_KIND[op.kind] && (x.externalId === opExternalId(op) || x.id === op.provider_ref));
       if (t?.status === "settled") {
         try {
           await applyPoolOpSettled(sql, op, t.id, t.amount, now);
@@ -129,6 +131,12 @@ export async function reconcileL2Ledger(d: { sql: Sql; regcf: RegCfProvider }, o
       }
       if (t?.status === "pending") {
         inFlightRefs.add(t.id);
+        continue;
+      }
+      if (t && isFailedMovement(t.status)) {
+        // Failed/returned at the provider and its webhook never came: op `failed` + alert, as `regcf.refund.failed` does
+        // (review round 5, PR #12); staff retry it with `pool_op.replay` (new generation). No break.
+        await recordPoolFailedMovement(sql, op, { gen: op.attempt_gen ?? 0, ref: t.id, status: t.status, via: "recon_lookup", lastError: `${op.kind} failed: ${t.status}` });
         continue;
       }
       breaks.push({ kind: "op_unconfirmed", dedupeKey: `op_unconfirmed:${op.id}`, amountMinor: n(op.amount_minor), refs: {

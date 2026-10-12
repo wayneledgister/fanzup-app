@@ -8,7 +8,8 @@
  *  - state changes that a real provider makes later (KYC decision, ACH settlement, refunds, disbursements, deposits,
  *    payouts) are scheduled jobs on a virtual clock and announced by signed webhooks;
  *  - deterministic triggers: party last name KYCFAIL → KYC rejected, AMLHOLD → manual review; a fund move whose
- *    whole-dollar amount ends in 13 (e.g. $113.00, $2,013.50) is returned (R01).
+ *    whole-dollar amount ends in 13 (e.g. $113.00, $2,013.50) is returned (R01); `failRefund` (admin
+ *    `POST /admin/refunds/:id/fail`) makes a pending refund fail at the bank (`refund.failed`, nothing leaves escrow).
  * Storage: node:sqlite (file in the service, ":memory:" in tests). Used by the HTTP server and in-process by API tests.
  */
 import { createHash, randomUUID } from "node:crypto";
@@ -46,7 +47,7 @@ type Obj = Record<string, unknown> & { id: string };
 export interface ProviderTxn {
   id: string;
   kind: "fund_move" | "refund" | "disbursement" | "deposit" | "payout";
-  /** pending | settled | returned (fund moves only) */
+  /** pending | settled | returned (fund moves only) | failed (refunds only) */
   status: string;
   amount: number;
   externalId: string | null;
@@ -375,6 +376,23 @@ export class MockEscrowEngine {
       this.schedule("refund.settle", this.delays.refund, { refundId: r.id });
       return r;
     });
+  }
+
+  /**
+   * Test trigger (admin): a PENDING refund fails at the bank (e.g. the investor's account was closed). Nothing leaves
+   * escrow; a trade refund puts the trade back to `funded` so it can be refunded again (under a NEW idempotency key — the
+   * old key keeps returning this failed refund); `refund.failed` is announced. Idempotent: a failed refund stays failed.
+   */
+  failRefund(refundId: string, returnCode = "R02") {
+    const r = this.get("refund", refundId);
+    if (r.status === "failed") return r;
+    if (r.status !== "pending") throw new MockError(409, "refund_state", `Only a pending refund can fail (it is ${r.status}).`);
+    const at = new Date(this.now()).toISOString();
+    const failed = this.patch("refund", r.id, { status: "failed", returnCode, settledAt: at });
+    const trade = r.tradeId ? this.get("trade", String(r.tradeId)) : null;
+    if (trade && trade.status === "refunding") this.patch("trade", trade.id, { status: "funded" });
+    this.emit("refund.failed", { refundId: r.id, tradeId: r.tradeId, fundMoveId: r.fundMoveId ?? null, offeringId: r.offeringId, amount: r.amount, externalId: r.externalId, returnCode });
+    return failed;
   }
 
   disburseToIssuer(offeringId: string, input: { amount: number; externalId: string }, idem?: string) {

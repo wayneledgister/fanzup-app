@@ -92,10 +92,16 @@ const EXECUTORS: Record<ActionName, Executor> = {
   },
   // A `dead`/`failed` op, or (review round 4, PR #12 — as `pool_op.replay`) a `sent` op while recon has an open
   // `op_unconfirmed` break on it (the provider has no record of the movement after the in-flight grace). The runner looks
-  // the movement up (`findRefund` / `findTransfer` by op id) before any call, so nothing moves twice.
+  // the movement up (`findRefund` / `findTransfer` by op id and generation) before any call, so nothing moves twice.
+  // Attempt generations (review round 5, PR #12; design §5): when the op's CURRENT generation has a movement the provider
+  // reported failed (`failed_refs`), the replay starts the next generation (fresh provider key `<key>:r<gen>`): a reused
+  // key would only return the failed object. Any other replay keeps the generation, so the lookup still finds a movement
+  // an earlier call made.
   "outbound_op.replay": async (d, a) => {
     const [r] = await asService(d.sql, (tx) => tx`
-      update public.outbound_ops o set status = 'initiated', next_attempt_at = now(), lease_until = null, last_error = null
+      update public.outbound_ops o set status = 'initiated', next_attempt_at = now(), lease_until = null, last_error = null,
+             provider_ref = case when public.op_gen_failed(o.failed_refs, o.attempt_gen) then null else o.provider_ref end,
+             attempt_gen = o.attempt_gen + case when public.op_gen_failed(o.failed_refs, o.attempt_gen) then 1 else 0 end
        where o.id = ${a.subject_id}
          and (o.status in ('dead', 'failed')
               or (o.status = 'sent' and exists (select 1 from public.recon_breaks b
@@ -118,6 +124,10 @@ const EXECUTORS: Record<ActionName, Executor> = {
    * the movement after the in-flight grace); its acceptance ref moves to `accepted_ref` and `provider_ref` is cleared, so
    * a later dead-letter of the re-call stays replayable. The runner looks the movement up again (by op id) before any
    * call, so nothing moves twice.
+   * Attempt generations (review round 5, PR #12; design §5): when the op's CURRENT generation has a movement the provider
+   * reported failed/returned (`failed_refs`), the replay starts the next generation — externalId `<op id>:r<gen>`, key
+   * `<key>:r<gen>` — so the runner sends exactly one new movement; `provider_ref` (the failed ref) is cleared. Any other
+   * replay keeps the generation, so the lookup still finds a movement an earlier call made.
    */
   "pool_op.replay": async (d, a) => {
     const rows = await asService(d.sql, async (tx) => {
@@ -133,14 +143,15 @@ const EXECUTORS: Record<ActionName, Executor> = {
           throw new HttpError(409, "replay_requires_resolution", "The provider already moved money for this operation. Resolve its amount-mismatch break before replaying it.");
         }
       }
-      const r = await tx<{ id: string }[]>`
+      const r = await tx<{ id: string; attempt_gen: number }[]>`
         update public.pool_ops set status = 'initiated', next_attempt_at = now(), lease_until = null, claim_token = null, last_error = null,
                accepted_ref = case when status = 'sent' then coalesce(provider_ref, accepted_ref) else accepted_ref end,
-               provider_ref = case when status = 'sent' then null else provider_ref end
-         where id = ${a.subject_id} and (status in ('dead', 'failed') or (status = 'sent' and ${prev?.unconfirmed ?? false})) returning id`;
+               provider_ref = case when status = 'sent' or public.op_gen_failed(failed_refs, attempt_gen) then null else provider_ref end,
+               attempt_gen = attempt_gen + case when public.op_gen_failed(failed_refs, attempt_gen) then 1 else 0 end
+         where id = ${a.subject_id} and (status in ('dead', 'failed') or (status = 'sent' and ${prev?.unconfirmed ?? false})) returning id, attempt_gen`;
       if (r.length) {
         await tx`insert into public.audit_events (action, entity, entity_id, data)
-                 values ('pool_op.replayed', 'pool_op', ${a.subject_id}, ${tx.json({ from_status: prev.status, privileged_action_id: a.id })})`;
+                 values ('pool_op.replayed', 'pool_op', ${a.subject_id}, ${tx.json({ from_status: prev.status, attempt_gen: r[0].attempt_gen, privileged_action_id: a.id })})`;
       }
       return r;
     });

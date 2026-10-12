@@ -104,6 +104,37 @@ describe("mock escrow engine (ADR-007)", () => {
     expect(settled).toEqual([expect.objectContaining({ refundId: r.id, fundMoveId: fm.id, amount: 5_000, externalId: "op-1" })]);
   });
 
+  it("failRefund (test trigger): a pending refund fails at the bank — nothing leaves escrow, the old key replays the failed refund, a new key refunds", async () => {
+    const { e, inbox } = engine();
+    const o = offering(e);
+    const { account } = investor(e);
+    await e.advance(3);
+    const t = e.createTrade({ offeringId: o.id, accountId: account.id, units: 2, unitPrice: 5_000, amount: 10_000, externalId: "inv-f" }, k());
+    e.fundTrade(t.id, { amount: 10_000, externalId: "inv-f" }, k());
+    await e.advance(3);
+    const key = k();
+    const r = e.refundTrade(t.id, { amount: 10_000, externalId: "op-f" }, key);
+    expect(e.get("trade", t.id).status).toBe("refunding");
+    const failed = e.failRefund(r.id, "R02");
+    expect(failed).toMatchObject({ status: "failed", returnCode: "R02" });
+    expect(e.failRefund(r.id).status).toBe("failed"); // idempotent
+    await e.advance(3); // its settle job finds it failed: nothing settles
+    expect(e.get("refund", r.id).status).toBe("failed");
+    expect(e.get("trade", t.id).status).toBe("funded");
+    expect(e.getEscrow(o.id).balance).toBe(10_000);
+    expect(inbox.filter((x) => x.evt.type === "refund.failed").map((x) => x.evt.data))
+      .toEqual([expect.objectContaining({ refundId: r.id, externalId: "op-f", amount: 10_000, returnCode: "R02" })]);
+    expect(e.listTransactions({ offeringId: o.id }).data.find((x) => x.id === r.id)).toMatchObject({ kind: "refund", status: "failed", returnCode: "R02" });
+    // Same key → the same (failed) refund, never a new movement; a new key (a new attempt generation) refunds.
+    expect(e.refundTrade(t.id, { amount: 10_000, externalId: "op-f" }, key)).toMatchObject({ id: r.id, status: "pending" });
+    const again = e.refundTrade(t.id, { amount: 10_000, externalId: "op-f:r1" }, k());
+    expect(again.id).not.toBe(r.id);
+    await e.advance(2);
+    expect(e.get("refund", again.id).status).toBe("settled");
+    expect(e.getEscrow(o.id).balance).toBe(0);
+    expect(() => e.failRefund(again.id)).toThrow(/Only a pending refund/);
+  });
+
   it("collection account: deposits in, payouts out, never negative", async () => {
     const { e, types } = engine();
     const o = offering(e);

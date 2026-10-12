@@ -24,6 +24,8 @@ escrow and data.").
   status, amount and `externalId`; `?since=<ISO>` filters.
 - Asynchronous steps run on a virtual clock (`POST /admin/advance {seconds}`) and are announced by signed webhooks.
   Triggers: party last name `KYCFAIL` → rejected, `AMLHOLD` → manual review; a fund move whose whole-dollar amount ends
-  in 13 is returned (R01).
+  in 13 is returned (R01); `POST /admin/refunds/:id/fail {returnCode?}` makes a pending refund fail at the bank
+  (`refund.failed`; nothing leaves escrow, a trade goes back to `funded`; the refund's key keeps returning it, so a
+  retry needs a new key — FanZuP's attempt generations, L2 design §5 Outbound).
 
 `pnpm --filter @fanzup/mock-escrow test` runs the engine and HTTP tests.

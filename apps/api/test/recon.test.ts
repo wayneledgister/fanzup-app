@@ -8,6 +8,8 @@ import { POLICY, processingFeeMinor } from "@fanzup/shared/policy";
 import { asService, n } from "../src/db";
 import { ingestEvent, processEventById, processPendingEvents } from "../src/inbox";
 import { runDueOps } from "../src/outbound";
+import { drainOutbox } from "../src/money";
+import { ProviderError } from "../src/provider";
 import { isPayoutPaused, runReconciliation, PAYOUT_PAUSING_KINDS, type ReconResult } from "../src/recon";
 import { afterDeadline, back, createUser, ids, kit, one, pay, tick, tokenWith, type Kit } from "./helpers";
 
@@ -230,30 +232,189 @@ describe("lost confirmation of a `sent` op (follow-up found in the PR #12 L2 rev
     expect(res.json().error).toBe("not_replayable");
     expect((await opStatus(op.id)).status).toBe("sent");
   });
+});
 
-  it("a refund the lookup finds failed at the provider: op failed + alert, as the refund.failed webhook (no break); replay retries it", async () => {
-    const { op } = await sentStrayRefund();
-    // The provider's refund failed and its refund.failed webhook was lost; the provider keeps no successful refund.
-    await asService(k.sql, (tx) => tx`delete from public.provider_events where object_ref = ${op.provider_ref} and type = 'refund.succeeded'`);
-    const orig = k.provider.findRefund.bind(k.provider);
-    k.provider.findRefund = async (input) =>
-      input.opId === op.id ? { refundRef: op.provider_ref, amountMinor: 1500, status: "failed" } : orig(input);
-    let r: ReconResult;
-    try {
-      r = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
-    } finally {
-      k.provider.findRefund = orig;
-    }
-    expect(of(r, "op_unconfirmed").filter((b) => b.refs.ref === op.id)).toEqual([]);
-    expect(r.recovered.filter((x) => x.opId === op.id)).toEqual([]);
-    expect(await opStatus(op.id)).toEqual({ status: "failed", last_error: "refund failed: failed" });
+/**
+ * Attempt generations (PR #12 review round 5; design §5 "Attempt generations", §7). The sandbox plays Stripe: a refund
+ * it accepts can later FAIL there, a lookup keeps reporting it `failed`, and a call with the same idempotency key returns
+ * that same failed refund. A failed movement is never re-adopted; `outbound_op.replay` starts generation 1, whose key
+ * `refund:<backing>:r1` makes exactly one new refund; the ledger posts once (keyed by the op).
+ */
+describe("a refund that fails at the provider: never re-adopted; replay sends one new refund under a fresh key (review round 5)", () => {
+  const minutesLater = (m: number) => new Date(Date.now() + m * 60_000);
+  const dueNow = () => asService(k.sql, (tx) => tx`update public.outbound_ops set next_attempt_at = now(), lease_until = null where status = 'initiated'`);
+  type Op = { id: string; status: string; provider_ref: string | null; attempt_gen: number; idempotency_key: string; last_error: string | null;
+    failed_refs: { gen: number; ref: string; status: string; via: string }[] };
+  const opOf = (id: string) => one(k.sql, (tx) => tx<Op[]>`select id, status, provider_ref, attempt_gen, idempotency_key, last_error, failed_refs from public.outbound_ops where id = ${id}`);
+  const replay = async (opId: string, reason: string) =>
+    k.app.inject({ method: "POST", url: `/api/v1/staff/outbound-ops/${opId}/replay`,
+      headers: { authorization: `Bearer ${await tokenWith(ids.reviewer, { aal: "aal2" })}` }, payload: { reason } });
+  const refundCalls = (opId: string) =>
+    k.provider.calls.filter((c) => c.op === "refund" && (c.input as { opId: string }).opId === opId)
+      .map((c) => c.input as { idempotencyKey: string; attempt: number });
+  const backingStatus = async (id: string) => (await one(k.sql, (tx) => tx<{ status: string }[]>`select status::text from public.backings where id = ${id}`)).status;
+  const postings = async (key: string) => (await one(k.sql, (tx) => tx<{ c: number }[]>`select count(*)::int as c from public.ledger_transactions where idempotency_key = ${key}`)).c;
 
-    const res = await replay(op.id, "Refund failed at the processor; send it again");
+  /** A backer's refund op, run once: the provider accepts the refund (op `sent`). */
+  async function sentBackingRefund(): Promise<{ backingId: string; op: Op }> {
+    const backingId = await backAndPay(VELVET, VELVET_PERK);
+    await asService(k.sql, (tx) => tx`select public.request_backing_refund(${backingId}, 'test: refund fails at the provider')`);
+    await drainOutbox(k.sql, async () => undefined);
+    const { id } = await one(k.sql, (tx) => tx<{ id: string }[]>`select id from public.outbound_ops where kind = 'refund' and subject_id = ${backingId}`);
+    await dueNow();
+    await runDueOps(k.sql, k.provider);
+    const op = await opOf(id);
+    expect(op).toMatchObject({ status: "sent", attempt_gen: 0, provider_ref: `sbx_re_${id}`, idempotency_key: `refund:${backingId}` });
+    return { backingId, op };
+  }
+
+  /** Replay → exactly one new refund call, key `<key>:r1` → confirmed; backer refunded; the ledger posts once. */
+  async function replayRefundsOnce(backingId: string, op: Op) {
+    const res = await replay(op.id, "Refund failed at the processor; send a new one");
     expect(res.statusCode, res.body).toBe(200);
+    expect(await opOf(op.id)).toMatchObject({ status: "initiated", attempt_gen: 1, provider_ref: null });
+    const before = refundCalls(op.id).length;
     await runDueOps(k.sql, k.provider);
     await processPendingEvents(k.sql, k.provider);
-    expect((await opStatus(op.id)).status).toBe("confirmed");
-    const after = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
-    expect(after.breaks.filter((b) => b.refs.ref === op.id)).toEqual([]);
+    const calls = refundCalls(op.id).slice(before);
+    expect(calls).toEqual([expect.objectContaining({ idempotencyKey: `refund:${backingId}:r1`, attempt: 1 })]);
+    const after = await opOf(op.id);
+    expect(after).toMatchObject({ status: "confirmed", attempt_gen: 1, provider_ref: `sbx_re_${op.id}_r1` });
+    expect(after.failed_refs).toEqual([expect.objectContaining({ gen: 0, ref: `sbx_re_${op.id}`, status: "failed" })]);
+    expect(await backingStatus(backingId)).toBe("refunded");
+    expect(await postings(`refund:${backingId}`)).toBe(1);
+    // More runs, events and recon change nothing: no second refund, no second posting, no break about the op.
+    await dueNow();
+    await runDueOps(k.sql, k.provider);
+    await processPendingEvents(k.sql, k.provider);
+    const r = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
+    expect(r.breaks.filter((b) => b.refs.ref === op.id || b.refs.op_id === op.id)).toEqual([]);
+    expect(refundCalls(op.id)).toHaveLength(before + 1);
+    expect(await postings(`refund:${backingId}`)).toBe(1);
+  }
+
+  it("recon's lookup finds the refund failed (webhook lost): op failed, ref kept; replay → one new refund `…:r1` → refunded, posted once", async () => {
+    k.provider.failNextRefundAtProvider({ webhook: false });
+    const { backingId, op } = await sentBackingRefund();
+    // The provider keeps reporting the failed refund (as Stripe would): a lookup of generation 0 says `failed`, and the
+    // same key returns the same failed object.
+    const lookup = await k.provider.findRefund({ paymentRef: `sbx_pi_${backingId}`, opId: op.id, attempt: 0 });
+    expect(lookup).toMatchObject({ refundRef: op.provider_ref, status: "failed" });
+
+    const r = await runReconciliation(k.sql, k.provider, minutesLater(POLICY.recon.inflightGraceMinutes + 1));
+    expect(r.recovered.filter((x) => x.opId === op.id)).toEqual([]);
+    expect(of(r, "op_unconfirmed").filter((b) => b.refs.ref === op.id)).toEqual([]);
+    const failed = await opOf(op.id);
+    expect(failed).toMatchObject({ status: "failed", attempt_gen: 0, last_error: "refund failed: failed" });
+    expect(failed.failed_refs).toEqual([expect.objectContaining({ gen: 0, ref: op.provider_ref, status: "failed", via: "recon_lookup" })]);
+    expect(await backingStatus(backingId)).toBe("refund_pending");
+    expect(await postings(`refund:${backingId}`)).toBe(0);
+    // A failed op is not run again by itself.
+    await dueNow();
+    await runDueOps(k.sql, k.provider);
+    expect(refundCalls(op.id)).toHaveLength(1);
+
+    await replayRefundsOnce(backingId, op);
+    // Generation 0 is still failed at the provider and was never re-adopted.
+    expect(await k.provider.findRefund({ paymentRef: `sbx_pi_${backingId}`, opId: op.id, attempt: 0 })).toMatchObject({ status: "failed" });
+  });
+
+  it("the refund.failed webhook: op failed; a late duplicate about generation 0 can't fail generation 1; replay → refunded once", async () => {
+    k.provider.failNextRefundAtProvider({ failureCode: "expired_or_canceled_card" });
+    const { backingId, op } = await sentBackingRefund();
+    await processPendingEvents(k.sql, k.provider); // the refund.failed webhook
+    const failed = await opOf(op.id);
+    expect(failed).toMatchObject({ status: "failed", attempt_gen: 0, last_error: "refund failed: expired_or_canceled_card" });
+    expect(failed.failed_refs).toEqual([expect.objectContaining({ gen: 0, ref: op.provider_ref, via: "webhook" })]);
+
+    const res = await replay(op.id, "Refund failed at the processor; send a new one");
+    expect(res.statusCode, res.body).toBe(200);
+    // The provider re-sends its refund.failed about generation 0 (a new delivery) before the runner picks the op up.
+    await ingestEvent(k.sql, {
+      provider: "sandbox", eventId: `evt_${randomUUID()}`, type: "refund.failed", livemode: false, account: null, objectRef: op.provider_ref,
+      paymentRef: `sbx_pi_${backingId}`, amountMinor: 800, currency: "usd", failureCode: "expired_or_canceled_card",
+      metadata: { outbound_op_id: op.id, outbound_attempt: "0", backing_id: backingId, campaign_id: VELVET }, raw: {},
+    });
+    await processPendingEvents(k.sql, k.provider);
+    expect(await opOf(op.id)).toMatchObject({ status: "initiated", attempt_gen: 1 });
+    // replayRefundsOnce replays again only if needed: the op is already on generation 1 and initiated.
+    const before = refundCalls(op.id).length;
+    await runDueOps(k.sql, k.provider);
+    await processPendingEvents(k.sql, k.provider);
+    expect(refundCalls(op.id).slice(before)).toEqual([expect.objectContaining({ idempotencyKey: `refund:${backingId}:r1`, attempt: 1 })]);
+    expect(await opOf(op.id)).toMatchObject({ status: "confirmed", attempt_gen: 1 });
+    expect(await backingStatus(backingId)).toBe("refunded");
+    expect(await postings(`refund:${backingId}`)).toBe(1);
+  });
+
+  it("the runner's own lookup finds the refund failed: op failed, never re-adopted as `sent`; replay → refunded once", async () => {
+    // The provider accepts the refund but the call's response is lost (timeout after it acted) — and the refund then fails.
+    k.provider.failNextRefundAtProvider({ webhook: false });
+    const backingId = await backAndPay(VELVET, VELVET_PERK);
+    await asService(k.sql, (tx) => tx`select public.request_backing_refund(${backingId}, 'test: refund fails at the provider')`);
+    await drainOutbox(k.sql, async () => undefined);
+    const { id } = await one(k.sql, (tx) => tx<{ id: string }[]>`select id from public.outbound_ops where kind = 'refund' and subject_id = ${backingId}`);
+    const orig = k.provider.refund.bind(k.provider);
+    k.provider.refund = async (input) => {
+      await orig(input);
+      throw new ProviderError("retry", "timeout", "response lost");
+    };
+    try {
+      await dueNow();
+      await runDueOps(k.sql, k.provider);
+    } finally {
+      k.provider.refund = orig;
+    }
+    expect(await opOf(id)).toMatchObject({ status: "initiated", attempt_gen: 0 });
+    await dueNow();
+    await runDueOps(k.sql, k.provider); // lookup (generation 0) → failed → op failed, no call
+    const op = await opOf(id);
+    expect(op).toMatchObject({ status: "failed", attempt_gen: 0, last_error: "refund failed: failed" });
+    expect(op.failed_refs).toEqual([expect.objectContaining({ gen: 0, ref: `sbx_re_${id}`, via: "runner" })]);
+    expect(refundCalls(id)).toHaveLength(1);
+    await replayRefundsOnce(backingId, { ...op, provider_ref: `sbx_re_${id}` });
+  });
+
+  it("a crash within a generation: lookup-before-call still prevents a second refund (generation 1)", async () => {
+    k.provider.failNextRefundAtProvider();
+    const { backingId, op } = await sentBackingRefund();
+    await processPendingEvents(k.sql, k.provider); // refund.failed → op failed
+    expect((await replay(op.id, "Refund failed at the processor; send a new one")).statusCode).toBe(200);
+    // Generation 1: the provider refunds, then the call times out (the case FR-PAY-004 exists for).
+    k.provider.failNext("refund", "retry", "timeout", { after: true });
+    await runDueOps(k.sql, k.provider);
+    expect(await opOf(op.id)).toMatchObject({ status: "initiated", attempt_gen: 1 });
+    expect(refundCalls(op.id)).toHaveLength(2);
+    // The retry asks the provider first (generation 1) and finds the refund: no new call, no second movement.
+    await dueNow();
+    await runDueOps(k.sql, k.provider);
+    expect(refundCalls(op.id)).toHaveLength(2);
+    expect(await opOf(op.id)).toMatchObject({ status: "sent", attempt_gen: 1, provider_ref: `sbx_re_${op.id}_r1` });
+    await processPendingEvents(k.sql, k.provider);
+    expect(await opOf(op.id)).toMatchObject({ status: "confirmed" });
+    const moved = await one(k.sql, (tx) => tx<{ c: number }[]>`
+      select count(*)::int as c from public.provider_events where type = 'refund.succeeded' and payload -> 'metadata' ->> 'outbound_op_id' = ${op.id}`);
+    expect(moved.c).toBe(1);
+    expect(await backingStatus(backingId)).toBe("refunded");
+    expect(await postings(`refund:${backingId}`)).toBe(1);
+  });
+
+  it("a replay of an op whose generation did NOT fail at the provider (dead-letter) keeps the generation: the lookup finds the earlier refund", async () => {
+    const backingId = await backAndPay(VELVET, VELVET_PERK);
+    await asService(k.sql, (tx) => tx`select public.request_backing_refund(${backingId}, 'test: dead-letter')`);
+    await drainOutbox(k.sql, async () => undefined);
+    const { id } = await one(k.sql, (tx) => tx<{ id: string }[]>`select id from public.outbound_ops where kind = 'refund' and subject_id = ${backingId}`);
+    // The provider refunded, the response was lost, and the op was dead-lettered before a retry looked it up.
+    k.provider.failNext("refund", "retry", "timeout", { after: true });
+    await dueNow();
+    await runDueOps(k.sql, k.provider);
+    await asService(k.sql, (tx) => tx`update public.outbound_ops set status = 'dead' where id = ${id}`);
+    expect((await replay(id, "Dead-lettered; retry")).statusCode).toBe(200);
+    expect(await opOf(id)).toMatchObject({ status: "initiated", attempt_gen: 0 });
+    await runDueOps(k.sql, k.provider);
+    await processPendingEvents(k.sql, k.provider);
+    expect(refundCalls(id)).toHaveLength(1);
+    expect(await opOf(id)).toMatchObject({ status: "confirmed", attempt_gen: 0, provider_ref: `sbx_re_${id}` });
+    expect(await postings(`refund:${backingId}`)).toBe(1);
   });
 });

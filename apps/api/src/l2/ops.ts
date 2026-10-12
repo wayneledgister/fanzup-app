@@ -8,8 +8,11 @@
  * `call_started_at`, re-derives a disburse op's amount (frozen afterwards: `disburse_amount_changed`) and refuses while an
  * earlier tranche is unreleased. Once a call has started (`call_started_at` set: a retry, or a staff replay) the runner
  * first looks the movement up at the provider (`findPoolOpTxn`, M1 rule; review round 3): settled there → confirmed
- * through the webhook's SQL path; pending → `sent` with its ref; not found → the call is made again with the same
- * idempotency key (the op's key), which returns the original object if the provider has it. `sent` records `sent_at`
+ * through the webhook's SQL path; pending → `sent` with its ref; failed/returned/canceled → op `failed` + alert, the ref
+ * in `failed_refs`, never re-adopted (review round 5); not found → the call is made again with the same generation's
+ * idempotency key, which returns the original object if the provider has it. Attempt generations (design §5): the
+ * provider key is `opProviderKey(op)` and the externalId `opExternalId(op)`; `pool_op.replay` of an op whose current
+ * generation failed at the provider starts the next generation (fresh key), so one new movement is sent. `sent` records `sent_at`
  * (the tick clock) for recon's in-flight grace. Refunds, disbursements and payouts are confirmed by the provider's webhook (events.ts);
  * closing the offering by the response. `disburse` waits until the `close:<pool>` op is confirmed. The Pool's
  * `disburse`/`payout` ops wait while an L2 pausing break is open (L2_PAYOUT_PAUSING_KINDS); refunds never wait.
@@ -20,7 +23,8 @@ import { runWithCtx } from "../context";
 import { RegCfError, type RegCfProvider } from "../regcf";
 import { log, redact } from "../log";
 import { isPoolPayoutPaused } from "../recon";
-import { applyPoolOpSettled, findPoolOpTxn, type PoolOpRef } from "./events";
+import { isFailedMovement } from "../provider/types";
+import { applyPoolOpSettled, findPoolOpTxn, opExternalId, opProviderKey, recordPoolFailedMovement, type PoolOpRef } from "./events";
 
 export interface PoolOpRow {
   id: string;
@@ -32,6 +36,8 @@ export interface PoolOpRow {
   idempotency_key: string;
   status: string;
   attempts: number;
+  /** Attempt generation (design §5): provider key `opProviderKey`, externalId `opExternalId`. */
+  attempt_gen: number;
   claim_token: string;
   call_started_at: Date | null;
   correlation_id: string | null;
@@ -115,11 +121,19 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
         return;
       }
       if (prior?.status === "pending") return sent(sql, op, prior.id, now);
+      if (prior && isFailedMovement(prior.status)) {
+        // Failed/returned/canceled at the provider: not success, not "sent" — never re-adopted (review round 5).
+        await recordPoolFailedMovement(sql, op, {
+          gen: op.attempt_gen ?? 0, ref: prior.id, status: prior.status, via: "runner", claimToken: op.claim_token,
+          lastError: `${op.kind} failed: ${prior.status}${prior.returnCode ? ` (${prior.returnCode})` : ""}`,
+        });
+        return;
+      }
     }
     switch (op.kind) {
       case "close_offering": {
         if ((await startCall(d, op, now)) == null) return;
-        const r = await regcf.closeOffering(p.offering, op.idempotency_key);
+        const r = await regcf.closeOffering(p.offering, opProviderKey(op));
         const [ok] = await asService(sql, (tx) => tx<{ id: string }[]>`
           update public.pool_ops set status = 'confirmed', provider_ref = ${r.id}, attempts = attempts + 1, lease_until = null, claim_token = null, last_error = null
            where id = ${op.id} and status = 'initiated' and claim_token = ${op.claim_token} returning id`);
@@ -142,8 +156,8 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
         const amount = await startCall(d, op, now);
         if (amount == null) return;
         const r = target.fund
-          ? await regcf.refundFundMove(target.fund, { amount, externalId: op.id }, op.idempotency_key)
-          : await regcf.refundTrade(target.trade!, { amount, externalId: op.id }, op.idempotency_key);
+          ? await regcf.refundFundMove(target.fund, { amount, externalId: opExternalId(op) }, opProviderKey(op))
+          : await regcf.refundTrade(target.trade!, { amount, externalId: opExternalId(op) }, opProviderKey(op));
         return sent(sql, op, r.id, now);
       }
       case "disburse": {
@@ -154,7 +168,7 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
         const amount = await startCall(d, op, now);
         if (amount == null) return;
         try {
-          const r = await regcf.disburseToIssuer(p.offering, { amount, externalId: op.id }, op.idempotency_key);
+          const r = await regcf.disburseToIssuer(p.offering, { amount, externalId: opExternalId(op) }, opProviderKey(op));
           return sent(sql, op, r.id, now);
         } catch (e) {
           // The provider hasn't processed the close yet: wait, never count it as a failure.
@@ -172,8 +186,8 @@ export async function runPoolOp(d: D, op: PoolOpRow, now = new Date()) {
         const amount = await startCall(d, op, now);
         if (amount == null) return;
         const r = await regcf.payoutFromCollection(p.collection, {
-          recipientType: x.kind === "creator" ? "issuer" : (x.kind as "investor" | "platform"), recipientRef, amount, externalId: op.id,
-        }, op.idempotency_key);
+          recipientType: x.kind === "creator" ? "issuer" : (x.kind as "investor" | "platform"), recipientRef, amount, externalId: opExternalId(op),
+        }, opProviderKey(op));
         return sent(sql, op, r.id, now);
       }
     }

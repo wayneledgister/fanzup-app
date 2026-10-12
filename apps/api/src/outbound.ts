@@ -10,11 +10,17 @@
  * confirmation and only the exact amount. No DB lock is held across a provider call. A payout's amount is re-derived
  * from the ledger right before its first provider call and frozen from then on (never a stale amount).
  * A `permanent` error fails the op with an alert; only an amount mismatch also opens a recon break (design §5).
+ *
+ * Attempt generations (PR #12 review round 5; design §5 "Attempt generations"): the provider key is
+ * `attemptKey(idempotency_key, attempt_gen)` and lookups match only the current generation. A movement the provider
+ * reports failed/canceled (lookup, the call's own response, the `refund.failed` webhook, recon) is NEVER re-adopted and
+ * never "sent": the op goes `failed` (alert) with the ref appended to `failed_refs`. `outbound_op.replay` of such an op
+ * starts the next generation, so the runner issues exactly one new movement under a fresh key.
  */
 import { POLICY } from "@fanzup/shared/policy";
 import { asService, n, type Sql, type Tx } from "./db";
 import { runWithCtx } from "./context";
-import { ProviderError, type PaymentProvider } from "./provider";
+import { attemptKey, isFailedMovement, ProviderError, type PaymentProvider } from "./provider";
 import { log, redact } from "./log";
 import { isPayoutPaused } from "./recon";
 
@@ -32,8 +38,33 @@ export interface OpRow {
   /** Set just before the first provider call; a payout's amount is frozen from then on. */
   call_started_at: Date | null;
   attempts: number;
+  /** Attempt generation (design §5): provider key `attemptKey(idempotency_key, attempt_gen)`. */
+  attempt_gen: number;
+  /** Provider movements reported failed for this op: `{ gen, ref, status, via, at }`. */
+  failed_refs: { gen: number; ref: string; status: string; via: string; at: string }[];
   correlation_id: string | null;
   created_at: Date;
+}
+
+/**
+ * The provider reported this op's movement failed/canceled (no money moved): op `failed` + alert, the ref appended to
+ * `failed_refs` with its generation — never re-adopted, never "sent", never posted. Applies only while the op is still
+ * on that generation and not confirmed, so a stale report about an earlier generation can't fail a newer attempt.
+ * Shared by the runner (lookup / call response), the `refund.failed` webhook (inbox.ts) and recon's lookup (recon.ts).
+ */
+export async function recordFailedMovement(
+  sql: Sql, op: Pick<OpRow, "id" | "kind">, f: { gen: number; ref: string; status: string; via: string; lastError: string },
+): Promise<boolean> {
+  const entry = { gen: f.gen, ref: f.ref, status: f.status, via: f.via, at: new Date().toISOString() };
+  const [row] = await asService(sql, (tx) => tx<{ id: string }[]>`
+    update public.outbound_ops
+       set status = 'failed', last_error = ${redact(f.lastError)}, lease_until = null, waiting = null,
+           failed_refs = case when failed_refs @> ${tx.json([{ gen: f.gen, ref: f.ref }])} then failed_refs else failed_refs || ${tx.json([entry])} end
+     where id = ${op.id} and status <> 'confirmed' and attempt_gen = ${f.gen}
+     returning id`);
+  if (row) log("alert", `${op.kind}.failed`, { opId: op.id, providerRef: f.ref, status: f.status, attempt: f.gen, via: f.via });
+  else log("warn", "outbound.failed_movement_stale", { opId: op.id, providerRef: f.ref, attempt: f.gen, via: f.via });
+  return !!row;
 }
 
 /** Create (once) the refund op for a backing. Amount = what was actually captured (captured_minor). */
@@ -119,9 +150,19 @@ export async function runOp(sql: Sql, provider: PaymentProvider, op: OpRow) {
         paymentRef = b?.payment_ref ?? null;
       }
       if (!paymentRef) throw new ProviderError("permanent", "no_payment_ref", "Backing has no payment to refund");
+      // Lookup before (re-)call, current generation only; the call uses the generation's key (design §5).
+      const attempt = op.attempt_gen ?? 0;
       const res =
-        (await provider.findRefund({ paymentRef, opId: op.id })) ??
-        (await provider.refund({ paymentRef, amountMinor: amount, idempotencyKey: op.idempotency_key, opId: op.id, backingId: op.payment_ref ? null : op.subject_id, campaignId: op.campaign_id }));
+        (await provider.findRefund({ paymentRef, opId: op.id, attempt })) ??
+        (await provider.refund({
+          paymentRef, amountMinor: amount, idempotencyKey: attemptKey(op.idempotency_key, attempt), opId: op.id, attempt,
+          backingId: op.payment_ref ? null : op.subject_id, campaignId: op.campaign_id,
+        }));
+      if (isFailedMovement(res.status)) {
+        // Failed/canceled at the provider: not success, not "sent" — never re-adopted (review round 5, PR #12).
+        await recordFailedMovement(sql, op, { gen: attempt, ref: res.refundRef, status: String(res.status), via: "runner", lastError: `refund failed: ${res.status}` });
+        return;
+      }
       if (res.amountMinor !== amount) return failOpOnAmountMismatch(sql, op, res.refundRef, res.amountMinor);
       // Only move initiated → sent: the confirmation event may already have marked it confirmed.
       await asService(sql, (tx) => tx`
@@ -139,12 +180,16 @@ export async function runOp(sql: Sql, provider: PaymentProvider, op: OpRow) {
        where t.id = ${op.subject_id}`);
     if (t.earlier_pending) return defer(sql, op, "earlier_tranche", 30);
     if (!t.payout_ref) return defer(sql, op, "payout_account", 15 * 60);
-    let res = await provider.findTransfer({ campaignId: op.campaign_id, opId: op.id });
+    const attempt = op.attempt_gen ?? 0;
+    let res = await provider.findTransfer({ campaignId: op.campaign_id, opId: op.id, attempt });
     if (!res) {
       // Never send a stale amount: what is owed is re-derived from the ledger right before the call (design §5).
       const sendAmount = await startPayoutCall(sql, op);
       op = { ...op, amount_minor: BigInt(sendAmount) };
-      res = await provider.transfer({ campaignId: op.campaign_id, trancheId: op.subject_id, destination: t.payout_ref, amountMinor: sendAmount, idempotencyKey: op.idempotency_key, opId: op.id });
+      res = await provider.transfer({
+        campaignId: op.campaign_id, trancheId: op.subject_id, destination: t.payout_ref, amountMinor: sendAmount,
+        idempotencyKey: attemptKey(op.idempotency_key, attempt), opId: op.id, attempt,
+      });
     }
     if (res.amountMinor !== n(op.amount_minor)) return failOpOnAmountMismatch(sql, op, res.transferRef, res.amountMinor);
     try {

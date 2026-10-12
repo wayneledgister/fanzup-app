@@ -106,6 +106,7 @@ export function buildServer(cfg: ServerConfig, engine?: MockEscrowEngine) {
 
   app.post("/admin/advance", async (req) => eng.advance(Number(body<{ seconds?: number }>(req).seconds ?? 0)));
   app.post("/admin/tick", async () => eng.tick());
+  app.post<{ Params: { id: string } }>("/admin/refunds/:id/fail", async (req) => eng.failRefund(req.params.id, body<{ returnCode?: string }>(req).returnCode));
   app.post("/admin/reset", async (req) => {
     eng.reset();
     if (body<{ fixtures?: boolean }>(req).fixtures && cfg.fixtures) eng.loadFixture(JSON.parse(readFileSync(cfg.fixtures, "utf8")));
