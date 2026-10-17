@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@fanzup/shared": "workspace:*",
-    "@fastify/cors": "^11.0.0",
-    "fastify": "^5.4.0",
+    "@fastify/cors": "^11.3.1",
+    "fastify": "^5.12.7",
     "jose": "^6.0.0",
     "postgres": "^3.4.7",
     "stripe": "^18.3.0",
