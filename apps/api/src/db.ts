@@ -54,6 +54,18 @@ export function asService<T>(sql: Sql, fn: (tx: Tx) => Promise<T>): Promise<T> {
   }) as Promise<T>;
 }
 
+/**
+ * Agent layer (CR-003, ADR-008): run as the least-privilege role `fanzup_agent`, which can read only `agent_v_*` views and
+ * write only agent tables. Postgres refuses anything else (FR-AGT-F-001).
+ */
+export function asAgent<T>(sql: Sql, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return sql.begin(async (tx) => {
+    await setContext(tx, { role: "fanzup_agent" });
+    await tx.unsafe("set local role fanzup_agent");
+    return fn(tx);
+  }) as Promise<T>;
+}
+
 /** Copy the request/job context into transaction-local settings (ADR-005). */
 async function setContext(tx: Tx, claims: object) {
   const c = currentCtx();

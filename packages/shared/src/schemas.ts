@@ -152,5 +152,5 @@ export const Me = z.object({
 export type Me = z.infer<typeof Me>;
 
 /** `GET /staff/queue?type=` (design §4.2). `payouts`: releases waiting on a payout account, funds, a recon pause or an earlier tranche. */
-export const StaffQueueType = z.enum(["review", "verification", "refunds", "payouts", "unmatched", "dead_letters", "pool_dead_letters", "pool_breaks", "breaks", "failed_events", "scheduled"]);
+export const StaffQueueType = z.enum(["review", "verification", "refunds", "payouts", "unmatched", "dead_letters", "pool_dead_letters", "pool_breaks", "breaks", "failed_events", "scheduled", "agent_dead_letters"]);
 export type StaffQueueType = z.infer<typeof StaffQueueType>;
