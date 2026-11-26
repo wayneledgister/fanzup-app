@@ -80,6 +80,25 @@ export const POLICY = {
   /** NFR-SEC-13, FR-TAX-004 (E1 Security). Recorded at M1; enforced at M2. */
   rateLimits: { backingPerMinute: 5, backingPerHour: 20, writesPerMinutePerUser: 60, writesPerMinutePerIp: 120 },
   staff: { idleTimeoutMinutes: 15 },
+  /** Agent layer, Phase 0 (CR-003, specs/agents/02-design.md §3). Advisory only; nothing here gates money. */
+  agents: {
+    /** FR-AGT-F-003: attempts before a task is dead (or, after a model failure, ships deterministic-only). */
+    maxAttempts: 4,
+    /** Backoff after the 1st, 2nd and 3rd failed attempt. */
+    backoffSeconds: [30, 120, 600] as const,
+    /** A running task with no result after this long can be claimed again. */
+    leaseMinutes: 30, // ≥ batchSize × worst-case task (2 × modelTimeoutMs); completions are fenced anyway
+    /** NFR-AGT-03. */
+    modelTimeoutMs: 120_000,
+    /** Tasks claimed per tick. */
+    batchSize: 5,
+    /** FR-AGT-A1-002: goal above this share of the tier cap gets a headroom note. */
+    goalHeadroomPct: 80,
+    /** Default model for every agent (Messages API). */
+    model: "claude-opus-5-5",
+    /** Bump when a prompt or output schema changes; recorded on every run. */
+    promptVersions: { campaign_review: "cr-1", ops_weekly: "ow-1" },
+  },
   /** FR-PRV-001. Placeholder documents until counsel-approved versions (P0b). */
   legal: { termsVersion: "2026-10-03-beta", privacyVersion: "2026-10-03-beta" },
 
