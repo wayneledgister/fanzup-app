@@ -86,7 +86,7 @@ export default function RisingSocial() {
       <RequirementsChecklist tier="Rising" title="Ready to submit?" items={items} />
 
       <Checkbox id="confirm" checked={confirm} onChange={setConfirm}>
-        The business and streaming details above are accurate. I understand Pools open only after FanZuP's funding-portal partner is live and each one is reviewed before launch.
+        The business and streaming details above are accurate. I understand Pools open only after a registered intermediary has been chosen, and each one is reviewed before launch.
       </Checkbox>
       {ready ? null : (
         <p className="text-sm text-warning">

@@ -1,7 +1,8 @@
 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 import type { FastifyRequest } from "fastify";
 import type { Env } from "../env";
-import type { Claims } from "../db";
+import { asService, type Claims, type Sql } from "../db";
+import { setActor } from "../context";
 
 export class HttpError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -43,11 +44,25 @@ export type Verify = ReturnType<typeof createVerifier>;
 export async function optionalUser(req: FastifyRequest, verify: Verify): Promise<Claims | null> {
   const h = req.headers.authorization;
   if (!h?.startsWith("Bearer ")) return null;
-  return verify(h.slice(7));
+  const claims = await verify(h.slice(7));
+  // The verified actor and second-factor level come from the token, never from request input (FR-ID-003).
+  setActor(claims.sub, "user", typeof claims.aal === "string" ? claims.aal : null);
+  return claims;
 }
 
 export async function requireUser(req: FastifyRequest, verify: Verify): Promise<Claims> {
   const u = await optionalUser(req, verify);
   if (!u) throw new HttpError(401, "unauthenticated", "Sign in to continue.");
+  return u;
+}
+
+/**
+ * FR-ID-001 / FR-BCK-002 (card G1-B option 3): a verified email before the first backing. Checked against
+ * auth.users on the server, never trusted from the client.
+ */
+export async function requireVerifiedUser(req: FastifyRequest, verify: Verify, sql: Sql): Promise<Claims> {
+  const u = await requireUser(req, verify);
+  const [row] = await asService(sql, (tx) => tx<{ confirmed: boolean }[]>`select public.email_confirmed(${u.sub}) as confirmed`);
+  if (!row?.confirmed) throw new HttpError(403, "email_unverified", "Verify your email address to continue. We sent you a link when you signed up.");
   return u;
 }

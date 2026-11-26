@@ -3,13 +3,10 @@ name: Deploy database migrations
 # Manual fallback only. Migrations normally deploy through Supabase's own GitHub integration
 # (Supabase > Project Settings > Integrations > GitHub, "Deploy to production" on main), which
 # needs no GitHub secrets. Running both on every push would race, so this one never auto-runs.
+# Hosted databases never get supabase/seed.sql: it holds demo users with a published password,
+# including a staff reviewer (NFR-SEC-07). The seed is for local and CI only.
 on:
   workflow_dispatch:
-    inputs:
-      include_seed:
-        description: "Staging only: also load supabase/seed.sql (demo artists + test users). Never used for production."
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -42,7 +39,7 @@ jobs:
       - uses: supabase/setup-cli@v3
         with: { version: latest }
       - run: supabase link --project-ref "$PROJECT_REF"
-      - run: supabase db push ${{ inputs.include_seed && '--include-seed' || '' }}
+      - run: supabase db push
 
   production:
     # Off until a separate production project exists: set repository variable PROD_DEPLOY_ENABLED = true.

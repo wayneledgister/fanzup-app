@@ -1,5 +1,7 @@
 /** The DB mirrors rules from packages/shared. If either side changes alone, this fails. */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { TIERS } from "@fanzup/shared/tiers";
 import { CAMPAIGN_STATUSES, CAMPAIGN_TRANSITIONS } from "@fanzup/shared/campaign";
 import { POLICY } from "@fanzup/shared/policy";
@@ -27,6 +29,18 @@ describe("shared rules ⇄ database", () => {
     const db = new Set(rows.map((r) => `${r.f}>${r.t}`));
     const code = new Set(Object.entries(CAMPAIGN_TRANSITIONS).flatMap(([f, ts]) => ts.map((t) => `${f}>${t}`)));
     expect(db).toEqual(code);
+  });
+  it("every seeded user's terms_version / privacy_version equals POLICY.legal (design §3.7)", () => {
+    // Parsed from the file (not the DB) so a version bump that forgets the seed fails here with a clear message,
+    // not as an opaque trigger error inside freshDb().
+    const seed = readFileSync(join(import.meta.dirname, "../../../supabase/seed.sql"), "utf8");
+    const users = [...seed.matchAll(/insert into auth\.users[^;]*?'(\{"display_name"[^']*\})'/g)].map((m) => JSON.parse(m[1]) as Record<string, unknown>);
+    expect(users.length).toBeGreaterThanOrEqual(6);
+    expect((seed.match(/insert into auth\.users/g) ?? []).length).toBe(users.length);
+    for (const u of users) {
+      expect({ who: u.display_name, adult: u.adult_attested, terms: u.terms_version, privacy: u.privacy_version })
+        .toEqual({ who: u.display_name, adult: true, terms: POLICY.legal.termsVersion, privacy: POLICY.legal.privacyVersion });
+    }
   });
   it("campaign length bounds match POLICY", async () => {
     const [r] = await sql<{ def: string }[]>`select pg_get_constraintdef(oid) def from pg_constraint where conname = 'campaigns_duration_days_check'`;

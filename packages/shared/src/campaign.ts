@@ -42,3 +42,19 @@ export const canTransition = (from: CampaignStatus, to: CampaignStatus) => CAMPA
 export function settleOutcome(raisedMinor: number, goalMinor: number): "funded" | "failed" {
   return raisedMinor >= goalMinor ? "funded" : "failed";
 }
+
+/**
+ * Time left before a campaign's deadline, as the campaign page shows it (FR-BCK-004; design §11): whole days
+ * (rounded up) from 24 h out, hours and minutes under 24 h, "Ended" from the deadline instant on.
+ */
+export function timeLeft(endsAt: string | null, now: number = Date.now()): { label: string; value: string; ended: boolean; msLeft: number } {
+  if (!endsAt) return { label: "", value: "—", ended: true, msLeft: 0 };
+  const ms = Date.parse(endsAt) - now;
+  if (ms <= 0) return { label: "ended", value: "Ended", ended: true, msLeft: 0 };
+  if (ms < 86_400_000) {
+    const h = Math.floor(ms / 3_600_000);
+    const m = Math.floor((ms % 3_600_000) / 60_000);
+    return { label: "left", value: `${h}h ${m}m`, ended: false, msLeft: ms };
+  }
+  return { label: "days left", value: String(Math.ceil(ms / 86_400_000)), ended: false, msLeft: ms };
+}

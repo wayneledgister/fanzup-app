@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { currentCtx } from "./context";
 
 export type Sql = postgres.Sql;
 export type Tx = postgres.TransactionSql;
@@ -34,18 +35,33 @@ export interface Claims {
 export function asUser<T>(sql: Sql, claims: Claims | null, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return sql.begin(async (tx) => {
     const role = claims ? "authenticated" : "anon";
-    await tx`select set_config('request.jwt.claims', ${JSON.stringify(claims ?? { role })}, true)`;
+    await setContext(tx, claims ?? { role });
     await tx.unsafe(`set local role ${role}`);
     return fn(tx);
   }) as Promise<T>;
 }
 
-/** Trusted server-side operations (money paths). RLS bypassed; only call audited SQL functions. */
+/**
+ * Trusted server-side operations (money paths). RLS bypassed; only call audited SQL functions.
+ * When the current context has a verified actor, `auth.uid()` returns it (workflow functions rely on that).
+ */
 export function asService<T>(sql: Sql, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return sql.begin(async (tx) => {
+    const c = currentCtx();
+    await setContext(tx, c?.actorId ? { sub: c.actorId, role: "service_role" } : { role: "service_role" });
     await tx.unsafe("set local role service_role");
     return fn(tx);
   }) as Promise<T>;
+}
+
+/** Copy the request/job context into transaction-local settings (ADR-005). */
+async function setContext(tx: Tx, claims: object) {
+  const c = currentCtx();
+  await tx`select set_config('request.jwt.claims', ${JSON.stringify(claims)}, true),
+                  set_config('fanzup.correlation_id', ${c?.correlationId ?? ""}, true),
+                  set_config('fanzup.actor_id', ${c?.actorId ?? ""}, true),
+                  set_config('fanzup.actor_kind', ${c?.actorKind ?? ""}, true),
+                  set_config('fanzup.aal', ${c?.aal ?? ""}, true)`;
 }
 
 /** bigint columns come back as BigInt; API responses use plain numbers (cents fit safely). */
