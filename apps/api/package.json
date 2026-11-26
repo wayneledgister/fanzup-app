@@ -9,18 +9,21 @@
     "build": "tsup",
     "start": "node dist/server.cjs",
     "start:worker": "node dist/worker.js",
+    "agent-worker": "tsx --env-file-if-exists=.env src/agent-worker.ts",
+    "start:agent-worker": "node dist/agent-worker.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
+    "@fanzup/mock-escrow": "workspace:*",
     "@fanzup/shared": "workspace:*",
     "@fastify/cors": "^11.4.0",
     "fastify": "^5.12.8",
     "jose": "^6.2.15",
     "postgres": "^3.4.7",
     "stripe": "^18.3.0",
-    "zod": "^3.25.0",
-    "@fanzup/mock-escrow": "workspace:*"
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
