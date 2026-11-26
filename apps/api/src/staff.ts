@@ -34,7 +34,9 @@ export type ActionName =
   | "campaign.review" | "tranche.verify" | "backing.refund" | "recon.override" | "provider_event.replay" | "outbound_op.replay" | "weekly_review.signoff"
   // Layer 2 (CR-002)
   | "pool.review" | "pool.collection_execute" | "investor.kyc_decide" | "pool_tranche.verify" | "pool.distribution_commit" | "pool.collection_state"
-  | "pool.deposit_simulate" | "flag.set" | "pool_op.replay" | "pool_break.resolve";
+  | "pool.deposit_simulate" | "flag.set" | "pool_op.replay" | "pool_break.resolve"
+  // Agent layer (CR-003): a staff verdict on an agent proposal. Not a money action; changes nothing but the verdict.
+  | "agent_proposal.verdict";
 
 /**
  * Layer 2 break kinds only staff close (`pool_break.resolve`, review round 3 follow-up): money-path breaks raised by the
@@ -239,6 +241,14 @@ const EXECUTORS: Record<ActionName, Executor> = {
                                       values ('revenue.deposit_simulated', 'pool', ${a.subject_id}, ${tx.json({ amount_minor: p.amountMinor, reference: p.reference, deposit_ref: dep.id })})`);
     return { depositId: dep.id };
   },
+  "agent_proposal.verdict": async (d, a) => {
+    const p = a.params as { verdict: string; note: string | null };
+    const rows = await asService(d.sql, (tx) => tx`
+      update public.agent_proposals set verdict = ${p.verdict}, verdict_note = ${p.note}, verdict_by = ${a.actor_id}, verdict_at = now()
+       where id = ${a.subject_id} and verdict is null returning id, verdict`);
+    if (!rows.length) throw new HttpError(409, "verdict_exists", "This proposal already has a verdict.");
+    return rows[0];
+  },
   "flag.set": async (d, a) => {
     const p = a.params as { flag: string; on: boolean };
     await asService(d.sql, (tx) => tx`
@@ -260,6 +270,10 @@ async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | n
     "pool_tranche.verify": "public.pool_tranches t join public.pools p on p.id = t.pool_id join public.artists a on a.id = p.artist_id where t.id = $1",
     "pool_op.replay": "public.pool_ops o join public.pools p on p.id = o.pool_id join public.artists a on a.id = p.artist_id where o.id = $1",
     "pool_break.resolve": "public.pool_breaks b join public.pools p on p.id = b.pool_id join public.artists a on a.id = p.artist_id where b.id = $1",
+    // A verdict on a packet about your own campaign would skew the agreement metric (CR-003, FR-AGT-F-005).
+    "agent_proposal.verdict": `(select a.owner_id from public.agent_proposals p
+        left join public.campaigns c on p.subject_kind = 'campaign' and c.id = p.subject_id
+        left join public.artists a on a.id = c.artist_id where p.id = $1) a`,
     // Staff can't decide their own KYC: the "owner" of an investor subject is the investor.
     "investor.kyc_decide": "(select $1::uuid as owner_id) a",
   };
