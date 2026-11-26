@@ -199,18 +199,25 @@ describe("A1 Campaign Review Copilot (FR-AGT-A1-001/002, FR-AGT-F-004/005)", () 
     expect(audit).toBeTruthy();
   });
 
-  it("a resubmission gets a new packet and supersedes the old one", async () => {
-    await asService(k.sql, (tx) => tx`update public.campaigns set status = 'revisions_requested' where id = ${campaignId}`);
-    expect((await api("POST", `/artist/campaigns/${campaignId}/submit`, artist)).json().status).toBe("in_review");
-    await setFlag(true);
-    try {
-      await makeDue();
-      await agentTick({ sql: k.sql, model: new FakeModel(() => goodAssessment()) });
-    } finally {
-      await setFlag(false);
-    }
-    const list = (await api("GET", `/staff/agents/proposals?subjectId=${campaignId}`, staff)).json().proposals;
-    expect(list.map((p: { status: string }) => p.status).sort()).toEqual(["open", "superseded"]);
+  it("a resubmission gets a new packet and supersedes the old unjudged one; a judged packet keeps its status", async () => {
+    const resubmit = async () => {
+      await asService(k.sql, (tx) => tx`update public.campaigns set status = 'revisions_requested' where id = ${campaignId}`);
+      expect((await api("POST", `/artist/campaigns/${campaignId}/submit`, artist)).json().status).toBe("in_review");
+      await setFlag(true);
+      try {
+        await makeDue();
+        await agentTick({ sql: k.sql, model: new FakeModel(() => goodAssessment()) });
+      } finally {
+        await setFlag(false);
+      }
+      return (await api("GET", `/staff/agents/proposals?subjectId=${campaignId}`, staff)).json().proposals as { id: string; status: string; verdict: string | null }[];
+    };
+    const second = await resubmit();
+    expect(second.find((p) => p.id === proposalId)).toMatchObject({ status: "open", verdict: "agree" });
+    expect(second.filter((p) => p.verdict == null).map((p) => p.status)).toEqual(["open"]);
+    const third = await resubmit();
+    expect(third.filter((p) => p.verdict == null).map((p) => p.status)).toEqual(["open", "superseded"]); // newest first
+    expect(third.find((p) => p.id === proposalId)?.status).toBe("open");
   });
 
   it("FR-AGT-F-006: a failing model retries with backoff, then ships deterministic findings with model_unavailable", async () => {
@@ -477,6 +484,24 @@ describe("review fixes (AGT G1+G2)", () => {
     const again = await api("POST", `/staff/agents/proposals/${judged.id}/verdict`, staff, { verdict: "disagree", reason: "Changing my mind later" });
     expect(again.statusCode).toBe(409);
     expect(await count()).toBe(before);
+  });
+
+  it("pass 2: a judged proposal is never superseded, and the agent's audit row never claims a second factor", async () => {
+    const [judged] = await asService(k.sql, (tx) => tx<{ id: string; status: string }[]>`select id, status from public.agent_proposals where verdict is not null limit 1`);
+    await expect(asAgent(k.sql, (tx) => tx`update public.agent_proposals set status = 'superseded' where id = ${judged.id}`)).rejects.toThrow(/invalid proposal status change/);
+    const [t] = await asService(k.sql, (tx) => tx<{ id: string }[]>`
+      insert into public.agent_tasks (agent, subject_kind, subject_key, dedupe_key) values ('ops_weekly', 'week', 'week:p2', ${"p2:" + randomUUID()}) returning id`);
+    const pid = await asAgent(k.sql, async (tx) => {
+      await tx`select set_config('fanzup.aal', 'aal2', true)`;
+      const [r] = await tx<{ id: string }[]>`
+        insert into public.agent_runs (task_id, agent, attempt, prompt_version, status, started_at) values (${t.id}, 'ops_weekly', 1, 'ow-1', 'succeeded', now()) returning id`;
+      const [p] = await tx<{ id: string }[]>`
+        insert into public.agent_proposals (task_id, run_id, agent, subject_kind, subject_key, kind, source, body)
+        values (${t.id}, ${r.id}, 'ops_weekly', 'week', 'week:p2', 'weekly_pack', 'model', '{}') returning id`;
+      return p.id;
+    });
+    const [a] = await asService(k.sql, (tx) => tx<{ aal: string | null }[]>`select aal from public.audit_events where action = 'agent.proposal.created' and entity_id = ${pid}`);
+    expect(a.aal).toBeNull();
   });
 
   it("the proposals list filters by status", async () => {

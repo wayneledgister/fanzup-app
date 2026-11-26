@@ -2,7 +2,8 @@
 **Tier:** Enterprise (regulated domain) · **Review:** one independent reviewer over the spec set and the built code (G1, G2 and the code review combined, because Phase 0 can't move money and ships with its flag off).
 **Artifacts:** `specs/changes/CR-003-agent-layer.md`, `specs/agents/00-strategy.md`, `01-requirements.md`, `02-design.md`, `03-tasks.md`, `docs/adr/ADR-008-agent-layer.md`, `supabase/migrations/20261126000100_agents.sql`, `apps/api/src/agents/*`, `apps/api/test/agents.test.ts`.
 
-**Verdict, pass 1: REQUEST CHANGES** (2 majors, 7 minors, 6 nits; no blockers). All majors and minors are fixed below; pass 2 pending.
+**Verdict, pass 1: REQUEST CHANGES** (2 majors, 7 minors, 6 nits; no blockers). All majors and minors are fixed below.
+**Verdict, pass 2: APPROVE WITH NITS.** The reviewer confirmed every fix against the diff and a scratch database (including logging in as `fanzup_agent`: `reset role`, `set role postgres`/`service_role` and `set session authorization` all denied). Pass 2 nits are fixed in the table at the end.
 **Sign-off:** ⏳ Wayne (AGT-T-012). The reviewer advises; Wayne signs.
 
 ## What the reviewer checked
@@ -33,3 +34,14 @@
 
 ## After the fixes
 API 358/358 (28 files), shared green, `pnpm -r typecheck` clean.
+
+## Pass 2 nits
+| # | Finding | Fix |
+|---|---|---|
+| P2-1 | The agent session could set `aal` (and the correlation id) on its proposal audit rows. | The audit trigger writes `aal` null. Correlation ids stay the task's, documented as self-reported. |
+| P2-2 | A judged proposal could be superseded (status change not audited). | Guard and runtime supersede only unjudged proposals. Test. |
+| P2-3 | A failed run rolls back when the lease is lost. | Documented in design §4. |
+| P2-4 | A flag-check error mid-batch left the rest of the batch leased for 30 min. | Caught; the rest is given back. |
+| P2-5 | Migration edited in place. | Safe: never on `main`, so never applied to a hosted database. |
+| P2-6 | Supavisor may cache credentials; add a check. | SETUP D3: pooler restart hint and `select current_user` check. |
+

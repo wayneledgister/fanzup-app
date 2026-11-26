@@ -235,11 +235,11 @@ The agent layer prepares review packets and the weekly single-operator review pa
    ```sql
    alter role fanzup_agent with login password '<new random password>';
    ```
-   The migration creates the role without a login, so no password lives in the repo. The worker then holds only this role's rights: it can't switch back to the owner, read money tables or call money functions.
+   The migration creates the role without a login, so no password lives in the repo. If the pooler still rejects the new password a minute later, restart it (Database settings → **Restart pooler**). The worker then holds only this role's rights: it can't switch back to the owner, read money tables or call money functions.
 3. Render → **New → Background Worker** → same repo. Build command: as `fanzup-worker`. Start command: `node apps/api/dist/agent-worker.js`.
 4. Env: `AGENT_DATABASE_URL`: the Session pooler URL (port **5432**) with the user changed from `postgres.<project-ref>` to **`fanzup_agent.<project-ref>`** and the password from step 2. Don't set `DATABASE_URL` here: deployed, the worker refuses to start unless it logs in as `fanzup_agent`. Also `NODE_ENV=production`, `DEPLOY_ENV=staging`, `AGENT_MODEL_PROVIDER=anthropic`, `ANTHROPIC_API_KEY` (from console.anthropic.com). With `AGENT_MODEL_PROVIDER=none` it still ships the deterministic checks, with no model calls.
 5. Turn it on: `POST /api/v1/staff/flags/agents` with `{"on": true, "reason": "…"}` (staff session with a second factor). Turn it off the same way.
-6. **✅ Check:** logs show `agent_worker.start`; after a campaign is submitted, `GET /api/v1/staff/agents/proposals?subjectId=<campaign id>` returns a review packet. Record your verdict with `POST /api/v1/staff/agents/proposals/:id/verdict`; `GET /api/v1/staff/agents/metrics` shows the agreement rate.
+6. **✅ Check:** `psql "$AGENT_DATABASE_URL" -c "select current_user"` prints `fanzup_agent`; logs show `agent_worker.start`; after a campaign is submitted, `GET /api/v1/staff/agents/proposals?subjectId=<campaign id>` returns a review packet. Record your verdict with `POST /api/v1/staff/agents/proposals/:id/verdict`; `GET /api/v1/staff/agents/metrics` shows the agreement rate.
 
 **Local:** `AGENT_MODEL_PROVIDER=none pnpm --filter @fanzup/api agent-worker` (or `anthropic` with a key in `apps/api/.env`).
 

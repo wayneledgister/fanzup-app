@@ -67,8 +67,15 @@ export async function agentTick(d: AgentDeps, now = new Date()): Promise<TickRes
     res.claimed = tasks.length;
     for (const [i, t] of tasks.entries()) {
       // The flag is re-read before every task after the first, so turning it off stops the batch (review nit).
-      if (i > 0 && !(await flagOn(d.sql))) {
-        await release(d.sql, tasks.slice(i));
+      let on = true;
+      try {
+        if (i > 0) on = await flagOn(d.sql);
+      } catch (e) {
+        on = false; // can't read the flag: stop, and give the rest back rather than hold their leases
+        log("warn", "agent.flag_check_failed", { error: String((e as Error).message) });
+      }
+      if (!on) {
+        await release(d.sql, tasks.slice(i)).catch(() => undefined);
         break;
       }
       const outcome = await runTask(d, t, now);
@@ -174,7 +181,7 @@ async function runTaskInner(d: AgentDeps, task: AgentTask, now: Date): Promise<"
         error_code: errorCode, model, usage, input_digest: inputDigest,
       });
       await tx`update public.agent_proposals set status = 'superseded'
-                where agent = ${def.name} and subject_key = ${task.subject_key} and status = 'open'`;
+                where agent = ${def.name} and subject_key = ${task.subject_key} and status = 'open' and verdict is null`;
       await tx`insert into public.agent_proposals (task_id, run_id, agent, subject_kind, subject_id, subject_key, kind, source, body)
                values (${task.id}, ${runId}, ${def.name}, ${task.subject_kind}, ${task.subject_id}, ${task.subject_key}, ${def.kind},
                        ${assessment == null ? "deterministic" : "model"}, ${tx.json(body as never)})`;

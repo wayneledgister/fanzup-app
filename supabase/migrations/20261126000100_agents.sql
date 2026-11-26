@@ -98,7 +98,8 @@ begin
      is distinct from (old.id, old.task_id, old.run_id, old.agent, old.subject_kind, old.subject_id, old.subject_key, old.kind, old.source, old.body, old.correlation_id, old.created_at) then
     raise exception 'agent proposal content is immutable' using errcode = 'insufficient_privilege';
   end if;
-  if new.status is distinct from old.status and not (old.status = 'open' and new.status = 'superseded') then
+  -- A judged proposal stays as judged: only unjudged ones are superseded.
+  if new.status is distinct from old.status and not (old.status = 'open' and new.status = 'superseded' and old.verdict is null) then
     raise exception 'invalid proposal status change' using errcode = 'insufficient_privilege';
   end if;
   if (new.verdict, new.verdict_note, new.verdict_by, new.verdict_at) is distinct from (old.verdict, old.verdict_note, old.verdict_by, old.verdict_at) then
@@ -116,8 +117,10 @@ create function public.agent_proposals_audit() returns trigger language plpgsql 
 begin
   if tg_op = 'INSERT' then
     perform set_config('fanzup.actor_id', '', true);
-    insert into public.audit_events (actor_kind, action, entity, entity_id, data)
-    values ('system:agent:' || new.agent, 'agent.proposal.created', 'agent_proposal', new.id,
+    -- aal is null: an agent never has a second factor, whatever the session settings say. The correlation id is the
+    -- task's (self-reported by the agent worker); trace views label these rows by actor_kind.
+    insert into public.audit_events (actor_kind, aal, action, entity, entity_id, data)
+    values ('system:agent:' || new.agent, null, 'agent.proposal.created', 'agent_proposal', new.id,
             jsonb_build_object('agent', new.agent, 'subject_kind', new.subject_kind, 'subject_id', new.subject_id, 'source', new.source, 'run_id', new.run_id));
   elsif new.verdict is distinct from old.verdict then
     insert into public.audit_events (actor_id, action, entity, entity_id, data)
