@@ -178,6 +178,11 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
 
   app.post<{ Params: { id: string } }>("/agents/proposals/:id/verdict", async (req) => {
     const b = z.object({ verdict: z.enum(["agree", "partial", "disagree"]), note: z.string().max(2000).optional(), reason: z.string() }).parse(req.body);
+    // Checked before privileged() so a repeat or a bad id doesn't leave a failed action in the weekly pack (review minor 7).
+    // The executor's `verdict is null` guard still decides a race.
+    const [p] = await asService(d.sql, (tx) => tx<{ verdict: string | null }[]>`select verdict from public.agent_proposals where id = ${id(req.params.id)}`);
+    if (!p) throw new HttpError(404, "not_found", "We couldn't find that proposal.");
+    if (p.verdict) throw new HttpError(409, "verdict_exists", "This proposal already has a verdict.");
     return { action: await act({ action: "agent_proposal.verdict", subjectId: id(req.params.id), reason: b.reason, params: { verdict: b.verdict, note: b.note ?? null } }) };
   });
 

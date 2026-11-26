@@ -32,7 +32,7 @@ followed, after the consultant report ("FanZuP Agent Strategy", 2026-11-26), by:
 ### Ripple
 - **Gates:** M1 G1/G2 and L2-G1G2 are untouched. This change gets a combined G1+G2 pass (`specs/gates/AGT-G1G2.md`).
 - **Docs:** README (agent worker, flag), `docs/SETUP.md` (agent worker env, model vendor terms), `specs/backlog.md` (Phase 1–3 agents).
-- **Partners and counsel:** the flow-of-funds memo (NFR-COMP-01) should say that agents are advisory and hold no money-writing credential. The model vendor needs a DPA before real user data reaches it (NFR-COMP-21).
+- **Partners and counsel:** the flow-of-funds memo (NFR-COMP-01) should say that agents are advisory and that the agent worker logs in as a database role with no money-writing rights (true once the SETUP D3 login step is done; until then the worker isn't deployed). The model vendor needs a DPA before real user data reaches it (NFR-COMP-21).
 - **Deploys:** merging to `main` applies the migration to the Supabase project through the existing GitHub integration. The migration creates a role, three tables, views and a trigger; it changes no existing table's data. No Render service is added by this change (the agent worker is a manual step, design §9).
 
 ## What this displaces

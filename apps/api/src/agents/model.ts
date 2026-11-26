@@ -76,7 +76,7 @@ export class AnthropicModel implements ModelClient {
   async generate<S extends z.ZodType>(req: GenerateRequest<S>): Promise<GenerateResult<z.infer<S>>> {
     let res;
     try {
-      res = await this.client.beta.messages.parse(this.params(req) as never, { timeout: POLICY.agents.modelTimeoutMs, maxRetries: 1 });
+      res = await this.client.beta.messages.parse(this.params(req), { timeout: POLICY.agents.modelTimeoutMs, maxRetries: 1 });
     } catch (e) {
       if (e instanceof Anthropic.RateLimitError) throw new ModelError("model_rate_limited");
       if (e instanceof Anthropic.APIConnectionError || (e instanceof Anthropic.APIError && (e.status ?? 0) >= 500)) throw new ModelError("model_unavailable");

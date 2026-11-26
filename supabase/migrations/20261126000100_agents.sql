@@ -6,7 +6,9 @@
 do $$ begin
   if not exists (select 1 from pg_roles where rolname = 'fanzup_agent') then create role fanzup_agent nologin noinherit; end if;
 end $$;
--- The connecting owner switches to it per transaction (`set local role fanzup_agent`), as asService does for service_role.
+-- Deployed, the agent worker logs in AS this role over its own AGENT_DATABASE_URL (docs/SETUP.md D3: an operator runs
+-- `alter role fanzup_agent login password …` once, so no secret lives in a migration), and holds no owner credential.
+-- The grant below lets the migration owner switch to it too (`set local role`), which tests and local dev use.
 grant fanzup_agent to current_user;
 grant usage on schema public to fanzup_agent;
 
@@ -50,7 +52,8 @@ create table public.agent_runs (
   error_code text,
   started_at timestamptz not null,
   finished_at timestamptz not null default now(),
-  actor_kind text not null default coalesce(public.ctx('actor_kind'), 'system:db'),
+  -- Derived, never supplied: the session's context settings are plain GUCs the agent could set.
+  actor_kind text generated always as ('system:agent:' || agent) stored,
   correlation_id text default public.ctx('correlation_id')
 );
 create index agent_runs_task_idx on public.agent_runs (task_id);
@@ -80,9 +83,16 @@ create table public.agent_proposals (
 create index agent_proposals_subject_idx on public.agent_proposals (subject_key, created_at desc);
 create index agent_proposals_agent_idx on public.agent_proposals (agent, created_at desc);
 
--- Only two changes are ever allowed: open → superseded, and a verdict set once (by the API as service_role).
+-- A proposal is born open and unjudged. After that only two changes are allowed: open → superseded, and a verdict set
+-- once (by the API as service_role).
 create function public.agent_proposals_guard() returns trigger language plpgsql as $$
 begin
+  if tg_op = 'INSERT' then
+    if new.status <> 'open' or new.verdict is not null or new.verdict_note is not null or new.verdict_by is not null or new.verdict_at is not null then
+      raise exception 'a new proposal must be open and have no verdict' using errcode = 'insufficient_privilege';
+    end if;
+    return new;
+  end if;
   if tg_op = 'DELETE' then raise exception 'agent proposals are append-only' using errcode = 'insufficient_privilege'; end if;
   if (new.id, new.task_id, new.run_id, new.agent, new.subject_kind, new.subject_id, new.subject_key, new.kind, new.source, new.body, new.correlation_id, new.created_at)
      is distinct from (old.id, old.task_id, old.run_id, old.agent, old.subject_kind, old.subject_id, old.subject_key, old.kind, old.source, old.body, old.correlation_id, old.created_at) then
@@ -97,14 +107,17 @@ begin
   end if;
   return new;
 end $$;
-create trigger agent_proposals_guard before update or delete on public.agent_proposals for each row execute function public.agent_proposals_guard();
+create trigger agent_proposals_guard before insert or update or delete on public.agent_proposals for each row execute function public.agent_proposals_guard();
 
--- Audit every proposal (NFR-COMP-11); the context's actor kind is system:agent:<name>.
+-- Audit every proposal (NFR-COMP-11). A created proposal is always the agent's: its actor is set here, not taken from
+-- the context settings (which the agent session could set), and the actor id is cleared so audit_fill_actor can't
+-- attribute it to a person.
 create function public.agent_proposals_audit() returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   if tg_op = 'INSERT' then
-    insert into public.audit_events (action, entity, entity_id, data)
-    values ('agent.proposal.created', 'agent_proposal', new.id,
+    perform set_config('fanzup.actor_id', '', true);
+    insert into public.audit_events (actor_kind, action, entity, entity_id, data)
+    values ('system:agent:' || new.agent, 'agent.proposal.created', 'agent_proposal', new.id,
             jsonb_build_object('agent', new.agent, 'subject_kind', new.subject_kind, 'subject_id', new.subject_id, 'source', new.source, 'run_id', new.run_id));
   elsif new.verdict is distinct from old.verdict then
     insert into public.audit_events (actor_id, action, entity, entity_id, data)
@@ -131,7 +144,7 @@ create trigger campaigns_agent_review after update of status on public.campaigns
 create view public.agent_v_campaign as
   select c.id, c.slug, c.title, c.type, c.blurb, c.story, c.risks, c.goal_minor, c.currency, c.status, c.milestone_release,
          c.duration_days, c.tier_at_submission, c.cap_minor_at_submission, c.updated_at,
-         a.name as artist_name, a.tier as artist_tier, a.identity_status as artist_identity_status,
+         a.name as artist_name, a.tier as artist_tier,
          (select count(*) from public.campaigns o where o.artist_id = c.artist_id and o.id <> c.id) as artist_other_campaigns,
          (select count(*) from public.campaigns o where o.artist_id = c.artist_id and o.id <> c.id and o.status in ('funded', 'released')) as artist_funded_campaigns
     from public.campaigns c join public.artists a on a.id = c.artist_id;
@@ -146,7 +159,7 @@ create view public.agent_v_campaign_tranches as
 
 -- Weekly review (FR-ID-007): actions without the free-text reason (it can name people).
 create view public.agent_v_weekly_actions as
-  select pa.id, pa.action, pa.subject_id, pa.status, pa.amount_minor, pa.execute_after, pa.executed_at, pa.created_at,
+  select pa.id, pa.action, pa.status, pa.amount_minor, pa.execute_after, pa.executed_at, pa.created_at,
          (pa.error is not null) as has_error
     from public.privileged_actions pa;
 
@@ -164,15 +177,19 @@ create view public.agent_v_ops_snapshot as
     -- Inline (not public.single_operator_mode()): the agent role has no execute grant on staff functions.
     coalesce((select (value #>> '{}')::boolean from public.platform_settings where key = 'single_operator_mode'), true) as single_operator_mode;
 
--- ── Grants: exactly this, nothing else (FR-AGT-F-001; asserted by apps/api/test/agents-privileges.test.ts) ──
+-- ── Grants: exactly this, nothing else (FR-AGT-F-001; asserted by apps/api/test/agents.test.ts) ──
 revoke all on public.agent_tasks, public.agent_runs, public.agent_proposals,
   public.agent_v_campaign, public.agent_v_campaign_perks, public.agent_v_campaign_tranches,
   public.agent_v_weekly_actions, public.agent_v_week_signoffs, public.agent_v_ops_snapshot from anon, authenticated;
 grant select on public.agent_v_campaign, public.agent_v_campaign_perks, public.agent_v_campaign_tranches,
   public.agent_v_weekly_actions, public.agent_v_week_signoffs, public.agent_v_ops_snapshot to fanzup_agent;
-grant select, insert on public.agent_tasks to fanzup_agent;
+-- Inserts are column-limited so the agent can't create a task already running/done, a run with a chosen actor, or a
+-- proposal that already carries a verdict (review M1).
+grant select on public.agent_tasks, public.agent_runs, public.agent_proposals to fanzup_agent;
+grant insert (agent, subject_kind, subject_id, subject_key, dedupe_key) on public.agent_tasks to fanzup_agent;
 grant update (status, attempts, available_at, lease_until, last_error) on public.agent_tasks to fanzup_agent;
-grant select, insert on public.agent_runs, public.agent_proposals to fanzup_agent;
+grant insert (task_id, agent, attempt, model, prompt_version, input_digest, status, usage, error_code, started_at) on public.agent_runs to fanzup_agent;
+grant insert (task_id, run_id, agent, subject_kind, subject_id, subject_key, kind, source, body) on public.agent_proposals to fanzup_agent;
 grant update (status) on public.agent_proposals to fanzup_agent;
 grant execute on function public.ctx(text), public.agents_enabled() to fanzup_agent;
 revoke execute on function public.agents_enabled() from public, anon, authenticated;

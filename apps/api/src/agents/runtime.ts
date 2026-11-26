@@ -30,7 +30,27 @@ export interface TickResult {
   done: number;
   retried: number;
   dead: number;
+  /** Lease lost to another worker before this one finished; its writes rolled back (review minor 1). */
+  lost: number;
 }
+
+/** Thrown inside a write transaction when the task is no longer ours, so the run and proposal roll back with it. */
+class LeaseLost extends Error {
+  constructor() { super("lease_lost"); }
+}
+
+/** Fenced completion: only the holder of this attempt's lease may finish the task. */
+async function finish(tx: Parameters<Parameters<typeof asAgent>[1]>[0], task: AgentTask, set: "done" | "dead" | "retry", code: string | null, backoffSecs = 0) {
+  const rows = set === "retry"
+    ? await tx`update public.agent_tasks set status = 'queued', lease_until = null, last_error = ${code},
+                      available_at = now() + make_interval(secs => ${backoffSecs})
+                where id = ${task.id} and status = 'running' and attempts = ${task.attempts} returning id`
+    : await tx`update public.agent_tasks set status = ${set}, lease_until = null, last_error = ${code}
+                where id = ${task.id} and status = 'running' and attempts = ${task.attempts} returning id`;
+  if (!rows.length) throw new LeaseLost();
+}
+
+const flagOn = (sql: Sql) => asAgent(sql, async (tx) => (await tx<{ on: boolean }[]>`select public.agents_enabled() as on`)[0].on);
 
 export async function agentTick(d: AgentDeps, now = new Date()): Promise<TickResult> {
   return runWithCtx({ actorId: null, actorKind: "system:agent", aal: null }, async () => {
@@ -40,12 +60,17 @@ export async function agentTick(d: AgentDeps, now = new Date()): Promise<TickRes
       const [r] = await tx<{ on: boolean }[]>`select public.agents_enabled() as on`;
       return r.on;
     });
-    const res: TickResult = { enabled, claimed: 0, done: 0, retried: 0, dead: 0 };
+    const res: TickResult = { enabled, claimed: 0, done: 0, retried: 0, dead: 0, lost: 0 };
     if (!enabled) return res; // FR-AGT-F-002: tasks wait; nothing runs.
     await scheduleWeekly(d.sql, now);
     const tasks = await claim(d.sql, now);
     res.claimed = tasks.length;
-    for (const t of tasks) {
+    for (const [i, t] of tasks.entries()) {
+      // The flag is re-read before every task after the first, so turning it off stops the batch (review nit).
+      if (i > 0 && !(await flagOn(d.sql))) {
+        await release(d.sql, tasks.slice(i));
+        break;
+      }
       const outcome = await runTask(d, t, now);
       res[outcome] += 1;
     }
@@ -61,6 +86,16 @@ export async function scheduleWeekly(sql: Sql, now: Date) {
     values ('ops_weekly', 'week', ${"week:" + week}, ${"ops_weekly:" + week}) on conflict (dedupe_key) do nothing`);
 }
 
+/** Give back claimed tasks we won't run (the attempt isn't counted). */
+async function release(sql: Sql, tasks: AgentTask[]) {
+  await asAgent(sql, async (tx) => {
+    for (const t of tasks) {
+      await tx`update public.agent_tasks set status = 'queued', attempts = attempts - 1, lease_until = null
+                where id = ${t.id} and status = 'running' and attempts = ${t.attempts}`;
+    }
+  });
+}
+
 async function claim(sql: Sql, now: Date): Promise<AgentTask[]> {
   return asAgent(sql, (tx) => tx<AgentTask[]>`
     update public.agent_tasks t set status = 'running', attempts = t.attempts + 1,
@@ -73,7 +108,17 @@ async function claim(sql: Sql, now: Date): Promise<AgentTask[]> {
 
 const digest = (system: string, input: string) => createHash("sha256").update(system).update("\u0000").update(input).digest("hex");
 
-export async function runTask(d: AgentDeps, task: AgentTask, now: Date): Promise<"done" | "retried" | "dead"> {
+export async function runTask(d: AgentDeps, task: AgentTask, now: Date): Promise<"done" | "retried" | "dead" | "lost"> {
+  try {
+    return await runTaskInner(d, task, now);
+  } catch (e) {
+    if (!(e instanceof LeaseLost)) throw e;
+    log("warn", "agent.lease_lost", { agent: task.agent, taskId: task.id, attempt: task.attempts });
+    return "lost";
+  }
+}
+
+async function runTaskInner(d: AgentDeps, task: AgentTask, now: Date): Promise<"done" | "retried" | "dead"> {
   const def = AGENTS[task.agent];
   return runWithCtx({ actorKind: `system:agent:${task.agent}`, correlationId: task.correlation_id }, async () => {
     const startedAt = new Date();
@@ -92,7 +137,7 @@ export async function runTask(d: AgentDeps, task: AgentTask, now: Date): Promise
     if (skip) {
       await asAgent(d.sql, async (tx) => {
         await insertRun(tx, task, def.promptVersion, startedAt, { status: "skipped", error_code: skip });
-        await tx`update public.agent_tasks set status = 'done', lease_until = null, last_error = ${skip} where id = ${task.id}`;
+        await finish(tx, task, "done", skip);
       });
       return "done";
     }
@@ -133,7 +178,7 @@ export async function runTask(d: AgentDeps, task: AgentTask, now: Date): Promise
       await tx`insert into public.agent_proposals (task_id, run_id, agent, subject_kind, subject_id, subject_key, kind, source, body)
                values (${task.id}, ${runId}, ${def.name}, ${task.subject_kind}, ${task.subject_id}, ${task.subject_key}, ${def.kind},
                        ${assessment == null ? "deterministic" : "model"}, ${tx.json(body as never)})`;
-      await tx`update public.agent_tasks set status = 'done', lease_until = null, last_error = ${errorCode} where id = ${task.id}`;
+      await finish(tx, task, "done", errorCode);
     });
     log("info", "agent.proposal", { agent: task.agent, taskId: task.id, source: assessment == null ? "deterministic" : "model" });
     return "done";
@@ -155,12 +200,7 @@ async function fail(sql: Sql, task: AgentTask, promptVersion: string, startedAt:
   const backoff = POLICY.agents.backoffSeconds[Math.min(task.attempts - 1, POLICY.agents.backoffSeconds.length - 1)] ?? 600;
   await asAgent(sql, async (tx) => {
     await insertRun(tx, task, promptVersion, startedAt, { status: "failed", error_code: code, input_digest: inputDigest ?? null });
-    if (next === "dead") {
-      await tx`update public.agent_tasks set status = 'dead', lease_until = null, last_error = ${code} where id = ${task.id}`;
-    } else {
-      await tx`update public.agent_tasks set status = 'queued', lease_until = null, last_error = ${code},
-                      available_at = now() + make_interval(secs => ${backoff}) where id = ${task.id}`;
-    }
+    await finish(tx, task, next, code, backoff);
   });
   return next === "dead" ? ("dead" as const) : ("retried" as const);
 }

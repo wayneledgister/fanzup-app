@@ -9,7 +9,7 @@ import { createDb } from "./db";
 import { log, redact } from "./log";
 
 const env = loadAgentEnv(process.env);
-const sql = createDb(env.DATABASE_URL, env.DB_POOL_MAX);
+const sql = createDb(env.databaseUrl, env.DB_POOL_MAX);
 const model = createModel(env.AGENT_MODEL_PROVIDER, env.ANTHROPIC_API_KEY);
 let stopping = false;
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { stopping = true; });

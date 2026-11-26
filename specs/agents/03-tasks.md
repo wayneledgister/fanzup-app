@@ -15,9 +15,9 @@
 | AGT-T-008 | Staff API: proposals list, verdict via `privileged()` (reviewer ≠ owner), metrics, `agent_dead_letters` queue, `/staff/flags/agents` | API tests | FR-AGT-F-002/005 | ✅ |
 | AGT-T-009 | `agent-worker.ts` entry, tsup bundle, `agent-worker` / `start:agent-worker` scripts | `pnpm --filter @fanzup/api build` emits `dist/agent-worker.js` | NFR-AGT-01 | ✅ |
 | AGT-T-010 | Docs: README, `docs/SETUP.md` (agent worker, model key, vendor terms), backlog rows for Phases 1–3, worklog | files updated | — | ✅ |
-| AGT-T-011 | Independent review; fix findings; CI green | reviewer APPROVE; CI green | all | see worklog |
+| AGT-T-011 | Independent review; fix findings; CI green | reviewer APPROVE; CI green | all | 🔶 pass 1 REQUEST CHANGES, all majors/minors fixed (`../gates/AGT-G1G2.md`); pass 2 + CI pending |
 | AGT-T-012 | **Wayne:** sign off AGT G1+G2; decide AGT-Q1 (vendor terms); create the Render agent worker; turn the flag on in staging | — | — | ⏳ Wayne |
 
 ## Test strategy
-- Real Postgres (as every API suite): privilege denial for money/identity/staff tables and functions; exact grant inventory; view column scan; trigger enqueue; runtime paths (flag off, success, invalid output, model outage to deterministic fallback, skip, concurrency, dead letter); staff verdict rules; weekly pack.
+- Real Postgres (as every API suite): privilege denial for money/identity/staff tables and functions; exact grant inventory (tables, insert/update columns, executable functions); exact view column lists; agent login check; lease fencing and reclaim; backoff timing; prompt-block escaping; trigger enqueue; runtime paths (flag off, success, invalid output, model outage to deterministic fallback, skip, concurrency, dead letter); staff verdict rules; weekly pack.
 - No network: the Anthropic adapter is tested on request shape and response mapping with a stubbed client.

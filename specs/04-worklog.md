@@ -240,3 +240,9 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - Built: migration `20261126000100_agents.sql` (role `fanzup_agent`, tables, guards, audit + enqueue triggers, views, `flag.agents`); shared `copy-rules.ts`, `agents.ts`, `POLICY.agents`; `apps/api/src/agents/*` (env, model boundary, runtime, A1 Campaign Review Copilot, A8 Ops Steward); `agent-worker.ts`; staff routes (proposals, verdict, metrics, flag, `agent_dead_letters` queue).
 - Deviation from design §2: `agent_v_ops_snapshot` reads `single_operator_mode` inline rather than calling `public.single_operator_mode()`, because a view's function calls are checked against the caller and the agent role has no execute grant on staff functions (found by the weekly-pack test).
 - Not done here, by design: no web UI for proposals; agent worker not added to `render.yaml`; no real model call (no key in the build environment; adapter tested on request/response shape only).
+
+## 2026-11-26 · CR-003 review pass 1 fixes
+- Independent review: REQUEST CHANGES (M1 verdicted proposal insert, M2 worker held the owner credential, 7 minors). All fixed; details in `specs/gates/AGT-G1G2.md`.
+- Spec changes from the fixes: the agent worker logs in as `fanzup_agent` via `AGENT_DATABASE_URL` when deployed (design §2/§4/§9, ADR-008 decision 3, SETUP D3); column-limited inserts; `agent_runs.actor_kind` generated; lease 30 min with fenced completions; `artist_identity_status` and `agent_v_weekly_actions.subject_id` dropped.
+- Tests run here: API 358/358 (28 files), shared green, `pnpm -r typecheck` clean.
+

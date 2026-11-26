@@ -6,6 +6,7 @@ import * as z from "zod/v4";
 import { weeklyPack, type WeeklyAction, type WeeklyPack } from "@fanzup/shared/agents";
 import { POLICY } from "@fanzup/shared/policy";
 import type { Tx } from "../db";
+import { block } from "./blocks";
 import type { AgentDefinition } from "./types";
 
 export const WeeklyBrief = z.object({
@@ -62,8 +63,8 @@ export const opsWeekly: AgentDefinition<WeeklyInput, WeeklyBrief, WeeklyPack> = 
 
   prompt(input, pack) {
     return [
-      `<week_summary>\n${JSON.stringify(pack, null, 2)}\n</week_summary>`,
-      `<queue_snapshot>\n${JSON.stringify(input.snapshot, null, 2)}\n</queue_snapshot>`,
+      block("week_summary", pack),
+      block("queue_snapshot", input.snapshot),
       "Write the weekly brief.",
     ].join("\n\n");
   },

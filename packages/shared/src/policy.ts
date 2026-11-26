@@ -87,7 +87,7 @@ export const POLICY = {
     /** Backoff after the 1st, 2nd and 3rd failed attempt. */
     backoffSeconds: [30, 120, 600] as const,
     /** A running task with no result after this long can be claimed again. */
-    leaseMinutes: 10,
+    leaseMinutes: 30, // ≥ batchSize × worst-case task (2 × modelTimeoutMs); completions are fenced anyway
     /** NFR-AGT-03. */
     modelTimeoutMs: 120_000,
     /** Tasks claimed per tick. */
