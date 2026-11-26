@@ -78,6 +78,10 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
         -- Claimed but never finished (the process stopped mid-run): needs a look, never re-run automatically.
         select 'scheduled', p.id, p.subject_id, p.action || ' stuck executing since ' || p.execute_after, p.created_at, p.correlation_id
           from public.privileged_actions p where p.status = 'executing' and p.execute_after < now() - interval '15 minutes'
+        union all
+        -- Agent tasks that gave up (CR-003, FR-AGT-F-003). Advisory work: nothing waits on them.
+        select 'agent_dead_letters', t.id, t.subject_id, t.agent || ' ' || t.subject_key || ': ' || coalesce(t.last_error, ''), t.updated_at, t.correlation_id
+          from public.agent_tasks t where t.status = 'dead'
       ) q where ${type}::text is null or q.type = ${type}
       order by created limit 200`);
     return {
@@ -143,10 +147,53 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
 
   /** FR-PLT-001: flag changes are privileged and audited. Layer 2 additionally needs REGCF_PROVIDER=mock, refused when deployed. */
   app.post<{ Params: { flag: string } }>("/flags/:flag", async (req) => {
-    if (req.params.flag !== "layer2") throw new HttpError(404, "not_found", "Unknown flag.");
+    if (req.params.flag !== "layer2" && req.params.flag !== "agents") throw new HttpError(404, "not_found", "Unknown flag.");
     const b = z.object({ on: z.boolean(), reason: z.string() }).parse(req.body);
+    if (req.params.flag === "agents") {
+      // CR-003: the agent layer is advisory; turning it on needs no provider (the agent worker brings its own model config).
+      return { action: await privileged(d, { action: "flag.set", subjectId: null, reason: b.reason, params: { flag: "agents", on: b.on } }) };
+    }
     if (b.on && !d.regcf) throw new HttpError(409, "provider_missing", "Layer 2 needs a Reg CF provider (REGCF_PROVIDER=mock, local/CI only).");
     return { action: await privileged(d, { action: "flag.set", subjectId: null, reason: b.reason, params: { flag: "layer2", on: b.on } }) };
+  });
+
+  // ── Agent layer (CR-003, FR-AGT-F-005). Proposals are advisory; a verdict changes nothing else. ──
+  app.get<{ Querystring: { subjectId?: string; agent?: string; status?: string } }>("/agents/proposals", async (req) => {
+    const q = z.object({
+      subjectId: z.string().uuid().optional(),
+      agent: z.enum(["campaign_review", "ops_weekly"]).optional(),
+      status: z.enum(["open", "superseded"]).optional(),
+    }).parse(req.query);
+    const proposals = await asService(d.sql, (tx) => tx`
+      select p.id, p.agent, p.subject_kind, p.subject_id, p.subject_key, p.kind, p.source, p.body, p.status,
+             p.verdict, p.verdict_note, p.verdict_by, p.verdict_at, p.correlation_id, p.created_at,
+             r.model, r.prompt_version, r.status as run_status, r.error_code
+        from public.agent_proposals p join public.agent_runs r on r.id = p.run_id
+       where (${q.subjectId ?? null}::uuid is null or p.subject_id = ${q.subjectId ?? null}::uuid)
+         and (${q.agent ?? null}::text is null or p.agent = ${q.agent ?? null})
+         and (${q.status ?? null}::text is null or p.status = ${q.status ?? null})
+       order by p.created_at desc limit 50`);
+    return { proposals };
+  });
+
+  app.post<{ Params: { id: string } }>("/agents/proposals/:id/verdict", async (req) => {
+    const b = z.object({ verdict: z.enum(["agree", "partial", "disagree"]), note: z.string().max(2000).optional(), reason: z.string() }).parse(req.body);
+    return { action: await act({ action: "agent_proposal.verdict", subjectId: id(req.params.id), reason: b.reason, params: { verdict: b.verdict, note: b.note ?? null } }) };
+  });
+
+  app.get("/agents/metrics", async () => {
+    const rows = await asService(d.sql, (tx) => tx<{ agent: string; proposals: bigint; agree: bigint; partial: bigint; disagree: bigint }[]>`
+      select agent, count(*) as proposals,
+             count(*) filter (where verdict = 'agree') as agree,
+             count(*) filter (where verdict = 'partial') as partial,
+             count(*) filter (where verdict = 'disagree') as disagree
+        from public.agent_proposals group by agent order by agent`);
+    return {
+      agents: rows.map((r) => {
+        const judged = n(r.agree) + n(r.partial) + n(r.disagree);
+        return { agent: r.agent, proposals: n(r.proposals), agree: n(r.agree), partial: n(r.partial), disagree: n(r.disagree), agreementRate: judged ? n(r.agree) / judged : null };
+      }),
+    };
   });
 
   /** Everything carrying one correlation id, in time order (M1 exit test 4). */

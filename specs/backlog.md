@@ -62,3 +62,18 @@ One row per condition carried forward in `gates/G2-design.md` pass 2 ("Condition
 | L2: staff nav items "Pools (Layer 2)" / "Investor KYC" visible on the completion signal; `role="alert"` on LoadGate errors | PR #13 review round 3 | Staff reach flag-off money views without typing URLs | S | 2026-10-12 |
 | L2: verify `cap_overflow_minor` against fan share − Σ payouts at commit | PR #11 review round 2 | Waterfall data stored only after SQL check | S | 2026-10-12 |
 | M1: on real Stripe, confirm wait-for-funds payout retries aren't replaying a stored `balance_insufficient` for 24 h (use the attempt generation if so) | PR #7 fixer note | Payouts resume as soon as the float is topped up | S | 2026-10-12 |
+
+## Agent layer, Phases 1–3 (CR-003)
+Origin: `specs/agents/00-strategy.md` §4. Each is built when its milestone's data exists, in shadow mode first.
+
+| Item | Origin | Value hypothesis | Size | Added |
+|---|---|---|---|---|
+| A2 Milestone Evidence Analyst (evidence dossier per tranche; never a verifier) | CR-003 Phase 1 | Verification prep is the bottleneck under the 3-per-day single-operator limit | M | 2026-11-26 |
+| A3 Reconciliation Break Investigator (root cause + proposed staff action for breaks, dead letters, unmatched money) | CR-003 Phase 1 (Stripe test), Phase 2 (custodian) | Breaks resolved inside the one-business-day limit | M | 2026-11-26 |
+| A6 Artist Campaign Coach (drafts only; copy-linted) | CR-003 Phase 1 | Campaign success rate ≥ 40% in beta | M | 2026-11-26 |
+| A4 Support and Dispute Agent (ledger-grounded replies, dispute evidence packs) | CR-003 Phase 2 | Disputes answered before deadlines; ratio < 0.5% | M | 2026-11-26 |
+| A5 Fulfillment Watchdog | CR-003 Phase 2 | Perks delivered by promised date ≥ 90% | S | 2026-11-26 |
+| A7 Risk and Integrity Sentinel (narratives on rule hits; never clears a hit) | CR-003 Phase 2; counsel AGT-Q3 | Faster fraud/sanctions triage | M | 2026-11-26 |
+| Staff console UI for agent proposals and verdicts | CR-003 (no staff UI yet, G2 condition 9) | Verdicts recorded without curl | S | 2026-11-26 |
+| Add the agent worker to `render.yaml` once Wayne runs it | CR-003 design §9 | One deploy path | S | 2026-11-26 |
+
