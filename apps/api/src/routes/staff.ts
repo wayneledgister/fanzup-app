@@ -51,6 +51,18 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
         select 'dead_letters', o.id, o.subject_id, initcap(o.kind) || ' ' || o.status || ': ' || coalesce(o.last_error, ''), o.updated_at, o.correlation_id
           from public.outbound_ops o where o.status in ('dead', 'failed')
         union all
+        -- Layer 2 money ops that need a person (review round 2, PR #12): replay with POST /staff/l2/pool-ops/:id/replay.
+        -- Listed whatever the layer2 flag says: money already owed is a completion path.
+        select 'pool_dead_letters', o.id, o.pool_id, 'Pool ' || replace(o.kind, '_', ' ') || ' ' || o.status || ': ' || coalesce(o.last_error, ''), o.updated_at, o.correlation_id
+          from public.pool_ops o where o.status in ('dead', 'failed')
+        union all
+        -- Open Layer 2 breaks (review round 3 follow-up). amount_mismatch / unapplied_funding are closed with
+        -- POST /staff/l2/pool-breaks/:id/resolve; the other kinds clear when recon no longer finds them.
+        select 'pool_breaks', b.id, b.pool_id,
+               b.kind || ' ' || b.amount_minor || case when b.kind in ('amount_mismatch', 'unapplied_funding') then ' (staff resolve)' else ' (clears on recon)' end,
+               b.opened_at, null
+          from public.pool_breaks b where b.resolved_at is null
+        union all
         select 'unmatched', e.id, null, e.type || ' ' || coalesce(e.object_ref, ''), e.received_at, e.correlation_id
           from public.provider_events e where e.status = 'unmatched'
         union all
@@ -127,6 +139,14 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.post("/recon/override", async (req) => {
     const { reason } = Reason.parse(req.body);
     return { action: await act({ action: "recon.override", subjectId: null, reason }) };
+  });
+
+  /** FR-PLT-001: flag changes are privileged and audited. Layer 2 additionally needs REGCF_PROVIDER=mock, refused when deployed. */
+  app.post<{ Params: { flag: string } }>("/flags/:flag", async (req) => {
+    if (req.params.flag !== "layer2") throw new HttpError(404, "not_found", "Unknown flag.");
+    const b = z.object({ on: z.boolean(), reason: z.string() }).parse(req.body);
+    if (b.on && !d.regcf) throw new HttpError(409, "provider_missing", "Layer 2 needs a Reg CF provider (REGCF_PROVIDER=mock, local/CI only).");
+    return { action: await privileged(d, { action: "flag.set", subjectId: null, reason: b.reason, params: { flag: "layer2", on: b.on } }) };
   });
 
   /** Everything carrying one correlation id, in time order (M1 exit test 4). */

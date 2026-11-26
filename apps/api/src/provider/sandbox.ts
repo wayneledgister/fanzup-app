@@ -10,7 +10,7 @@ import { processingFeeMinor } from "@fanzup/shared/policy";
 import type { Sql } from "../db";
 import { asService, n } from "../db";
 import { ingestEvent } from "../inbox";
-import { ProviderError, type BalanceTxn, type NormalizedEvent, type PaymentProvider, type ProviderErrorClass } from "./types";
+import { attemptOf, ProviderError, type BalanceTxn, type NormalizedEvent, type PaymentProvider, type ProviderErrorClass } from "./types";
 
 type Row = { type: string; object_ref: string | null; payload: { amountMinor?: number; feeMinor?: number; paymentRef?: string; metadata?: Record<string, string> } };
 
@@ -22,7 +22,23 @@ export class SandboxProvider implements PaymentProvider {
   readonly calls: { op: string; input: unknown }[] = [];
   private failures: { op: string; cls: ProviderErrorClass; code: string; after: boolean }[] = [];
 
+  /**
+   * Refunds the processor created and later FAILED (Stripe: `refund.status = failed`). They keep their idempotency key:
+   * a later `refund()` with the same key returns the same failed object, as Stripe does (design §5 "Attempt generations").
+   */
+  private failedRefunds: { key: string; refundRef: string; paymentRef: string; opId: string; attempt: number; amountMinor: number; failureCode: string }[] = [];
+  private refundFailures: { failureCode: string; webhook: boolean }[] = [];
+
   constructor(private sql: Sql) {}
+
+  /**
+   * Test hook: the processor accepts the next `refund()` (returns it `pending`) and then the refund FAILS there
+   * (e.g. the card was closed). With `webhook: true` (default) a `refund.failed` event is emitted into the inbox; with
+   * `webhook: false` the event is lost and only a lookup (`findRefund`, recon) sees the failure.
+   */
+  failNextRefundAtProvider(opts: { failureCode?: string; webhook?: boolean } = {}) {
+    this.refundFailures.push({ failureCode: opts.failureCode ?? "expired_or_canceled_card", webhook: opts.webhook ?? true });
+  }
 
   /**
    * Test hook: make the next call of `op` fail with this class. With `after: true` the provider performs the
@@ -117,44 +133,60 @@ export class SandboxProvider implements PaymentProvider {
   async refund(input: Parameters<PaymentProvider["refund"]>[0]) {
     this.calls.push({ op: "refund", input });
     this.maybeFail("refund");
-    const existing = await this.findRefund({ paymentRef: input.paymentRef, opId: input.opId });
-    if (existing) return { refundRef: existing.refundRef, amountMinor: existing.amountMinor };
+    // Same idempotency key → the original object, even a failed one (Stripe semantics; design §5 "Attempt generations").
+    const sameKey = this.failedRefunds.find((f) => f.key === input.idempotencyKey);
+    if (sameKey) return { refundRef: sameKey.refundRef, amountMinor: sameKey.amountMinor, status: "failed" };
+    const existing = await this.findRefund({ paymentRef: input.paymentRef, opId: input.opId, attempt: input.attempt });
+    if (existing) return { refundRef: existing.refundRef, amountMinor: existing.amountMinor, status: existing.status };
     const [paid] = await this.events({ type: "payment.succeeded", objectRef: input.paymentRef });
     if (!paid) throw new ProviderError("permanent", "charge_not_found", "Nothing to refund for this payment");
     if ((paid.payload.amountMinor ?? 0) < input.amountMinor) throw new ProviderError("permanent", "amount_too_large", "Refund exceeds the payment");
-    const refundRef = `sbx_re_${input.opId}`;
+    const refundRef = input.attempt > 0 ? `sbx_re_${input.opId}_r${input.attempt}` : `sbx_re_${input.opId}`;
+    const metadata = { outbound_op_id: input.opId, outbound_attempt: String(input.attempt), backing_id: input.backingId ?? "", campaign_id: input.campaignId };
+    const fail = this.refundFailures.shift();
+    if (fail) {
+      // Accepted (pending), then failed at the processor: no money moved, no balance transaction.
+      this.failedRefunds.push({ key: input.idempotencyKey, refundRef, paymentRef: input.paymentRef, opId: input.opId, attempt: input.attempt, amountMinor: input.amountMinor, failureCode: fail.failureCode });
+      if (fail.webhook) {
+        await this.emit({ type: "refund.failed", objectRef: refundRef, paymentRef: input.paymentRef, amountMinor: input.amountMinor, currency: "usd", failureCode: fail.failureCode, metadata });
+      }
+      return { refundRef, amountMinor: input.amountMinor, status: "pending" };
+    }
     await this.emit({
-      type: "refund.succeeded", objectRef: refundRef, paymentRef: input.paymentRef, amountMinor: input.amountMinor, currency: "usd",
-      metadata: { outbound_op_id: input.opId, backing_id: input.backingId ?? "", campaign_id: input.campaignId },
+      type: "refund.succeeded", objectRef: refundRef, paymentRef: input.paymentRef, amountMinor: input.amountMinor, currency: "usd", metadata,
     });
     this.maybeFail("refund", true);
-    return { refundRef, amountMinor: input.amountMinor };
+    return { refundRef, amountMinor: input.amountMinor, status: "succeeded" };
   }
 
-  async findRefund(input: { paymentRef: string; opId: string }) {
-    const [r] = (await this.events({ type: "refund.succeeded", opId: input.opId })).filter((x) => x.payload.paymentRef === input.paymentRef);
-    return r ? { refundRef: r.object_ref!, amountMinor: r.payload.amountMinor ?? 0, status: "succeeded" } : null;
+  /** The refund of the op's current generation only; a failed one is reported `failed` (never as succeeded). */
+  async findRefund(input: { paymentRef: string; opId: string; attempt: number }) {
+    const [r] = (await this.events({ type: "refund.succeeded", opId: input.opId }))
+      .filter((x) => x.payload.paymentRef === input.paymentRef && attemptOf(x.payload.metadata) === input.attempt);
+    if (r) return { refundRef: r.object_ref!, amountMinor: r.payload.amountMinor ?? 0, status: "succeeded" };
+    const f = this.failedRefunds.find((x) => x.opId === input.opId && x.paymentRef === input.paymentRef && x.attempt === input.attempt);
+    return f ? { refundRef: f.refundRef, amountMinor: f.amountMinor, status: "failed" } : null;
   }
 
   async transfer(input: Parameters<PaymentProvider["transfer"]>[0]) {
     this.calls.push({ op: "transfer", input });
     this.maybeFail("transfer");
-    const existing = await this.findTransfer({ campaignId: input.campaignId, opId: input.opId });
+    const existing = await this.findTransfer({ campaignId: input.campaignId, opId: input.opId, attempt: input.attempt });
     if (existing) return existing;
     if (!input.destination.startsWith("sbx_acct_")) throw new ProviderError("permanent", "invalid_destination", "Unknown payout account");
     const available = (await this.listBalanceTransactions()).reduce((s, t) => s + t.netMinor, 0);
     if (available < input.amountMinor) throw new ProviderError("wait_funds", "balance_insufficient", "Not enough available balance");
-    const transferRef = `sbx_tr_${input.opId}`;
+    const transferRef = input.attempt > 0 ? `sbx_tr_${input.opId}_r${input.attempt}` : `sbx_tr_${input.opId}`;
     await this.emit({
       type: "transfer.created", objectRef: transferRef, amountMinor: input.amountMinor, currency: "usd",
-      metadata: { outbound_op_id: input.opId, campaign_id: input.campaignId, tranche_id: input.trancheId },
+      metadata: { outbound_op_id: input.opId, outbound_attempt: String(input.attempt), campaign_id: input.campaignId, tranche_id: input.trancheId },
     });
     this.maybeFail("transfer", true);
     return { transferRef, amountMinor: input.amountMinor };
   }
 
-  async findTransfer(input: { campaignId: string; opId: string }) {
-    const [t] = await this.events({ type: "transfer.created", opId: input.opId });
+  async findTransfer(input: { campaignId: string; opId: string; attempt: number }) {
+    const [t] = (await this.events({ type: "transfer.created", opId: input.opId })).filter((x) => attemptOf(x.payload.metadata) === input.attempt);
     return t ? { transferRef: t.object_ref!, amountMinor: t.payload.amountMinor ?? 0 } : null;
   }
 

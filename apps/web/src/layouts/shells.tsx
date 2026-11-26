@@ -1,11 +1,12 @@
 import { useState, type ComponentType } from "react";
 import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from "react-router";
 import {
+  Disc3, Fingerprint,
   Bell, CalendarDays, Compass, Gem, Home, LayoutDashboard, LineChart, Menu, Package, Radio, Receipt, Settings, ShieldCheck,
   Sparkles, Ticket, Upload, User, Users, Wallet, X, Megaphone, Landmark, Vote, ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useFlag, setFlag, allFlags } from "@/lib/flags";
+import { useFlag, setFlag, allFlags, useLayer2Completion } from "@/lib/flags";
 import { Button, Logo, Container } from "@/components/brand";
 import { initials, useSession } from "@/lib/session";
 
@@ -36,7 +37,8 @@ function AccountActions({ mobile = false, onDone }: { mobile?: boolean; onDone?:
   );
 }
 
-type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta"; end?: boolean };
+/** `completion`: a layer2 item also shown on the server's completion signal (flag off; L2-T-038, review round 2 finding 2). */
+type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta"; completion?: boolean; end?: boolean };
 
 /* ── Public (marketing + discovery) ─────────────────────── */
 
@@ -118,8 +120,8 @@ export function SiteFooter() {
       </Container>
       <Container size="xl" className="border-t border-line py-6">
         <p className="text-xs leading-relaxed text-muted">
-          © 2026 FanZuP LLC. Campaign backers receive perks, not securities. Any securities offerings are made only through a
-          FINRA-registered intermediary under Regulation Crowdfunding, are speculative and illiquid, and may result in total loss.
+          © 2026 FanZuP LLC. Campaign backers receive perks, not securities. A securities offering under Regulation Crowdfunding must be made
+          through a registered intermediary; none has been chosen yet. Such offerings are speculative and illiquid, and may result in total loss.
         </p>
       </Container>
     </footer>
@@ -179,7 +181,8 @@ const FAN_NAV: NavItem[] = [
   { to: "/merch", label: "Merch", icon: Package },
   { to: "/backstage", label: "Backstage", icon: Sparkles },
   { to: "/live", label: "Live", icon: Radio },
-  { to: "/portfolio", label: "Portfolio", icon: LineChart, flag: "layer2" },
+  { to: "/pools", label: "Pools", icon: Disc3, flag: "layer2" },
+  { to: "/portfolio", label: "Portfolio", icon: LineChart, flag: "layer2", completion: true },
   { to: "/governance", label: "Holder votes", icon: Vote, flag: "postBeta" },
 ];
 const FAN_SECONDARY: NavItem[] = [
@@ -190,6 +193,7 @@ const FAN_SECONDARY: NavItem[] = [
 const CREATOR_NAV: NavItem[] = [
   { to: "/creator", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/creator/campaigns", label: "Campaigns", icon: Megaphone },
+  { to: "/creator/pools", label: "Royalty Pools", icon: Disc3, flag: "layer2" },
   { to: "/creator/revenue", label: "Revenue", icon: LineChart },
   { to: "/creator/content", label: "Content", icon: Upload },
   { to: "/creator/events", label: "Events", icon: CalendarDays },
@@ -202,12 +206,15 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/admin", label: "Queues", icon: ClipboardList, end: true },
   { to: "/admin/review/under-review", label: "Campaign review", icon: ShieldCheck },
   { to: "/admin/kyc", label: "Identity review", icon: Users },
+  { to: "/admin/pools", label: "Pools (Layer 2)", icon: Disc3, flag: "layer2" },
+  { to: "/admin/investors", label: "Investor KYC", icon: Fingerprint, flag: "layer2" },
 ];
 
 function SideNav({ items, secondary, onNavigate }: { items: NavItem[]; secondary?: NavItem[]; onNavigate?: () => void }) {
   const layer2 = useFlag("layer2");
   const postBeta = useFlag("postBeta");
-  const visible = (i: NavItem) => !i.flag || (i.flag === "layer2" ? layer2 : postBeta);
+  const completion = useLayer2Completion();
+  const visible = (i: NavItem) => !i.flag || (i.flag === "layer2" ? layer2 || (!!i.completion && completion) : postBeta);
   const link = (i: NavItem) => (
     <NavLink
       key={i.to}

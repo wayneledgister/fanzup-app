@@ -278,7 +278,7 @@ describe("outbound ops (FR-PAY-004 review fixes)", () => {
     const op = await refundOpFor(id);
     expect(op.attempts).toBe(0);
     // The provider acted (e.g. a previous worker crashed right after the call) before anything was recorded.
-    await k.provider.refund({ paymentRef: `sbx_pi_${id}`, amountMinor: 1000, idempotencyKey: op.idempotency_key, opId: op.id, backingId: id, campaignId: op.campaign_id });
+    await k.provider.refund({ paymentRef: `sbx_pi_${id}`, amountMinor: 1000, idempotencyKey: op.idempotency_key, opId: op.id, attempt: 0, backingId: id, campaignId: op.campaign_id });
     await dueNow();
     await runDueOps(k.sql, k.provider);
     expect(k.provider.calls.filter((c) => c.op === "refund" && (c.input as { backingId: string }).backingId === id)).toHaveLength(1);
@@ -290,7 +290,7 @@ describe("outbound ops (FR-PAY-004 review fixes)", () => {
   it("a provider refund of a different amount fails the op, keeps the provider's ref and opens an amount_mismatch break", async () => {
     const id = await backAndPay(ids.novaCampaign, ids.novaPerkDiary);
     const op = await refundOpFor(id);
-    await k.provider.refund({ paymentRef: `sbx_pi_${id}`, amountMinor: 400, idempotencyKey: op.idempotency_key, opId: op.id, backingId: id, campaignId: op.campaign_id });
+    await k.provider.refund({ paymentRef: `sbx_pi_${id}`, amountMinor: 400, idempotencyKey: op.idempotency_key, opId: op.id, attempt: 0, backingId: id, campaignId: op.campaign_id });
     await dueNow();
     await runDueOps(k.sql, k.provider);
     const after = await one(k.sql, (tx) => tx<{ status: string; provider_ref: string }[]>`select status, provider_ref from public.outbound_ops where id = ${op.id}`);

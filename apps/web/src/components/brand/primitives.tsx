@@ -165,7 +165,8 @@ export function Field({ label, htmlFor, hint, error, children, className, option
         {label} {optional && <span className="font-normal text-muted">(optional)</span>}
       </label>
       {children}
-      {error ? <p className="text-sm text-error">{error}</p> : hint ? <p className="text-sm text-muted">{hint}</p> : null}
+      {/* `${htmlFor}-msg` lets the control point at its hint or error with aria-describedby. */}
+      {error ? <p id={htmlFor ? `${htmlFor}-msg` : undefined} className="text-sm text-error">{error}</p> : hint ? <p id={htmlFor ? `${htmlFor}-msg` : undefined} className="text-sm text-muted">{hint}</p> : null}
     </div>
   );
 }
