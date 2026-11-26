@@ -28,7 +28,7 @@ export default defineConfig([
   },
   {
     ...shared,
-    entry: ["src/worker.ts"],
+    entry: ["src/worker.ts", "src/agent-worker.ts"],
     format: ["esm"],
     clean: false,
     // Gives bundled CommonJS deps (fastify, stripe) a working `require` inside ESM.
