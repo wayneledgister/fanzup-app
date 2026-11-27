@@ -18,6 +18,7 @@ export default function Verify() {
   const email = params.email ?? session.email ?? "";
   const [checking, setChecking] = useState(false);
   const [notYet, setNotYet] = useState(false);
+  const [offline, setOffline] = useState(false);
   const [wait, setWait] = useState(0);
   const [resent, setResent] = useState(false);
 
@@ -30,7 +31,14 @@ export default function Verify() {
   const check = async () => {
     setChecking(true);
     setNotYet(false);
-    const s = session.session ? await session.refresh() : null;
+    setOffline(false);
+    let s = null;
+    try {
+      s = session.session ? await session.refresh() : null;
+    } catch {
+      setChecking(false);
+      return setOffline(true); // the session is still there; only the check failed
+    }
     setChecking(false);
     if (s?.user.email_confirmed_at) return router.dismissTo(next as never);
     if (!s) return router.replace(`/auth/login?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`); // verified elsewhere, no session here yet
@@ -51,6 +59,7 @@ export default function Verify() {
         We sent a verification link{email ? <> to <Num>{email}</Num></> : null}. Open it on this phone or any device, then come back and tap "I've verified".
       </Body>
       {notYet && <Callout tone="warning" icon="time-outline" title="Not verified yet">Open the link in the email first. It can take a minute to arrive; check spam too.</Callout>}
+      {offline && <Callout tone="error" icon="cloud-offline-outline" title="We couldn't check just now">Check your connection and try again.</Callout>}
       {resent && <Callout tone="success" icon="mail-outline" title="New link sent">Use the newest email; older links stop working.</Callout>}
       <Button onPress={check} loading={checking} testID="verified">I've verified</Button>
       <Button variant="secondary" onPress={resend} disabled={!email || wait > 0}>{wait > 0 ? `Send a new link (${wait}s)` : "Send a new link"}</Button>

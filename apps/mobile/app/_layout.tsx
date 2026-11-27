@@ -40,6 +40,7 @@ export default function RootLayout() {
           <Stack.Screen name="auth/signup" options={{ title: "Create your account" }} />
           <Stack.Screen name="auth/verify" options={{ title: "Verify your email" }} />
           <Stack.Screen name="auth/forgot" options={{ title: "Reset password" }} />
+          <Stack.Screen name="stripe-redirect" options={{ headerShown: false, animation: "none" }} />
         </Stack>
       </SessionProvider>
     </SafeAreaProvider>

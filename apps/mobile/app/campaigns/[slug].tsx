@@ -150,7 +150,7 @@ export default function CampaignScreen() {
             </View>
           )}
           <Button onPress={back} disabled={!perk || !accepting} testID="back-cta">
-            {!accepting ? (c.status === "live" ? "Campaign ended" : "Not accepting backers") : perk ? `Back with ${formatMoney(perk.priceMinor)}` : "Pick a perk to back"}
+            {!accepting ? (t.ended && c.endsAt ? "Campaign ended" : "Not accepting backers") : perk ? `Back with ${formatMoney(perk.priceMinor)}` : "Pick a perk to back"}
           </Button>
           {accepting && <Body muted small style={{ textAlign: "center" }}>Charged when you back. No fees added at checkout. Refunded in full if the goal isn't met.</Body>}
           {!session.session && accepting && <Body muted small style={{ textAlign: "center" }}>You'll create a free account and verify your email first.</Body>}

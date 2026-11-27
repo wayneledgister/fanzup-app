@@ -4,7 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 import { EMAIL_RE } from "@fanzup/shared/auth-rules";
 import { Body, Button, Callout, Field, H1, Screen, TextField } from "@/components/ui";
 import { webUrl } from "@/lib/links";
-import { supabase } from "@/lib/supabase";
+import { isTransportError, supabase } from "@/lib/supabase";
 
 export default function Forgot() {
   const params = useLocalSearchParams<{ email?: string }>();
@@ -18,10 +18,17 @@ export default function Forgot() {
     setErr(undefined);
     if (!supabase) return setErr("Sign-in isn't configured in this build.");
     setLoading(true);
-    // Same outcome whether or not the address has an account (no account enumeration).
-    await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: webUrl("/reset-password?state=reset") ?? undefined });
-    setLoading(false);
-    setSent(true);
+    try {
+      // Same outcome for any server answer, account or not (no account enumeration); only a request that never got an
+      // answer (offline, 5xx) asks the fan to try again.
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: webUrl("/reset-password?state=reset") ?? undefined });
+      if (error && isTransportError(error)) return setErr("We couldn't reach FanZuP. Check your connection and try again.");
+      setSent(true);
+    } catch {
+      setErr("We couldn't reach FanZuP. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

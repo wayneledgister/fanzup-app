@@ -272,9 +272,12 @@ function StripePay({ backing, disabled, onFailure, onCanceled, onPaid }: { backi
 
   useEffect(() => {
     let cancelled = false;
+    const fail = (f: Failure) => !cancelled && failRef.current(f);
     (async () => {
       const cfg = await loadConfig();
-      if (!cfg?.stripePublishableKey) return failRef.current({ category: "other", message: "Card payments aren't configured here.", next: "Nothing was charged." });
+      if (cancelled) return;
+      if (!cfg) return fail({ category: "network", message: "We couldn't reach the payment processor.", next: "Check your connection and try again — nothing was charged." });
+      if (!cfg.stripePublishableKey) return fail({ category: "other", message: "Card payments aren't configured here.", next: "Nothing was charged." });
       await initStripe({ publishableKey: cfg.stripePublishableKey, urlScheme: "fanzup" });
       const { error } = await initPaymentSheet({
         merchantDisplayName: "FanZuP",
@@ -288,9 +291,9 @@ function StripePay({ backing, disabled, onFailure, onCanceled, onPaid }: { backi
         },
       });
       if (cancelled) return;
-      if (error) return failRef.current(categorize(error, "create"));
+      if (error) return fail(categorize(error, "create"));
       setReady(true);
-    })();
+    })().catch((e) => fail(categorize(e, "create")));
     return () => {
       cancelled = true;
     };

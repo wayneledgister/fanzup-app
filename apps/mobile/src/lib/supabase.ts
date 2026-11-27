@@ -22,6 +22,13 @@ if (supabase) {
   });
 }
 
+/** True when an auth call never got a real answer (offline, timeout, 5xx), as opposed to a 4xx such as bad credentials. */
+export function isTransportError(e: { name?: string; status?: number } | null | undefined): boolean {
+  if (!e) return false;
+  if (e.name === "AuthRetryableFetchError") return true;
+  return e.status === undefined || e.status === 0 || e.status >= 500;
+}
+
 export async function accessToken(): Promise<string | null> {
   if (!supabase) return null;
   const { data } = await supabase.auth.getSession();

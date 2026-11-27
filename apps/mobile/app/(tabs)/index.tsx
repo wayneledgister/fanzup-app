@@ -24,7 +24,10 @@ export default function Explore() {
     const id = ++req.current;
     setError(false);
     if (mode === "refresh") setRefreshing(true);
-    else setItems(null);
+    else {
+      setItems(null);
+      setCursor(null); // never page the new tab with the previous tab's cursor
+    }
     try {
       const r = await api.campaigns({ tab: t });
       if (id !== req.current) return;
@@ -42,7 +45,7 @@ export default function Explore() {
   }, [tab, load]);
 
   const loadMore = async () => {
-    if (!cursor || more) return;
+    if (!cursor || more || items === null) return;
     const id = req.current;
     setMore(true);
     try {

@@ -11,7 +11,10 @@ interface SessionState {
   emailVerified: boolean;
   displayName: string;
   signOut: () => Promise<void>;
-  /** Re-reads the user from Supabase (after the fan verified their email in the browser). */
+  /**
+   * Re-reads the user from Supabase (after the fan verified their email in the browser). Throws when the refresh
+   * fails (offline, server error) and keeps the current session, so a network blip never looks like a sign-out.
+   */
   refresh: () => Promise<Session | null>;
 }
 
@@ -24,11 +27,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!supabase) return;
     let alive = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (!alive) return;
-      setSession(data.session);
-      setLoading(false);
-    });
+    // A keystore that can't be read (device restore, locked device) must not leave the app on a spinner forever.
+    supabase.auth.getSession()
+      .then(({ data }) => alive && setSession(data.session))
+      .catch(() => alive && setSession(null))
+      .finally(() => alive && setLoading(false));
     const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => {
       alive = false;
@@ -50,7 +53,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       },
       refresh: async () => {
         if (!supabase) return null;
-        const { data } = await supabase.auth.refreshSession();
+        const { data, error } = await supabase.auth.refreshSession();
+        if (error) throw error;
         setSession(data.session);
         return data.session;
       },

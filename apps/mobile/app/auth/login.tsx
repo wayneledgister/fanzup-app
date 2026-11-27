@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { EMAIL_RE } from "@fanzup/shared/auth-rules";
 import { Body, Button, Callout, Field, H1, Screen, TextField } from "@/components/ui";
 import { safeAppNext } from "@/lib/links";
-import { supabase } from "@/lib/supabase";
+import { isTransportError, supabase } from "@/lib/supabase";
 
 export default function LogIn() {
   const params = useLocalSearchParams<{ next?: string; email?: string }>();
@@ -27,8 +27,10 @@ export default function LogIn() {
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pwd });
     setLoading(false);
     if (error) {
-      setPwd("");
       if (/confirm/i.test(error.message)) return setFailure({ title: "Verify your email first", body: "Open the link we emailed you, then log in again.", verify: true });
+      // Only a credentials answer from the server means a wrong password; offline / 5xx keeps what the fan typed.
+      if (isTransportError(error)) return setFailure({ title: "We couldn't reach FanZuP", body: "Check your connection and try again." });
+      setPwd("");
       return setFailure({ title: "That email and password don't match", body: "Try again, or reset your password." });
     }
     if (!data.user?.email_confirmed_at) return router.replace(`/auth/verify?next=${encodeURIComponent(next)}`);
