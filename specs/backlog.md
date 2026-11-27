@@ -77,3 +77,9 @@ Origin: `specs/agents/00-strategy.md` §4. Each is built when its milestone's da
 | Staff console UI for agent proposals and verdicts | CR-003 (no staff UI yet, G2 condition 9) | Verdicts recorded without curl | S | 2026-11-26 |
 | Add the agent worker to `render.yaml` once Wayne runs it | CR-003 design §9 | One deploy path | S | 2026-11-26 |
 | Measure agent model latency; switch to streaming + `finalMessage()` if the 120 s timeout trips | CR-003 review nit N5 | No timeouts at `effort: high` | S | 2026-11-26 |
+| Mobile: push notifications (device tokens API + FR-NTF provider) | CR-004 | Fans hear about funded / refunded / released without email | M | 2026-11-27 |
+| Mobile: Apple Pay / Google Pay in PaymentSheet (Apple Merchant ID, Stripe domain setup) | CR-004 | Faster checkout on phones | S | 2026-11-27 |
+| Mobile: universal links / App Links on the production domain | CR-004 | Shared campaign links open the app | S | 2026-11-27 |
+| Mobile: in-app account deletion (with FR-PRV-003) — **blocks public store release** | CR-004, FR-MOB-009 | Store requirement; privacy | S (after FR-PRV-003) | 2026-11-27 |
+| Mobile: device e2e (Maestro) for the golden journey on EAS | CR-004 | Catches native regressions the bundle check can't | M | 2026-11-27 |
+| Mobile: artist screens (campaign status, milestone evidence) | CR-004 | Artists manage on the go | L | 2026-11-27 |

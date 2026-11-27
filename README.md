@@ -6,8 +6,9 @@ Direct-to-fan funding for independent artists. *Fund the culture. Own the future
 |---|---|---|
 | `apps/web` | React app (Brand v2.0, 102 routes) | Vercel service `web` at `/` |
 | `apps/api` | Fastify API: backings, escrow orchestration, settlement, refunds, milestone releases | Vercel service `api` at `/api`; worker on Render ([ADR-002](docs/adr/ADR-002-hosting.md)) |
+| `apps/mobile` | iOS and Android app (Expo + React Native): explore, campaign, account, checkout, My backings — same API and shared rules as the web ([CR-004](specs/changes/CR-004-mobile-app.md), [docs/MOBILE.md](docs/MOBILE.md)) | App Store / Google Play via EAS (internal testing first) |
 | `apps/mock-escrow` | Mock Reg CF escrow/offering provider (TransactAPI-shaped) for the Layer 2 demo — local and CI only ([ADR-007](docs/adr/ADR-007-regcf-provider-and-mock-escrow.md)) | never deployed |
-| `packages/shared` | Rules shared by web and API: creator tiers (PRD 01 §6.3), policy defaults, money, campaign state machine, request schemas | — |
+| `packages/shared` | Rules shared by web, mobile and API: creator tiers (PRD 01 §6.3), policy defaults, money, campaign state machine, request schemas, API client, checkout rules, fan-facing copy | — |
 | `supabase/` | Postgres schema: double-entry ledger, RLS, money functions, seed | Supabase |
 
 **Start here:**
@@ -23,6 +24,7 @@ pnpm install
 pnpm db:start && pnpm db:reset   # local Supabase (Docker) with migrations + seed
 pnpm dev:web                     # http://localhost:5173
 pnpm dev:api                     # http://localhost:8787/api  (or `npx vercel dev` for both)
+pnpm dev:mobile                  # Expo dev server; open in Expo Go on your phone (docs/MOBILE.md)
 pnpm --filter @fanzup/api worker # settlement + outbox worker
 pnpm test                        # needs TEST_DATABASE_URL (see SETUP.md A6)
 pnpm typecheck && pnpm lint:copy

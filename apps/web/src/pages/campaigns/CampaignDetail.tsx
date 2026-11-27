@@ -9,6 +9,7 @@ import type { CreatorTier } from "@/lib/mock";
 import { api, ApiError, type PerkView, type TrancheView } from "@/lib/api";
 import type { CampaignDetail as Detail } from "@fanzup/shared/schemas";
 import { timeLeft } from "@fanzup/shared/campaign";
+import { CAMPAIGN_FAQ, perkStock, TRANCHE_STATUS_COPY } from "@fanzup/shared/backing-copy";
 import { anonId, rememberSource, sourceFor } from "@/lib/attribution";
 import { useSession } from "@/lib/session";
 import { formatDate, formatInstant, formatMoney, formatNumber } from "@/lib/format";
@@ -24,12 +25,8 @@ import { cn } from "@/lib/utils";
 
 const KIND_ICON = { digital: Sparkles, physical: Package, experience: Ticket } as const;
 
-const FAQ = [
-  { q: "When am I charged?", a: "Your card is charged when you back. If the campaign doesn't reach its goal by the deadline, you're refunded in full automatically — you don't need to do anything." },
-  { q: "What if the goal is reached?", a: "The artist receives the money in stages: part when the campaign is funded, the rest as each milestone below is verified." },
-  { q: "Is backing an investment?", a: "No. Backing gets you the perk you choose. It doesn't give you any share of the artist's earnings or ownership of the project." },
-  { q: "Why do I need an account?", a: "So your backing, your refund if it fails, and your perk are tied to you. You verify your email once, then you're straight back here." },
-];
+/** Shared with the mobile app (CR-004). */
+const FAQ = CAMPAIGN_FAQ;
 
 const localDeadline = (iso: string) => formatInstant(iso);
 
@@ -251,8 +248,7 @@ function MiniStat({ icon, value, label }: { icon: React.ReactNode; value: string
 }
 
 function PerkOption({ perk: p, selected, onSelect, disabled }: { perk: PerkView; selected: boolean; onSelect: () => void; disabled?: boolean }) {
-  const soldOut = p.remaining === 0;
-  const low = p.remaining !== null && p.remaining > 0 && p.limit !== null && p.remaining <= Math.max(10, p.limit * 0.15);
+  const { soldOut, low } = perkStock(p);
   const Icon = KIND_ICON[p.kind];
   return (
     <button type="button" role="radio" aria-checked={selected} disabled={soldOut || disabled} onClick={onSelect} data-testid="perk-option"
@@ -278,9 +274,7 @@ function PerkOption({ perk: p, selected, onSelect, disabled }: { perk: PerkView;
   );
 }
 
-const TRANCHE_STATUS: Record<string, string> = {
-  pending: "Waiting", evidence_submitted: "Evidence submitted", verified: "Verified", released: "Released", rejected: "Not accepted",
-};
+const TRANCHE_STATUS = TRANCHE_STATUS_COPY;
 
 function Story({ story, risks, tranches, goalMinor }: { story: string | null; risks: string | null; tranches: TrancheView[]; goalMinor: number }) {
   const hasMilestones = tranches.length > 1;
