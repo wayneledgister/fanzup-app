@@ -12,7 +12,8 @@
     "agent-worker": "tsx --env-file-if-exists=.env src/agent-worker.ts",
     "start:agent-worker": "node dist/agent-worker.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "api:routes": "tsx scripts/api-routes.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",

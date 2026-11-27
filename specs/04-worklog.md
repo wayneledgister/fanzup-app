@@ -253,3 +253,16 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - Deviation from design: none. One wording note: `categorize` now also reads Stripe React Native's `declineCode` / `stripeErrorCode` fields; Stripe.js shapes are handled as before.
 - `lint:copy` extended to `apps/mobile` (Layer 1 rules on user-facing text) and `packages/shared/src/backing-copy.ts`.
 - Tests run here: shared 88/88, web 12/12, mobile 9/9; `pnpm -r typecheck`, `lint:copy`, web build and `expo export` (iOS + Android) clean. API tests and e2e not run here (CI).
+
+## 2026-11-26 · PR #24 merged (CR-003); dependency bumps #15–#23
+- Agent layer Phase 0 merged after review pass 1. React/React DOM 19.3.0 (#15 + #17 together), TypeScript 7.0.2 (#16), lucide-react 1.52 (#18), `upload-artifact` v7 (#20), 38 minor/patch bumps (#23).
+
+## 2026-11-27 · PRs #25 and #26 merged
+- #25 mobile app MOB-1 (CR-004) merged.
+- #26: Vercel deploys failed after #16 because Vercel compiles `apps/api` with the TypeScript JS API (`transpileModule`), which TypeScript 7 doesn't ship. `apps/api` pins `typescript ~5.9.3`; CI step "Vercel can compile the API" guards it; Dependabot ignores TypeScript major bumps. No CR (a build fix, no product change); recorded as decision log DL-001 in `docs/adr/README.md`.
+
+## 2026-11-27 · SDD documentation audit (`docs/sdd-sync-2026-11-27`)
+- Wayne asked whether wire contracts and docs were being kept in step with the SDD skills. Audit of `main` (sdd-continuity, sdd-document, sdd-evaluate) against everything merged; record `specs/gates/DOC-2026-11-27-audit.md`.
+- Out of date and fixed: no single route index (M1 design §4.2 lacked `DELETE /artist/campaigns/:id`, `POST /staff/flags/:flag`, `GET /internal/tick` and `GET /config.flags`); no traceability matrix (Enterprise tier requires one); no ADR index or decision log (PR #26's TypeScript pin recorded nowhere); no changelog; `specs/session-state.md` still described PR #9 (2026-10-11); FR-PLT-001 didn't list the flags in use; backlog still listed two items done in M1/CR-002; `docs/BUILD_CONVENTIONS.md` said React 18.
+- Added guards so this doesn't drift again: `apps/api/test/api-contract.test.ts` (registered routes == `docs/API.md`, no database), `pnpm trace:check` in the Web CI job (generated `specs/traceability.md` is current). `buildApp` gains an optional `onRoute` callback (tooling only; no behaviour change).
+- Tests run here: `api-contract.test.ts` 1/1; `pnpm --filter @fanzup/api typecheck` clean; `pnpm trace:check` current. Full API suite needs Postgres (CI).

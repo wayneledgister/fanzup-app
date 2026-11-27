@@ -1,6 +1,6 @@
 # ADR-004: Full account before checkout on Supabase Auth; staff second factor via `aal2`
 
-**Status:** Proposed (G2, M1) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** FR-ID-001/002/003/006/007, FR-BCK-002, FR-PRV-001
+**Status:** Accepted (G2, M1; Wayne, 2026-11-27, after build and merge) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** FR-ID-001/002/003/006/007, FR-BCK-002, FR-PRV-001
 
 ## Context
 Wayne chose card G1-B option 3: fans create and verify an account before their first backing. Staff actions need a second factor taken from the verified session (FR-ID-003), and the operator is alone (FR-ID-007).

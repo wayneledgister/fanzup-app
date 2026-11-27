@@ -1,6 +1,6 @@
 # ADR-008: Agent layer as an advisory sidecar with its own database role
 
-**Status:** Proposed (CR-003, AGT G1+G2) · **Date:** 2026-11-26 · **Decider:** Wayne · **Requirements:** FR-AGT-F-001…006, NFR-AGT-01
+**Status:** Accepted (CR-003, AGT G1+G2; Wayne, 2026-11-27, after build and merge) · **Date:** 2026-11-26 · **Decider:** Wayne · **Requirements:** FR-AGT-F-001…006, NFR-AGT-01
 
 ## Context
 FanZuP's operator works twelve staff queues alone in single-operator mode. Agentic AI can prepare much of that work (review packets, weekly review packs, later evidence and break investigations). FanZuP's promise rests on deterministic money code and human controls (FR-ID-003), so whatever we add must not be able to move money, change a money record, or count as a human approval.

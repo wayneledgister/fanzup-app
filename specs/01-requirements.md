@@ -691,6 +691,7 @@ Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the co
 - URL flag overrides work only in development and for signed-in staff.
 - Production bundles don't contain Layer 2 or post-Beta screens unless their flag is on in production.
 - Every flag change is audited.
+- *Flags in use (as built, 2026-11-27):* `flag.layer2` (server, CR-002, needs `REGCF_PROVIDER=mock`), `flag.agents` (server, CR-003), `postBeta` (client-only review flag; no data behind it yet). Each server flag is changed only through `POST /staff/flags/:flag` (privileged `flag.set`) and reported in `GET /config.flags` where a client needs it. A CR that adds a flag adds it to this list.
 **Priority:** P0a · **Source:** E1 C1; Sec S9, Architect
 
 ### FR-PLT-002: Honest production scope
@@ -912,6 +913,7 @@ G1 is approved for M1 only. Before M2:
 4. Success-metric targets and volume assumptions (brief Q3, Q4).
 
 ## Change log
+- 2026-11-27: SDD documentation audit: FR-PLT-001 lists the flags in use (`layer2`, `agents`, `postBeta`). The per-requirement trace now lives in the generated `specs/traceability.md` (all modules); the E1 tables above stay as the E1 record.
 - 2026-10-03: v2 draft created from council E1 (Claude, on Wayne's request "evaluate and come up with an improvement spec … enterprise level"). Scope per E1 card A default.
 - 2026-10-03: revised after G1 pass 1. P0 split into P0a (test-mode beta) / P0b (live money). Added FR-PAY-010 custody integration, FR-PAY-011 undeliverable refunds, FR-CMP-008 discovery, FR-ID-007 single-operator mode, FR-ID-008 payout-account cooling-off, FR-TAX-005 sales tax, FR-PRV-005 marketing/tracking consent, FR-PRV-006 artist use of backer data, FR-PLT-005 safe uploads; NFR-SEC-12..14, NFR-COMP-19..23, NFR-OPS-12..13. System-derived actor + factor on privileged actions; two-person control placed on milestone verification, not release. Restored E1 levels for fan cancel, late-perk remedy, fan problems, export/deletion and status page (P0b). One number per obligation (auto-refund initiated ≤ 1 h, confirmed ≤ 5 business days). Audit payloads carry ids only; address purge outlasts dispute windows. Added E1-conditions trace and Appendix A policy defaults. Checkout per card G1-B default (light account).
 - 2026-10-03: G1 decisions recorded (Wayne): G1-C option 1 (M1 only; PRD trace gates M2), G1-A option 1, G1-B option 3 (full account first), Appendix A accepted. Added §Milestone M1 scope (from `.G1-pragmatist.md`). Rewrote FR-BCK-002 for full account first and aligned FR-ID-001 (N2). FR-BCK-001 charge at backing (N8). New FR-PLT-006 test-money promise (N9).
