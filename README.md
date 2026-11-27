@@ -13,10 +13,13 @@ Direct-to-fan funding for independent artists. *Fund the culture. Own the future
 
 **Start here:**
 - **[docs/SETUP.md](docs/SETUP.md):** step-by-step setup, including everything that needs your accounts.
-- [docs/adr/ADR-001-monorepo.md](docs/adr/ADR-001-monorepo.md): why this is one repo.
+- [docs/API.md](docs/API.md): every API route, its access level, gate, shared contract and spec (CI fails if it drifts from the code).
+- [docs/adr/](docs/adr/README.md): architecture decisions (ADR index and decision log); [ADR-001](docs/adr/ADR-001-monorepo.md) explains why this is one repo.
+- [docs/MOBILE.md](docs/MOBILE.md): running the iOS/Android app and the store path.
+- [CHANGELOG.md](CHANGELOG.md): what each merged PR changed.
 - [docs/CONSOLIDATION.md](docs/CONSOLIDATION.md): how the Figma mockups became this app.
 - [docs/council/](docs/council/): decision records.
-- [specs/](specs/): change requests and backlog.
+- [specs/](specs/): requirements, designs, plans, change requests ([index](specs/changes/000-index.md)), backlog, the generated [traceability matrix](specs/traceability.md) and the [session state](specs/session-state.md).
 
 ## Everyday commands
 ```bash
@@ -28,6 +31,8 @@ pnpm dev:mobile                  # Expo dev server; open in Expo Go on your phon
 pnpm --filter @fanzup/api worker # settlement + outbox worker
 pnpm test                        # needs TEST_DATABASE_URL (see SETUP.md A6)
 pnpm typecheck && pnpm lint:copy
+pnpm trace                       # regenerate specs/traceability.md (CI runs pnpm trace:check)
+pnpm --filter @fanzup/api api:routes  # list API routes (docs/API.md must match; checked by the API tests)
 pnpm e2e                         # golden + Layer 2 journeys; needs the local stack + mock escrow (see .github/workflows/ci.yml job e2e)
 ```
 

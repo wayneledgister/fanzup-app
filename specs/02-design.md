@@ -168,9 +168,11 @@ Base path `/api/v1`. JSON. **The request and response shapes below are defined o
 | staff | user + row in `staff` + token claim `aal = 'aal2'` → else `403 second_factor_required` |
 
 ### 4.2 Endpoints
+Paths are relative to `/api/v1`, except `GET /health` (`/api/health`) and `GET /internal/tick` (`/api/internal/tick`). Every route the API registers, across M1, Layer 2, the agent layer and later CRs, is indexed in [`docs/API.md`](../docs/API.md), which CI checks against the running route table; Layer 2 routes are specified in L2 design §9 and agent routes in agents design §5.
+
 | Method & path | Level | Request | Response | Errors |
 |---|---|---|---|---|
-| `GET /config` | public | — | `{ provider: "sandbox"\|"stripe-test", testMode: true, stripePublishableKey: string\|null, legal: {termsVersion, privacyVersion} }` | — |
+| `GET /config` | public | — | `{ provider: "sandbox"\|"stripe-test", testMode: true, stripePublishableKey: string\|null, legal: {termsVersion, privacyVersion}, flags?: { layer2, layer2Completion?, … } }` *(flags added by CR-002; the full shape is `PublicConfig` in `@fanzup/shared/schemas`, and each later flag is added by the CR that owns it)* | — |
 | `GET /campaigns?type=&tab=live\|funded&cursor=&limit=` | public | — | `{ campaigns: CampaignCard[], nextCursor }`, ≤ 24 per page (`limit` 1–24, default 24), order `ends_at asc, created_at desc, id asc` (live: "ending soonest, then newest", FR-CMP-008) or `settled_at desc, id desc` (funded); never by money. **Funded tab = funded outcomes only:** `funded`, `released`, or `closed` with a released tranche (closed-from-released); a `closed` campaign that came from `refunded` never appears (PR #9 review) | 400 (bad cursor, `limit` > 24) |
 | `GET /campaigns/:slug` | public | — | `{ campaign: CampaignCard & {story, risks, startsAt}, perks: [{id,title,description,kind,priceMinor,remaining,fulfillBy}], tranches: [{seq,pct,milestone,status,targetDate,verifiedAt,releasedAt}] }` | 404 |
 | `POST /events` | public | `{ name: "perk_selected", campaignId, perkId?, anonId (uuid), source? (≤ 40 chars, `[a-z0-9_-]`) }`; body ≤ 1 KB; the campaign must exist and be public (G2 condition 18). Only `perk_selected`: `checkout_started` and `backing_confirmed` are recorded by the `backings` trigger and `account_created` by the new-user trigger (PR #8 review fix 9) | 202 | 400, 404 |
@@ -186,6 +188,7 @@ Base path `/api/v1`. JSON. **The request and response shapes below are defined o
 | `PATCH /artist/campaigns/:id` | artist (draft or revisions) | partial of the above | 200 | 404, 409 |
 | `PUT /artist/campaigns/:id/perks` | artist (draft) | `[{ id?, title, description?, kind, priceMinor, quantityLimit?, fulfillBy, shipsTo? }]` | 200 | 400 |
 | `PUT /artist/campaigns/:id/tranches` | artist (draft) | `[{ seq, pct, milestone?, evidenceRequired?, targetDate? }]` (Σ pct = 100, 2–3 tranches) | 200 | 400 |
+| `DELETE /artist/campaigns/:id` *(as built; recorded 2026-11-27)* | artist (draft only) | — | 204 | 404, 409 `not_editable` (only drafts) |
 | `GET /artist/campaigns/:id` *(added in build, PR #9, D-007)* | artist | — | campaign + `tranches: [{ id, seq, pct, milestone, status, releasedMinor }]` (milestone ids are needed to submit evidence) | 404 |
 | `POST /artist/campaigns/:id/submit` · `/publish` | artist | — | 200 `{ status, endsAt? }` | 409 rule (submit needs `identity_status = 'verified'`, i.e. a ready payout account, §3.5.2) |
 | `POST /artist/tranches/:id/evidence` | artist (funded campaign) | `{ notes, links: url[] ≤ 10 }` | 201 | 409 |
@@ -197,6 +200,7 @@ Base path `/api/v1`. JSON. **The request and response shapes below are defined o
 | `POST /staff/provider-events/:id/replay` · `/staff/outbound-ops/:id/replay` | staff | `{ reason }` | 200 | 409 |
 | `POST /staff/recon/run` · `GET /staff/recon/latest` | staff | — | run + open breaks | — |
 | `POST /staff/recon/override` | staff | `{ reason }` | 200 `{ action }` (delayed per FR-ID-007, N4) | — |
+| `POST /staff/flags/:flag` *(added by CR-002; `agents` by CR-003)* | staff | `{ on: boolean, reason }` | 200 `{ action }` (privileged `flag.set`, audited) | 404 unknown flag; 409 `provider_missing` (`layer2` on without `REGCF_PROVIDER=mock`). Flags: `layer2` (L2 design §2), `agents` (agents design §5) |
 | `GET /staff/trace/:correlationId` | staff | — | `{ audit[], ledger[], outbox[], providerEvents[], outboundOps[], actions[], notifications[] }` ordered by time | — |
 | `GET /staff/weekly-review?weekStart=` · `POST /staff/weekly-review/signoff` | staff | `{ weekStart, note?, reason }` (typed reason ≥ 10 chars like every privileged action; the executor writes the sign-off row) | list / 201 `{ signoff, action }` | 400 `reason_required`, 409 `already_signed` |
 | `POST /webhooks/stripe` | Stripe signature | raw body | 200 `{received:true}` after the row commits — including an event for a connected account that isn't one of our artists', which is stored with `status='ignored'` (§5); 400 `bad_signature`; 400 `livemode_rejected`. No other 4xx (review round 3: there is no `account_mismatch` response) | — |
@@ -204,6 +208,7 @@ Base path `/api/v1`. JSON. **The request and response shapes below are defined o
 | `POST /dev/sandbox/tick?now=` | same | — | `{ holdsReleased, events, settled: [{ id, outcome, correlationId }], processed, ops, recon }` — each settlement runs under its own correlation id (exit test 4 traces it) | — |
 | `POST /dev/sandbox/topup` *(PR #9)* | same | `{ amountMinor }` | 200 — platform money into the sandbox balance (the §12.1 float; recon skips it as an adjustment) | 400 |
 | `GET /health` | public | — | `{ ok, provider, testMode, worker: { lastBeatAt, ageSeconds } }` | 503 when the DB is unreachable |
+| `GET /internal/tick` *(serverless fallback, ADR-002; not under `/v1`)* | `Authorization: Bearer $CRON_SECRET` | — | one worker tick's result | 404 when `CRON_SECRET` is unset; 401 wrong secret |
 
 ### 4.3 Checkout failure categories (FR-BCK-001; G2 condition 12)
 | Provider signal | Category shown | Next step shown |
@@ -427,6 +432,7 @@ Every other route keeps its mock data until M2. **Remaining "escrow" copy outsid
 3. **Hosted `/api/*` stays healthy through M1.** The earlier hosted 500 was fixed on `main` by 4a18c1b (the Vercel API entry is now built as CommonJS `dist/server.cjs`). The remaining risk is the intended fail-closed 503 once M1 merges and before Stripe test keys are set (§9, §12.1). M1 is still proven in CI and locally; the hosted run is exit test 8 (manual).
 
 ## Change log
+- 2026-11-27: SDD documentation audit: §4.2 gains the as-built routes it was missing (`DELETE /artist/campaigns/:id`, `POST /staff/flags/:flag`, `GET /internal/tick`) and `GET /config.flags`; points at `docs/API.md` (route index, CI drift test).
 - 2026-10-11: PR #12 review round 5 (follow-up to merged M1 code): §5 "Attempt generations" — `outbound_ops.attempt_gen`/`failed_refs` (migration `20261011001200`); provider key `<key>:r<gen>` after generation 0, metadata `outbound_attempt`, lookups by current generation; a refund found/returned/announced `failed`/`canceled` → op `failed` + alert, never re-adopted or `sent`; `outbound_op.replay` of a failed generation starts the next one (one new refund). §7 lost-confirmation lookup uses the same transition.
 - 2026-10-11: PR #12 review round 4 (follow-up to merged M1 code): §7 a refund the lost-confirmation lookup finds failed/canceled → op `failed` + alert (as `refund.failed`); `outbound_op.replay` also takes a `sent` op under an open `op_unconfirmed`.
 - 2026-10-11: PR #12 review round 3 (follow-up to merged M1 code): §7 in-flight allowance for a `sent` op limited to `recon.inflightGraceMinutes`; after it recon looks the op up (`findRefund`/`findTransfer`) and records the confirmation, or opens the new non-pausing `op_unconfirmed` break (migration `20261011001000`).

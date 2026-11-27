@@ -48,7 +48,10 @@ export const TRUSTED_PROXY_HOPS = 1;
 const defaultNotifier = createNotifier();
 export const jobDeps = (d: Deps): JobDeps => ({ sql: d.sql, provider: d.provider, notify: d.notify ?? defaultNotifier, extraSteps: [...(d.extraSteps ?? []), (now) => executeDueActions(d, now), ...(d.regcf ? [(now: Date) => l2Tick(d, now)] : [])] });
 
-export async function buildApp(deps: Deps): Promise<FastifyInstance> {
+/** Build options for tooling only. `onRoute` sees every route as it is registered (route inventory, docs/API.md). */
+export interface BuildOptions { onRoute?: (route: { method: string | string[]; url: string }) => void }
+
+export async function buildApp(deps: Deps, opts: BuildOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger:
       deps.env.NODE_ENV === "test"
@@ -65,6 +68,11 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     trustProxy: (_addr: string, hop: number) => hop < TRUSTED_PROXY_HOPS,
     genReqId: (req) => acceptCorrelationId(req.headers["x-correlation-id"]),
   });
+
+  if (opts.onRoute) {
+    const onRoute = opts.onRoute;
+    app.addHook("onRoute", (r) => onRoute({ method: r.method, url: r.url }));
+  }
 
   // bigint columns (cents, identity ids) serialise as numbers; every value M1 returns is within 2^53.
   app.setReplySerializer((payload) => JSON.stringify(payload, (_k, v) => (typeof v === "bigint" ? Number(v) : v)));
