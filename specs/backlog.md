@@ -83,3 +83,8 @@ Origin: `specs/agents/00-strategy.md` §4. Each is built when its milestone's da
 | Mobile: in-app account deletion (with FR-PRV-003) — **blocks public store release** | CR-004, FR-MOB-009 | Store requirement; privacy | S (after FR-PRV-003) | 2026-11-27 |
 | Mobile: device e2e (Maestro) for the golden journey on EAS | CR-004 | Catches native regressions the bundle check can't | M | 2026-11-27 |
 | Mobile: artist screens (campaign status, milestone evidence) | CR-004 | Artists manage on the go | L | 2026-11-27 |
+
+## Services marketplace, after MKT-1 (CR-005)
+- MKT-2 (counsel-gated, D-MKT-1): quotes, paid bookings on the ledger through `PaymentProvider`, held until delivery if counsel allows, provider payout onboarding + tax info + sanctions screening, disputes and refunds (FR-MKT-013…016, ADR-010). Fee model set after the beta (D-MKT-2).
+- MKT-3: reviews after completed bookings only (FTC 16 CFR 465), campaign-tranche link and provider credits on campaign pages, in-app message threads and notifications, provider tools on mobile (FR-MKT-017…020).
+- Before the flag is on for real users: Provider Terms (counsel), privacy-notice update for service requests and provider contact data.

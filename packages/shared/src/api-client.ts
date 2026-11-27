@@ -6,6 +6,9 @@
 import type {
   BackCampaignRequest, BackCampaignResponse, BackingStatus, CampaignDetail, CampaignList, Me, MyBacking, PublicConfig, FunnelEventRequest,
 } from "./schemas";
+import type {
+  ListingInput, MyProvider, ProviderPage, ProviderProfileInput, RespondInput, ServiceList, ServiceRequestInput, ServiceRequestView,
+} from "./marketplace";
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string, public correlationId?: string, public details?: Record<string, unknown>) {
@@ -77,6 +80,27 @@ export function createApiClient(opts: ApiClientOptions) {
     backing: (id: string) => request<BackingStatus>(`/v1/backings/${encodeURIComponent(id)}`),
     myBackings: () => request<{ backings: MyBacking[] }>("/v1/me/backings"),
     event: (e: FunnelEventRequest) => request<null>("/v1/events", { method: "POST", body: JSON.stringify(e), auth: false }).catch(() => null),
+    // ── Services marketplace (CR-005, MKT-1; no money) ──
+    services: (p: { category?: string; q?: string; remote?: boolean; cursor?: string | null } = {}, signal?: AbortSignal) => {
+      const q = new URLSearchParams();
+      if (p.category) q.set("category", p.category);
+      if (p.q) q.set("q", p.q);
+      if (p.remote) q.set("remote", "true");
+      if (p.cursor) q.set("cursor", p.cursor);
+      const qs = q.toString();
+      return request<ServiceList>(`/v1/services${qs ? `?${qs}` : ""}`, { signal, auth: false });
+    },
+    serviceProvider: (slug: string) => request<ProviderPage>(`/v1/services/providers/${encodeURIComponent(slug)}`, { auth: false }),
+    sendServiceRequest: (body: ServiceRequestInput) => request<ServiceRequestView>("/v1/services/requests", { method: "POST", body: JSON.stringify(body) }),
+    myServiceRequests: () => request<{ items: ServiceRequestView[] }>("/v1/services/requests"),
+    withdrawServiceRequest: (id: string) => request<ServiceRequestView>(`/v1/services/requests/${encodeURIComponent(id)}/withdraw`, { method: "POST" }),
+    myProvider: () => request<{ provider: MyProvider | null }>("/v1/provider"),
+    saveProvider: (body: ProviderProfileInput) => request<{ provider: MyProvider }>("/v1/provider", { method: "PUT", body: JSON.stringify(body) }),
+    saveListings: (body: ListingInput[]) => request<{ provider: MyProvider }>("/v1/provider/listings", { method: "PUT", body: JSON.stringify(body) }),
+    submitProvider: () => request<{ provider: MyProvider }>("/v1/provider/submit", { method: "POST" }),
+    providerRequests: () => request<{ items: ServiceRequestView[] }>("/v1/provider/requests"),
+    respondServiceRequest: (id: string, body: RespondInput) =>
+      request<ServiceRequestView>(`/v1/provider/requests/${encodeURIComponent(id)}/respond`, { method: "POST", body: JSON.stringify(body) }),
     /** Sandbox provider only (local/CI): what a card form submission does at a real processor. */
     sandboxPay: (backingId: string, outcome: "succeed" | "decline") =>
       request<{ status: string }>(`/v1/dev/sandbox/pay/${encodeURIComponent(backingId)}`, { method: "POST", body: JSON.stringify({ outcome }), auth: false }),

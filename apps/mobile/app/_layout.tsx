@@ -36,6 +36,8 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="campaigns/[slug]" options={{ title: "" }} />
           <Stack.Screen name="checkout/[slug]" options={{ title: "Checkout" }} />
+          <Stack.Screen name="services/[slug]" options={{ title: "" }} />
+          <Stack.Screen name="services/requests" options={{ title: "Service requests" }} />
           <Stack.Screen name="auth/login" options={{ title: "Log in" }} />
           <Stack.Screen name="auth/signup" options={{ title: "Create your account" }} />
           <Stack.Screen name="auth/verify" options={{ title: "Verify your email" }} />

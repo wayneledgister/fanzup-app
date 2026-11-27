@@ -61,7 +61,7 @@ describe("layer2 flag (L2-T-012)", () => {
     const store = stubBrowser("?flags=layer2");
     const f = await load();
     expect(f.isEnabled("layer2")).toBe(true);
-    expect(JSON.parse(store.get("fanzup.flags")!)).toEqual({ layer2: true, postBeta: false });
+    expect(JSON.parse(store.get("fanzup.flags")!)).toEqual({ layer2: true, postBeta: false, marketplace: false });
     expect(f.resolveFlag("layer2", f.isEnabled("layer2"), { layer2: false })).toBe(true);
     expect(f.resolveFlag("layer2", false, { layer2: true })).toBe(true);
     expect(f.resolveFlag("layer2", false, { layer2: false })).toBe(false);
@@ -84,5 +84,15 @@ describe("layer2 flag (L2-T-012)", () => {
     const f = await load();
     expect(f.isEnabled("postBeta")).toBe(true);
     expect(f.resolveFlag("postBeta", f.isEnabled("postBeta"), { layer2: false })).toBe(true);
+  });
+});
+
+describe("marketplace flag (CR-005, FR-MKT-001)", () => {
+  it("is the server's flag in a production build and ignores client overrides", async () => {
+    const f = await import("../src/lib/flags");
+    expect(f.resolveFlag("marketplace", true, { marketplace: false }, true)).toBe(false);
+    expect(f.resolveFlag("marketplace", false, { marketplace: true }, true)).toBe(true);
+    expect(f.resolveFlag("marketplace", false, null, true)).toBe(false);
+    expect(f.resolveFlag("marketplace", true, null, false)).toBe(true);
   });
 });

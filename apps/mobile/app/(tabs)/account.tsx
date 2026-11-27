@@ -8,6 +8,7 @@ import { SignInPrompt } from "@/components/SignInPrompt";
 import { apiHost, env } from "@/lib/env";
 import { openWeb } from "@/lib/links";
 import { useSession } from "@/lib/session";
+import { useConfig } from "@/lib/config";
 import { color, space, TOUCH } from "@/theme";
 
 const LINKS: { label: string; path: string; icon: React.ComponentProps<typeof Ionicons>["name"] }[] = [
@@ -20,6 +21,7 @@ const LINKS: { label: string; path: string; icon: React.ComponentProps<typeof Io
 
 export default function Account() {
   const session = useSession();
+  const marketplace = !!useConfig()?.flags?.marketplace;
   return (
     <Screen>
       <Eyebrow>Account</Eyebrow>
@@ -41,6 +43,7 @@ export default function Account() {
               </View>
             </Callout>
           )}
+          {marketplace && <Button variant="secondary" icon="construct-outline" onPress={() => router.push("/services/requests")}>My service requests</Button>}
           <Button variant="secondary" icon="log-out-outline" onPress={() => session.signOut()}>Log out</Button>
         </Card>
       ) : !session.configured ? (
