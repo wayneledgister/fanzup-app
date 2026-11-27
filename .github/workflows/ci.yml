@@ -24,6 +24,8 @@ jobs:
       - run: pnpm --filter @fanzup/web typecheck
       - run: pnpm --filter @fanzup/web test
       - run: pnpm lint:copy
+      - name: Specs in step with the code (traceability matrix is current; SDD)
+        run: pnpm trace:check
       - run: pnpm --filter @fanzup/web build
 
   mobile:

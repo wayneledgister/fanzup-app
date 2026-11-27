@@ -5,7 +5,7 @@
 Read this, `docs/CONSOLIDATION.md`, and `docs/brand/BRAND_GUIDELINES.md` §3–§8 before building a page. `src/pages/public/Landing.tsx` is the reference implementation: match its quality bar.
 
 ## Stack
-Vite 6 · React 18 · TypeScript (strict) · Tailwind v4 (`src/styles/index.css` holds all tokens) · react-router 7 (`createBrowserRouter`) · lucide-react icons. Import alias `@/` → `src/`.
+Vite 6 · React 19.3 · TypeScript 7 (strict; `apps/api` stays on 5.9, decision log DL-001) · Tailwind v4 (`src/styles/index.css` holds all tokens) · react-router 7 (`createBrowserRouter`) · lucide-react 1.x icons. Import alias `@/` → `src/`.
 
 Routes are generated: edit `scripts/routes.manifest.json` then run `node scripts/gen-routes.mjs`. Each page is a **default export** at `src/pages/<area>/<Name>.tsx`. The manifest's 5th column names the wireframe source in `/home/claude/figma-src/fps/` (Fan Profile Setup) or `/home/claude/figma-src/fanzup/` (FanZuP).
 
