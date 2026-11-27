@@ -1,6 +1,6 @@
 # ADR-006: End-to-end tests on the Supabase CLI stack in CI, sandbox provider, Mailpit
 
-**Status:** Proposed (G2, M1) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** NFR-QA-02, M1 exit tests 5–7
+**Status:** Accepted (G2, M1; Wayne, 2026-11-27, after build and merge) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** NFR-QA-02, M1 exit tests 5–7
 
 ## Context
 M1 needs a browser test of the golden journey with **real Supabase Auth** (sign-up, confirmation email, sign-in) in CI. Stripe test keys aren't available to CI (no secrets in the repo), and Stripe test mode can't be time-travelled to a campaign deadline.

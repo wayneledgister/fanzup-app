@@ -1,6 +1,6 @@
 # ADR-003: Payment-provider boundary — event inbox, two-phase outbound, sandbox that speaks events
 
-**Status:** Proposed (G2, M1) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** FR-PAY-002/003/004/007/008, NFR-QA-01
+**Status:** Accepted (G2, M1; Wayne, 2026-11-27, after build and merge) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** FR-PAY-002/003/004/007/008, NFR-QA-01
 
 ## Context
 Until a custodian is chosen (E1 card B), Stripe test mode plays the provider (FR-PAY-010). E1 found the money path trusted the processor's word at the wrong moments: webhooks acted on before being stored (B1), outbound refunds and payouts that could execute twice after a retry (B3), and no way to prove the ledger matches the money (B6). CI can't use Stripe (no keys in the repo, and `stripe-mock` is stateless).

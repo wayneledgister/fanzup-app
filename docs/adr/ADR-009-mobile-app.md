@@ -1,6 +1,6 @@
 # ADR-009: Native mobile app with Expo + React Native, sharing business rules with the web
 
-**Status:** Proposed (CR-004) · **Date:** 2026-11-27 · **Decider:** Wayne · **Requirements:** FR-MOB-*, NFR-MOB-01…08
+**Status:** Accepted (CR-004; Wayne, 2026-11-27, after build and merge) · **Date:** 2026-11-27 · **Decider:** Wayne · **Requirements:** FR-MOB-*, NFR-MOB-01…08
 
 ## Context
 Wayne wants a React Native app on the App Store and Google Play, and the web app must stay fully supported. The web app (Vite + React DOM, 100+ routes, Playwright e2e) is the M1 deliverable and works. The M1 API already serves everything a fan needs; money is only ever moved by the API and worker. The founder's Mac has about 12 GB free and no full Xcode.
