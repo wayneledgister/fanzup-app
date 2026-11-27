@@ -33,8 +33,10 @@ describe("marketplace shared rules", () => {
     expect(ServiceRequestInput.safeParse({ listingId: id, brief: "Mix 4 songs for an EP due in March.", shareEmail: false }).success).toBe(true);
   });
   it("needs a note unless staff list the provider", () => {
-    expect(ProviderReviewInput.safeParse({ decision: "listed", reason: "Checked portfolio" }).success).toBe(true);
-    expect(ProviderReviewInput.safeParse({ decision: "changes_requested", reason: "Checked portfolio" }).success).toBe(false);
+    expect(ProviderReviewInput.safeParse({ decision: "listed", reason: "Checked portfolio", version: "1" }).success).toBe(true);
+    expect(ProviderReviewInput.safeParse({ decision: "changes_requested", reason: "Checked portfolio", version: "1" }).success).toBe(false);
+    expect(ProviderReviewInput.safeParse({ decision: "listed", reason: "Checked portfolio" }).success).toBe(false);
+    expect(ProviderProfileInput.safeParse({ ...profile, slug: "requests" }).success).toBe(false);
   });
   it("labels prices as starting-at guides, never fees", () => {
     expect(priceFromLabel(25_000, "song")).toBe("Starting at $250 per song");

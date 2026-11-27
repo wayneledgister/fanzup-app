@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { ArrowRight, CircleAlert, Inbox, Mail, RefreshCw } from "lucide-react";
 import { Badge, Button, Callout, Card, Container, EmptyState, PageHeader } from "@/components/brand";
 import { RequireAccount } from "@/components/RequireAccount";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/format";
 import { MKT_OFF_PLATFORM_NOTICE, categoryLabel, requestStatusCopy, type ServiceRequestView } from "@fanzup/shared/marketplace";
 
@@ -27,14 +27,22 @@ export const toneOf = (s: ServiceRequestView["status"]) => {
 function MyServiceRequests() {
   const [items, setItems] = useState<ServiceRequestView[] | null>(null);
   const [error, setError] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const load = () => {
     setError(false);
     api.myServiceRequests().then((r) => setItems(r.items)).catch(() => setError(true));
   };
   useEffect(load, []);
   const withdraw = async (id: string) => {
-    const r = await api.withdrawServiceRequest(id).catch(() => null);
-    if (r) setItems((xs) => xs?.map((x) => (x.id === id ? r : x)) ?? null);
+    setWithdrawError(null);
+    try {
+      const r = await api.withdrawServiceRequest(id);
+      setItems((xs) => xs?.map((x) => (x.id === id ? r : x)) ?? null);
+    } catch (e) {
+      // Review finding 8: say why, and reload if the provider already answered (409).
+      setWithdrawError(e instanceof ApiError ? e.message : "We couldn't withdraw that request. Try again.");
+      if (e instanceof ApiError && e.status === 409) load();
+    }
   };
 
   return (
@@ -45,6 +53,7 @@ function MyServiceRequests() {
           <Button variant="ghost" size="sm" onClick={load}><RefreshCw /> Retry</Button>
         </Callout>
       )}
+      {withdrawError && <p className="text-sm text-error" role="alert">{withdrawError}</p>}
       {!items && !error && <div className="h-40 animate-pulse rounded-lg border border-line bg-surface" aria-busy="true" aria-label="Loading your requests" />}
       {items && items.length === 0 && (
         <EmptyState icon={<Inbox />} title="No requests yet" action={<Button asChild><Link to="/services">Find services <ArrowRight /></Link></Button>}>

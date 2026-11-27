@@ -40,9 +40,15 @@ export type RequestStatus = (typeof REQUEST_STATUSES)[number];
 const HttpsUrl = z.string().max(300).url().refine((u) => u.startsWith("https://"), "Links must start with https://");
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date like 2027-03-01");
 
+/** Words that are routes under /services (review finding 4). Must match the migration's check. */
+export const RESERVED_SLUGS = ["requests", "new", "edit", "provider", "providers", "search"] as const;
+
 /** FR-MKT-003. */
 export const ProviderProfileInput = z.object({
-  slug: z.string().regex(/^[a-z0-9-]{3,60}$/, "Use 3–60 lowercase letters, numbers or dashes"),
+  slug: z
+    .string()
+    .regex(/^[a-z0-9-]{3,60}$/, "Use 3–60 lowercase letters, numbers or dashes")
+    .refine((s) => !(RESERVED_SLUGS as readonly string[]).includes(s), "That address is reserved. Pick another."),
   displayName: z.string().trim().min(2).max(80),
   headline: z.string().trim().min(5).max(120),
   bio: z.string().max(2000).nullish(),
@@ -56,6 +62,8 @@ export type ProviderProfileInput = z.infer<typeof ProviderProfileInput>;
 
 /** FR-MKT-004. */
 export const ListingInput = z.object({
+  /** Present when updating an existing listing, so open requests keep pointing at it (review finding 1). */
+  id: z.string().uuid().optional(),
   category: Category,
   title: z.string().trim().min(3).max(90),
   description: z.string().max(2000).nullish(),
@@ -84,7 +92,7 @@ export type RespondInput = z.infer<typeof RespondInput>;
 
 /** FR-MKT-008. A note is required unless the decision is to list. */
 export const ProviderReviewInput = z
-  .object({ decision: z.enum(["listed", "changes_requested", "suspended"]), note: z.string().max(1000).nullish(), reason: z.string() })
+  .object({ decision: z.enum(["listed", "changes_requested", "suspended"]), note: z.string().max(1000).nullish(), reason: z.string(), version: z.string().min(1) })
   .refine((v) => v.decision === "listed" || (v.note ?? "").trim().length >= 5, { message: "Add a note for the provider", path: ["note"] });
 
 // ── Responses ──

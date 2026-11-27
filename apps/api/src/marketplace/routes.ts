@@ -17,7 +17,7 @@ import { asService, n, type Claims, type Tx } from "../db";
 import { HttpError, requireVerifiedUser } from "../lib/auth";
 import { privileged, requireStaff } from "../staff";
 import type { Deps } from "../app";
-import { audit } from "./service";
+import { audit, PROVIDER_CHANGED, REVIEW_FROM, VERSION } from "./service";
 
 const M = POLICY.marketplace;
 
@@ -135,7 +135,9 @@ export const marketplaceRoutes = (d: Deps): FastifyPluginAsync => async (app) =>
   app.post("/requests", async (req, reply) => {
     const u = await requireVerifiedUser(req, d.verify, d.sql);
     const b = ServiceRequestInput.parse(req.body);
-    if (b.neededBy && b.neededBy <= new Date().toISOString().slice(0, 10)) throw new HttpError(400, "invalid_request", "Pick a needed-by date in the future.");
+    // The client sends its local calendar date; allow "tomorrow" anywhere west of UTC (review finding 3).
+    const yesterdayUtc = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    if (b.neededBy && b.neededBy <= yesterdayUtc) throw new HttpError(400, "invalid_request", "Pick a needed-by date in the future.");
     const row = await asService(d.sql, async (tx) => {
       const [artist] = await tx<{ id: string }[]>`select id from public.artists where owner_id = ${u.sub} order by created_at limit 1`;
       if (!artist) throw new HttpError(403, "no_artist", "Create your artist profile first, then you can request services.");
@@ -224,7 +226,15 @@ export const providerRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.put("/", async (req) => {
     const u = userOf(req);
     const b = ProviderProfileInput.parse(req.body);
-    return asService(d.sql, async (tx) => {
+    return saveProfile(u, b).catch((e: { code?: string; constraint_name?: string }) => {
+      // Two saves racing past the checks below hit the unique constraints (review finding 5).
+      if (e.code === "23505" && e.constraint_name === "service_providers_slug_key") throw new HttpError(409, "slug_taken", "That profile address is taken. Try another.");
+      if (e.code === "23505" && e.constraint_name === "service_providers_owner_id_key") throw new HttpError(409, "already_exists", "Your profile was just created. Reload the page.");
+      throw e;
+    });
+  });
+  const saveProfile = (u: Claims, b: ReturnType<typeof ProviderProfileInput.parse>) =>
+    asService(d.sql, async (tx) => {
       const [existing] = await tx<ProviderRow[]>`select * from public.service_providers where owner_id = ${u.sub} for update`;
       const [taken] = await tx`select 1 from public.service_providers where slug = ${b.slug} and owner_id <> ${u.sub}`;
       if (taken) throw new HttpError(409, "slug_taken", "That profile address is taken. Try another.");
@@ -252,9 +262,10 @@ export const providerRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
       if (status !== existing.status) await audit(tx, u.sub, "marketplace.provider.resubmitted", "service_provider", p.id, { reason: "edited_while_listed" });
       return { provider: await myView(tx, p) };
     });
-  });
 
-  // FR-MKT-004: listings replaced wholesale.
+  // FR-MKT-004: the provider sends the full list. Rows carrying an `id` are updated in place (ids stay stable, so open
+  // requests keep their listing and the one-open-request rule holds; review finding 1); rows without one are new; rows
+  // left out are deleted.
   app.put("/listings", async (req) => {
     const u = userOf(req);
     const ls = ListingsInput.parse(req.body);
@@ -264,20 +275,35 @@ export const providerRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
       const bad = ls.find((l) => !p.categories.includes(l.category));
       if (bad) throw new HttpError(400, "invalid_request", "Each listing's category must be one of your profile's categories.");
       const before = await listingsOf(tx, p.id, false);
-      await tx`delete from public.service_listings where provider_id = ${p.id}`;
+      const known = new Set(before.map((l) => l.id));
+      const ids = ls.map((l) => l.id).filter((x): x is string => !!x);
+      if (ids.some((x) => !known.has(x)) || new Set(ids).size !== ids.length) throw new HttpError(400, "invalid_request", "One of those services isn't yours. Reload the page.");
+      await tx`delete from public.service_listings where provider_id = ${p.id} and not (id = any (${ids}::uuid[]))`;
       for (const [i, l] of ls.entries()) {
-        await tx`insert into public.service_listings (provider_id, position, category, title, description, price_from_minor, price_unit, turnaround_days, active)
-                 values (${p.id}, ${i}, ${l.category}, ${l.title}, ${l.description ?? null}, ${l.priceFromMinor ?? null}, ${l.priceUnit}, ${l.turnaroundDays ?? null}, ${l.active})`;
+        if (l.id) {
+          await tx`update public.service_listings
+                      set position = ${i}, category = ${l.category}, title = ${l.title}, description = ${l.description ?? null},
+                          price_from_minor = ${l.priceFromMinor ?? null}, price_unit = ${l.priceUnit}, turnaround_days = ${l.turnaroundDays ?? null}, active = ${l.active}
+                    where id = ${l.id} and provider_id = ${p.id}`;
+        } else {
+          await tx`insert into public.service_listings (provider_id, position, category, title, description, price_from_minor, price_unit, turnaround_days, active)
+                   values (${p.id}, ${i}, ${l.category}, ${l.title}, ${l.description ?? null}, ${l.priceFromMinor ?? null}, ${l.priceUnit}, ${l.turnaroundDays ?? null}, ${l.active})`;
+        }
       }
       const after = await listingsOf(tx, p.id, false);
-      const strip = (x: ListingRow[]) => JSON.stringify(x.map(({ id: _id, ...rest }) => ({ ...rest, price_from_minor: rest.price_from_minor == null ? null : n(rest.price_from_minor) })));
+      const norm = (x: ListingRow[]) => JSON.stringify(x.map((r) => ({ ...r, price_from_minor: r.price_from_minor == null ? null : n(r.price_from_minor) })));
       let status = p.status;
-      if (p.status === "listed" && strip(before) !== strip(after)) {
-        status = "in_review";
-        await tx`update public.service_providers set status = 'in_review', submitted_at = now() where id = ${p.id}`;
-        await audit(tx, u.sub, "marketplace.provider.resubmitted", "service_provider", p.id, { reason: "listings_changed" });
+      if (norm(before) !== norm(after)) {
+        if (p.status === "listed") {
+          status = "in_review";
+          await tx`update public.service_providers set status = 'in_review', submitted_at = now() where id = ${p.id}`;
+          await audit(tx, u.sub, "marketplace.provider.resubmitted", "service_provider", p.id, { reason: "listings_changed" });
+        } else {
+          // Bump the profile's version, so a staff decision on what they read before this change is refused.
+          await tx`update public.service_providers set updated_at = now() where id = ${p.id}`;
+        }
       }
-      // Open requests point at listing ids that no longer exist; they keep their own title/category copy.
+      // A deleted listing's open requests keep their own title/category copy (listing_id becomes null).
       return { provider: await myView(tx, { ...p, status }) };
     });
   });
@@ -334,11 +360,11 @@ export const marketplaceStaffRoutes = (d: Deps): FastifyPluginAsync => async (ap
   app.get("/providers", async (req) => {
     const q = z.object({ status: z.enum(["draft", "in_review", "changes_requested", "listed", "suspended"]).default("in_review") }).parse(req.query);
     return asService(d.sql, async (tx) => {
-      const ps = await tx<(ProviderRow & { submitted_at: Date | null })[]>`
-        select * from public.service_providers where status = ${q.status} order by submitted_at nulls last, created_at limit 100`;
+      const ps = await tx<(ProviderRow & { submitted_at: Date | null; version: string })[]>`
+        select *, ${tx.unsafe(VERSION)} as version from public.service_providers where status = ${q.status} order by submitted_at nulls last, created_at limit 100`;
       const items = [];
       for (const p of ps) {
-        items.push({ ...pageView(p, await listingsOf(tx, p.id, false)), id: p.id, status: p.status, reviewNote: p.review_note, submittedAt: p.submitted_at?.toISOString() ?? null });
+        items.push({ ...pageView(p, await listingsOf(tx, p.id, false)), id: p.id, status: p.status, reviewNote: p.review_note, submittedAt: p.submitted_at?.toISOString() ?? null, version: p.version });
       }
       return { items };
     });
@@ -347,10 +373,11 @@ export const marketplaceStaffRoutes = (d: Deps): FastifyPluginAsync => async (ap
   app.post<{ Params: { id: string } }>("/providers/:id/review", async (req) => {
     const id = uuid(req.params.id);
     const b = ProviderReviewInput.parse(req.body);
-    const [p] = await asService(d.sql, (tx) => tx<{ status: string }[]>`select status from public.service_providers where id = ${id}`);
+    const [p] = await asService(d.sql, (tx) => tx<{ status: string; version: string }[]>`select status, ${tx.unsafe(VERSION)} as version from public.service_providers where id = ${id}`);
     if (!p) throw NOT_FOUND();
-    const allowed: Record<string, string[]> = { listed: ["in_review"], changes_requested: ["in_review"], suspended: ["in_review", "listed", "changes_requested", "draft"] };
-    if (!allowed[b.decision].includes(p.status)) throw new HttpError(409, "invalid_transition", `A ${p.status.replace("_", " ")} profile can't be ${b.decision.replace("_", " ")}.`);
-    return { action: await privileged(d, { action: "provider.review", subjectId: id, reason: b.reason, params: { decision: b.decision, note: b.note ?? null } }) };
+    if (!REVIEW_FROM[b.decision].includes(p.status)) throw new HttpError(409, "invalid_transition", `A ${p.status.replace("_", " ")} profile can't be ${b.decision.replace("_", " ")}.`);
+    // Staff decide on the version they read (review finding 2): an edit since then, or another decision, refuses this one.
+    if (p.version !== b.version) throw PROVIDER_CHANGED();
+    return { action: await privileged(d, { action: "provider.review", subjectId: id, reason: b.reason, params: { decision: b.decision, note: b.note ?? null, version: b.version } }) };
   });
 };

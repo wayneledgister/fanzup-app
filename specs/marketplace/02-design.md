@@ -16,7 +16,7 @@ apps/mobile/app/(tabs)/services.tsx · app/services/[slug].tsx · app/services/r
 | Table | Key columns | Notes |
 |---|---|---|
 | `service_providers` | `owner_id` (unique → profiles), `slug` (unique), `display_name`, `headline`, `bio`, `city`, `remote_ok`, `categories text[]`, `links text[]`, `contact_email`, `status`, `review_note`, `submitted_at`, `reviewed_at`, `reviewed_by`, `listed_at` | `status in (draft, in_review, changes_requested, listed, suspended)`; `categories` checked against `marketplace_categories()` |
-| `service_listings` | `provider_id`, `category`, `title`, `description`, `price_from_minor`, `price_unit`, `turnaround_days`, `active`, `position` | replaced wholesale; ≤ 10 per provider (API) |
+| `service_listings` | `provider_id`, `category`, `title`, `description`, `price_from_minor`, `price_unit`, `turnaround_days`, `active`, `position` | saved as a set: rows sent with an `id` update in place (open requests keep their link), rows without one are added, missing ones removed; ≤ 10 per provider (API) |
 | `service_requests` | `listing_id`, `provider_id`, `requester_id`, `artist_id`, `campaign_id` (nullable), `brief`, `budget_minor`, `needed_by`, `share_email`, `requester_email` (snapshot only when `share_email`), `status`, `provider_note`, `responded_at` | `status in (sent, accepted, declined, withdrawn)`; partial unique index: one `sent` request per (artist, listing) |
 
 - `flag.marketplace` row + `public.marketplace_enabled()` (same shape as `flag.agents`).
@@ -41,6 +41,7 @@ All under `/api/v1`, all behind the flag gate in `routes.ts` (404 `marketplace_d
 - Editing a `listed` provider's public fields (`display_name`, `headline`, `bio`, `categories`, listings) moves it back to `in_review` and hides it until staff list it again. Editing `contact_email`, `city`, `remote_ok`, `links` does not (*decision, reviewable:* those don't change what staff vetted for; links do change, so links **do** trigger re-review). 
 - Contact reveal (FR-MKT-009) is computed in the response for the counterpart only: `providerContactEmail` on the artist's accepted requests; `requesterEmail` on the provider's accepted requests when `share_email`.
 - Rate limit (FR-MKT-007): count of the user's requests created since UTC midnight, checked in the same transaction as the insert under a per-user advisory lock.
+- Staff review is optimistic: the queue returns a `version` (from `updated_at`), the review must send it back, and the executor refuses with 409 `provider_changed` if the profile or its listings changed since. Slugs that are routes under `/services` (`requests`, `new`, …) are reserved in the schema and the table check.
 - Suspension (FR-MKT-008): the executor updates the provider and, in the same transaction, declines its `sent` requests with the fixed note.
 - `GET /v1/config.flags.marketplace` reports the flag.
 
@@ -85,3 +86,4 @@ See ADR-010. In short: a booking will be a ledger subject like a backing; the ar
 ## Change log
 - 2026-11-27: first version (CR-005, PR #27).
 - 2026-11-27: SDD documentation audit: §1 names the files as built (no `gate.ts`: the gate lives in `routes.ts`; the `provider.review` executor in `service.ts`); §3 points at `docs/API.md`.
+- 2026-11-27: code-review fixes (PR #27): stable listing ids, review version token, reserved slugs, unique-race errors map to 409, needed-by date allows for time zones west of UTC.

@@ -28,8 +28,16 @@ const listings = [
   { category: "mixing_mastering", title: "Mix and master one song", priceFromMinor: 25_000, priceUnit: "song", turnaroundDays: 7 },
   { category: "production", title: "Full production", description: "Beat, arrangement, stems.", priceFromMinor: 120_000, priceUnit: "project" },
 ];
-const review = (id: string, decision: string, note?: string, auth = staff) =>
-  api("POST", `/staff/marketplace/providers/${id}/review`, auth, { decision, note, reason: `Vetted the profile: ${decision}` });
+/** The version staff read in the queue (review finding 2: decisions are made on what staff saw). */
+const versionOf = async (id: string) => {
+  for (const s of ["in_review", "listed", "changes_requested", "draft", "suspended"]) {
+    const hit = (await api("GET", `/staff/marketplace/providers?status=${s}`, staff)).json().items?.find((p: { id: string }) => p.id === id);
+    if (hit) return hit.version as string;
+  }
+  throw new Error(`provider ${id} not in any queue`);
+};
+const review = async (id: string, decision: string, note?: string, auth = staff, version?: string) =>
+  api("POST", `/staff/marketplace/providers/${id}/review`, auth, { decision, note, reason: `Vetted the profile: ${decision}`, version: version ?? (await versionOf(id)) });
 const providerStatus = async () => (await api("GET", "/provider", provider.auth)).json().provider.status as string;
 
 beforeAll(async () => {
@@ -78,6 +86,7 @@ describe("FR-MKT-003/004/008: provider lifecycle", () => {
     const other = await createUser(k.sql);
     expect((await api("PUT", "/provider", other.auth, profile({ contactEmail: "x@example.com" }))).json().error).toBe("slug_taken");
     expect((await api("PUT", "/provider", provider.auth, profile({ links: ["http://example.com"] }))).statusCode).toBe(400);
+    expect((await api("PUT", "/provider", other.auth, profile({ slug: "requests", contactEmail: "x@example.com" }))).statusCode).toBe(400);
     expect((await api("PUT", "/provider/listings", provider.auth, [{ category: "video", title: "Music video" }])).statusCode).toBe(400);
   });
   it("needs an active listing to submit", async () => {
@@ -178,6 +187,23 @@ describe("FR-MKT-007/009/010: requests", () => {
     expect((await api("POST", `/services/requests/${r.json().id}/withdraw`, artist)).json().status).toBe("withdrawn");
     expect((await api("POST", `/services/requests/${requestId}/withdraw`, artist)).json().error).toBe("not_open");
   });
+  it("keeps open requests linked when the provider edits a listing in place", async () => {
+    const r = await api("POST", "/services/requests", artist, { listingId, brief, shareEmail: false, neededBy: new Date().toISOString().slice(0, 10) });
+    expect(r.statusCode).toBe(201);
+    const mine = (await api("GET", "/provider", provider.auth)).json().provider;
+    const edited = mine.listings.map((l: { id: string; title: string }) => (l.id === listingId ? { ...l, title: "Mix and master one song, stems included" } : l));
+    const saved = await api("PUT", "/provider/listings", provider.auth, edited);
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().provider.listings.map((l: { id: string }) => l.id)).toEqual(mine.listings.map((l: { id: string }) => l.id));
+    const [row] = await asService(k.sql, (tx) => tx<{ listing_id: string | null }[]>`select listing_id from public.service_requests where id = ${r.json().id}`);
+    expect(row.listing_id).toBe(listingId);
+    // An id from someone else's listing is refused.
+    expect((await api("PUT", "/provider/listings", provider.auth, [{ ...edited[0], id: "00000000-0000-4000-8000-000000000000" }])).statusCode).toBe(400);
+    await api("POST", `/services/requests/${r.json().id}/withdraw`, artist);
+    // Put the listings back and relist, so later tests see the provider as listed.
+    await api("PUT", "/provider/listings", provider.auth, mine.listings);
+    if ((await providerStatus()) === "in_review") await review(providerId, "listed");
+  });
   it("applies the daily limit", async () => {
     await asService(k.sql, (tx) => tx`
       insert into public.service_requests (listing_title, listing_category, provider_id, requester_id, artist_id, brief, share_email, status)
@@ -196,7 +222,17 @@ describe("FR-MKT-003: editing a listed profile goes back to review", () => {
     expect((await api("PUT", "/provider", provider.auth, profile({ contactEmail: "ada2@example.com" }))).json().provider.status).toBe("listed");
     expect((await api("PUT", "/provider", provider.auth, profile({ contactEmail: "ada2@example.com", headline: "Now also vocal production" }))).json().provider.status).toBe("in_review");
     expect((await api("GET", "/services/providers/ada-mixes")).statusCode).toBe(404);
+    // Staff read it, then the provider edits again before the decision: the stale decision is refused.
+    const seen = await versionOf(providerId);
+    await api("PUT", "/provider", provider.auth, profile({ contactEmail: "ada2@example.com", headline: "Now also vocal production", bio: "Changed after staff looked." }));
+    expect((await review(providerId, "listed", undefined, staff, seen)).json().error).toBe("provider_changed");
+    const seen2 = await versionOf(providerId);
+    const mine = (await api("GET", "/provider", provider.auth)).json().provider;
+    await api("PUT", "/provider/listings", provider.auth, mine.listings.map((l: Record<string, unknown>) => ({ ...l, title: `${l.title} (edited)` })));
+    expect((await review(providerId, "listed", undefined, staff, seen2)).json().error).toBe("provider_changed");
+    await api("PUT", "/provider/listings", provider.auth, mine.listings);
     await review(providerId, "listed");
+    expect(await providerStatus()).toBe("listed");
     expect((await api("PUT", "/provider/listings", provider.auth, listings.slice(0, 1))).json().provider.status).toBe("in_review");
     await review(providerId, "listed");
   });

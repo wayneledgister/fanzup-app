@@ -18,7 +18,7 @@ export default function AdminServiceProvidersPage() {
   );
 }
 
-type QueueItem = ProviderPage & { id: string; status: string; reviewNote: string | null; submittedAt: string | null };
+type QueueItem = ProviderPage & { id: string; status: string; reviewNote: string | null; submittedAt: string | null; version: string };
 const STATUSES = ["in_review", "listed", "changes_requested", "suspended"] as const;
 
 function AdminServiceProviders() {
@@ -47,7 +47,7 @@ function AdminServiceProviders() {
 function ProviderRow({ p, reload }: { p: QueueItem; reload: () => void }) {
   const [note, setNote] = useState("");
   const decide = (decision: "listed" | "changes_requested" | "suspended") => (reason: string) =>
-    api.request(`/v1/staff/marketplace/providers/${p.id}/review`, { method: "POST", body: JSON.stringify({ decision, note: note.trim() || null, reason }) }).then((x) => (reload(), x));
+    api.request(`/v1/staff/marketplace/providers/${p.id}/review`, { method: "POST", body: JSON.stringify({ decision, note: note.trim() || null, reason, version: p.version }) }).then((x) => (reload(), x));
   return (
     <div className="flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-3">

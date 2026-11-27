@@ -5,18 +5,29 @@
 import { asService, type Sql, type Tx } from "../db";
 import { HttpError } from "../lib/auth";
 
+/** A provider row's version token: its `updated_at` in microseconds (exact; JS dates would drop the last 3 digits). */
+export const VERSION = "(extract(epoch from updated_at) * 1000000)::bigint::text";
+/** Which statuses each staff decision may start from (FR-MKT-008). */
+export const REVIEW_FROM: Record<string, string[]> = {
+  listed: ["in_review"], changes_requested: ["in_review"], suspended: ["in_review", "listed", "changes_requested", "draft"],
+};
+export const PROVIDER_CHANGED = () => new HttpError(409, "provider_changed", "This profile changed since you opened it. Reload and review it again.");
+
 export const audit = (tx: Tx, actor: string | null, action: string, entity: string, id: string, data: Record<string, unknown> = {}) =>
   tx`insert into public.audit_events (actor_id, action, entity, entity_id, data) values (${actor}, ${action}, ${entity}, ${id}, ${tx.json(data as never)})`;
 
 /** Executor for the `provider.review` privileged action (staff.ts). Suspension declines open requests (FR-MKT-008). */
-export async function executeProviderReview(sql: Sql, subjectId: string, actorId: string, p: { decision: string; note: string | null }) {
+export async function executeProviderReview(sql: Sql, subjectId: string, actorId: string, p: { decision: string; note: string | null; version: string }) {
   await asService(sql, async (tx) => {
+    // Conditional on the status and the version staff reviewed, so a concurrent edit or decision can't slip through.
     const [row] = await tx<{ id: string }[]>`
       update public.service_providers
          set status = ${p.decision}, review_note = ${p.note}, reviewed_at = now(), reviewed_by = ${actorId},
              listed_at = case when ${p.decision} = 'listed' then now() else listed_at end
-       where id = ${subjectId} returning id`;
-    if (!row) throw new HttpError(404, "not_found", "We couldn't find that.");
+       where id = ${subjectId} and status = any (${REVIEW_FROM[p.decision] ?? []}::text[])
+         and ${tx.unsafe(VERSION)} = ${p.version}
+       returning id`;
+    if (!row) throw PROVIDER_CHANGED();
     if (p.decision === "suspended") {
       const closed = await tx`
         update public.service_requests set status = 'declined', provider_note = 'This provider is no longer listed.', responded_at = now()

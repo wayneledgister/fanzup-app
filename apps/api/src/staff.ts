@@ -253,7 +253,7 @@ const EXECUTORS: Record<ActionName, Executor> = {
     return rows[0];
   },
   "provider.review": async (d, a) => {
-    await executeProviderReview(d.sql, a.subject_id!, a.actor_id, a.params as { decision: string; note: string | null });
+    await executeProviderReview(d.sql, a.subject_id!, a.actor_id, a.params as { decision: string; note: string | null; version: string });
   },
   "flag.set": async (d, a) => {
     const p = a.params as { flag: string; on: boolean };

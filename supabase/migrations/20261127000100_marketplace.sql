@@ -19,7 +19,7 @@ $$;
 create table public.service_providers (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null unique references public.profiles (id) on delete cascade,
-  slug extensions.citext not null unique check (slug ~ '^[a-z0-9-]{3,60}$'),
+  slug extensions.citext not null unique check (slug ~ '^[a-z0-9-]{3,60}$' and slug::text not in ('requests', 'new', 'edit', 'provider', 'providers', 'search')),
   display_name text not null check (char_length(display_name) between 2 and 80),
   headline text not null check (char_length(headline) between 5 and 120),
   bio text check (char_length(bio) <= 2000),

@@ -23,6 +23,7 @@ export default function MyServiceRequests() {
   const [items, setItems] = useState<ServiceRequestView[] | null>(null);
   const [error, setError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
   const load = useCallback(async () => {
     setError(false);
     try {
@@ -43,6 +44,7 @@ export default function MyServiceRequests() {
     <Screen refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}>
       <Body muted small>{MKT_OFF_PLATFORM_NOTICE}</Body>
       {error && <Callout tone="error" icon="cloud-offline-outline" title="We couldn't load your requests"><Button variant="secondary" icon="refresh" onPress={load}>Retry</Button></Callout>}
+      {withdrawError ? <Callout tone="error" icon="alert-circle-outline" title={withdrawError} /> : null}
       {items === null && !error && <Loading label="Loading your requests" />}
       {items?.length === 0 && (
         <EmptyState icon="document-text-outline" title="No requests yet" action={<Button onPress={() => router.push("/services")}>Find services</Button>}>
@@ -62,8 +64,14 @@ export default function MyServiceRequests() {
           {r.providerContactEmail ? <Button variant="secondary" icon="mail-outline" onPress={() => Linking.openURL(`mailto:${r.providerContactEmail}`)}>{r.providerContactEmail}</Button> : null}
           {r.status === "sent" && (
             <Button variant="ghost" onPress={async () => {
-              const x = await api.withdrawServiceRequest(r.id).catch(() => null);
-              if (x) setItems((xs) => xs?.map((y) => (y.id === x.id ? x : y)) ?? null);
+              setWithdrawError(null);
+              try {
+                const x = await api.withdrawServiceRequest(r.id);
+                setItems((xs) => xs?.map((y) => (y.id === x.id ? x : y)) ?? null);
+              } catch (e) {
+                setWithdrawError(e instanceof Error && e.message ? e.message : "We couldn't withdraw that request. Try again.");
+                void load();
+              }
             }}>Withdraw request</Button>
           )}
         </Card>

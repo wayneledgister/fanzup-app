@@ -22,10 +22,10 @@ export default function ProviderEditorPage() {
   );
 }
 
-type ListingDraft = { category: CategoryKey; title: string; description: string; price: string; priceUnit: PriceUnit; turnaround: string; active: boolean };
+type ListingDraft = { id?: string; category: CategoryKey; title: string; description: string; price: string; priceUnit: PriceUnit; turnaround: string; active: boolean };
 const toDraft = (p: MyProvider | null): ListingDraft[] =>
   (p?.listings ?? []).map((l) => ({
-    category: l.category, title: l.title, description: l.description ?? "", price: l.priceFromMinor == null ? "" : String(l.priceFromMinor / 100),
+    id: l.id, category: l.category, title: l.title, description: l.description ?? "", price: l.priceFromMinor == null ? "" : String(l.priceFromMinor / 100),
     priceUnit: l.priceUnit, turnaround: l.turnaroundDays == null ? "" : String(l.turnaroundDays), active: l.active,
   }));
 const UNIT_LABEL: Record<PriceUnit, string> = { project: "per project", song: "per song", hour: "per hour", day: "per day" };
@@ -39,12 +39,12 @@ function ProviderEditor() {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const apply = (x: MyProvider | null) => {
+  // Saving one section refreshes only that section, so unsaved edits in the other one survive (review finding 6).
+  const apply = (x: MyProvider | null, only?: "profile" | "listings") => {
     setP(x);
-    if (x) {
-      setForm({ slug: x.slug, displayName: x.displayName, headline: x.headline, bio: x.bio ?? "", city: x.city ?? "", remoteOk: x.remoteOk, categories: x.categories, links: x.links.join("\n"), contactEmail: x.contactEmail });
-      setListings(toDraft(x));
-    }
+    if (!x) return;
+    if (only !== "listings") setForm({ slug: x.slug, displayName: x.displayName, headline: x.headline, bio: x.bio ?? "", city: x.city ?? "", remoteOk: x.remoteOk, categories: x.categories, links: x.links.join("\n"), contactEmail: x.contactEmail });
+    if (only !== "profile") setListings(toDraft(x));
   };
   useEffect(() => {
     api.myProvider().then((r) => apply(r.provider)).catch(() => setLoadError(true));
@@ -60,7 +60,7 @@ function ProviderEditor() {
     setErrors({});
     setBusy(true);
     try {
-      apply((await api.saveProvider(parsed.data)).provider);
+      apply((await api.saveProvider(parsed.data)).provider, "profile");
       setMsg("Profile saved.");
       return true;
     } catch (e) {
@@ -73,7 +73,7 @@ function ProviderEditor() {
 
   const saveListings = async () => {
     const body: ListingInput[] = listings.map((l) => ({
-      category: l.category, title: l.title, description: l.description || null, priceUnit: l.priceUnit, active: l.active,
+      ...(l.id ? { id: l.id } : {}), category: l.category, title: l.title, description: l.description || null, priceUnit: l.priceUnit, active: l.active,
       priceFromMinor: l.price.trim() ? dollarsToMinor(Number(l.price)) : null,
       turnaroundDays: l.turnaround.trim() ? Number(l.turnaround) : null,
     }));
@@ -82,7 +82,7 @@ function ProviderEditor() {
     setErrors({});
     setBusy(true);
     try {
-      apply((await api.saveListings(parsed.data)).provider);
+      apply((await api.saveListings(parsed.data)).provider, "listings");
       setMsg("Services saved.");
       return true;
     } catch (e) {
@@ -96,7 +96,7 @@ function ProviderEditor() {
   const submit = async () => {
     setBusy(true);
     try {
-      apply((await api.submitProvider()).provider);
+      setP((await api.submitProvider()).provider);
       setMsg("Submitted for review.");
     } catch (e) {
       fail(e);

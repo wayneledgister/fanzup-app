@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ArrowRight, CircleAlert, MapPin, RefreshCw, Search, Store, Wrench } from "lucide-react";
 import { Badge, Button, Callout, Card, Checkbox, Container, EmptyState, Field, PageHeader, Select, TextInput } from "@/components/brand";
@@ -20,18 +20,22 @@ export default function ServicesBrowse() {
   const [error, setError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // Review finding 7: only the latest request may update the list, so a slow earlier search can't overwrite it.
+  const seq = useRef(0);
   const load = (more = false) => {
+    const n = ++seq.current;
     setError(false);
     if (more) setLoadingMore(true);
     else setItems(null);
     api
       .services({ category: category || undefined, q: query || undefined, remote, cursor: more ? cursor : null })
       .then((r) => {
+        if (n !== seq.current) return;
         setItems((prev) => (more && prev ? [...prev, ...r.items] : r.items));
         setCursor(r.nextCursor);
       })
-      .catch(() => setError(true))
-      .finally(() => setLoadingMore(false));
+      .catch(() => n === seq.current && setError(true))
+      .finally(() => n === seq.current && setLoadingMore(false));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => load(), [category, query, remote]);
