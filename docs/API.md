@@ -1,7 +1,7 @@
 # FanZuP API reference (wire contract)
 **Owner:** Wayne (product) · engineering · **Status:** active · **Date:** 2026-11-27 · **Touches:** FR-PLT-001, NFR-OPS-04, ADR-003, ADR-005, ADR-007, ADR-008, ADR-009, ADR-010
 
-Every HTTP route the API registers, in one table. **This file is checked in CI**: `apps/api/test/api-contract.test.ts` builds the app with every optional module on (sandbox payments, mock Reg CF, cron secret) and fails if a route exists that isn't listed here, or a listed route no longer exists. When you add, rename or remove a route, update this table, the owning design doc's API section and, if a client calls it, `packages/shared/src/api-client.ts` in the same PR. `pnpm --filter @fanzup/api api:routes` prints the live list.
+Every HTTP route the API registers, in one table. **This file is checked in CI**: `apps/api/test/api-contract.test.ts` builds the app twice — locally with every optional module on (sandbox payments, mock Reg CF, cron secret) and as a deployed staging API (Stripe test provider) — and fails if a route exists that isn't listed here, or a listed route no longer exists. When you add, rename or remove a route, update this table, the owning design doc's API section and, if a client calls it, `packages/shared/src/api-client.ts` in the same PR. `pnpm --filter @fanzup/api api:routes` prints the live list.
 
 The detailed request, response and error shapes stay in the design docs (the **Spec** column); this file is the index and the drift guard. Request bodies are parsed with the zod schemas in `@fanzup/shared` where one exists (**Contract** column), so web, mobile and API validate with the same rule; the remaining bodies are parsed by route-local zod schemas in `apps/api/src`.
 
@@ -69,7 +69,7 @@ The detailed request, response and error shapes stay in the design docs (the **S
 | GET | `/api/v1/portfolio` | user | `layer2` |  |  | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
 | GET | `/api/v1/provider` | verified (own profile) | `marketplace` | `{ provider: MyProvider \| null }` |  | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | PUT | `/api/v1/provider` | verified (own profile) | `marketplace` | `ProviderProfileInput` → `{ provider: MyProvider }` | editing vetted fields of a `listed` provider sends it back to review | [MKT §3](../specs/marketplace/02-design.md#3-api) |
-| PUT | `/api/v1/provider/listings` | verified (own profile) | `marketplace` | `ListingInput[]` → `{ provider: MyProvider }` | ≤ 10 listings; replaced wholesale | [MKT §3](../specs/marketplace/02-design.md#3-api) |
+| PUT | `/api/v1/provider/listings` | verified (own profile) | `marketplace` | `ListingInput[]` → `{ provider: MyProvider }` | ≤ 10 listings; rows with an `id` update in place | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | GET | `/api/v1/provider/requests` | verified (provider) | `marketplace` | `{ items: ServiceRequestView[] }` | requester email only after accept and with consent | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | POST | `/api/v1/provider/requests/:id/respond` | verified (provider) | `marketplace` | `RespondInput` → `ServiceRequestView` | once per request | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | POST | `/api/v1/provider/submit` | verified (own profile) | `marketplace` | `{ provider: MyProvider }` | to staff review | [MKT §3](../specs/marketplace/02-design.md#3-api) |

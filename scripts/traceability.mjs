@@ -11,6 +11,7 @@
  * the specs use for groups: `FR-PAY-001/002/003` and `FR-MKT-003…009` (or `...`, `–`).
  */
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join, relative } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -25,7 +26,23 @@ const MODULES = [
 ].filter((m) => existsSync(join(ROOT, m.req)));
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".expo", ".git", "playwright-report", "test-results", ".vercel", ".turbo"]);
+/**
+ * Tracked files only (`git ls-files`), so a local run and CI read the same set: git-ignored output such as
+ * `expo prebuild` folders, coverage or scratch files can never change the matrix. Falls back to a directory walk
+ * outside a git checkout.
+ */
+let TRACKED = null;
+try {
+  TRACKED = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" }).split("\0").filter(Boolean).sort();
+} catch {
+  TRACKED = null;
+}
 function walk(dir, exts, out = []) {
+  if (TRACKED) {
+    const prefix = relative(ROOT, dir).split("\\").join("/") + "/";
+    for (const f of TRACKED) if (f.startsWith(prefix) && exts.some((e) => f.endsWith(e)) && !f.split("/").some((seg) => SKIP_DIRS.has(seg)) && existsSync(join(ROOT, f))) out.push(join(ROOT, f));
+    return out;
+  }
   if (!existsSync(dir)) return out;
   for (const name of readdirSync(dir).sort()) {
     if (SKIP_DIRS.has(name)) continue;
@@ -36,6 +53,8 @@ function walk(dir, exts, out = []) {
   }
   return out;
 }
+/** Read a text file with line endings normalised, so a CRLF checkout parses and compares like an LF one. */
+const readText = (p) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 const rel = (p) => relative(ROOT, p).split("\\").join("/");
 
 const CODE_EXT = [".ts", ".tsx", ".mjs", ".js", ".sql"];
@@ -58,14 +77,16 @@ SOURCES.code = SOURCES.code.filter((p) => !isTest(rel(p)));
 /** Every id a text mentions, with group shorthand expanded. */
 function mentions(text) {
   const ids = new Set();
-  const re = /\b(N?FR-(?:[A-Z][A-Z0-9]*-)*?[A-Z][A-Z0-9]*)-(\d{2,3}[a-z]?)((?:\s*(?:\/|…|\.\.\.|–)\s*\d{2,3}[a-z]?)*)/g;
+  // Group shorthand only when the separator sits directly between numbers ("001/002", "003…009", "01..18"):
+  // with spaces around it ("FR-ID-007 – 24 hours") it's prose, not a range.
+  const re = /\b(N?FR-(?:[A-Z][A-Z0-9]*-)*?[A-Z][A-Z0-9]*)-(\d{2,3}[a-z]?)((?:(?:\/|…|\.\.\.|\.\.|–)\d{2,3}[a-z]?)*)/g;
   let m;
   while ((m = re.exec(text))) {
     const [, prefix, first, rest] = m;
     const width = first.replace(/[a-z]$/, "").length;
     ids.add(`${prefix}-${first}`);
     if (!rest) continue;
-    const parts = rest.split(/(\/|…|\.\.\.|–)/).map((s) => s.trim()).filter(Boolean);
+    const parts = rest.split(/(\/|…|\.\.\.|\.\.|–)/).filter(Boolean);
     let prev = parseInt(first, 10);
     for (let i = 0; i < parts.length; i += 2) {
       const sep = parts[i];
@@ -82,12 +103,12 @@ function mentions(text) {
 
 const index = {};
 for (const [kind, files] of Object.entries(SOURCES)) {
-  index[kind] = files.map((p) => ({ path: rel(p), ids: mentions(readFileSync(p, "utf8")) }));
+  index[kind] = files.map((p) => ({ path: rel(p), ids: mentions(readText(p)) }));
 }
 const refs = (kind, id) => index[kind].filter((f) => f.ids.has(id)).map((f) => f.path);
 
 function definitions(file) {
-  const lines = readFileSync(join(ROOT, file), "utf8").split("\n");
+  const lines = readText(join(ROOT, file)).split("\n");
   const defs = [];
   const seen = new Set();
   lines.forEach((line, i) => {
@@ -180,7 +201,7 @@ ${orphanTasks.join("\n") || "| — | — |"}
 `;
 
 if (process.argv.includes("--check")) {
-  const current = existsSync(OUT) ? readFileSync(OUT, "utf8") : "";
+  const current = existsSync(OUT) ? readText(OUT) : "";
   if (current !== out) {
     console.error("specs/traceability.md is out of date. Run: node scripts/traceability.mjs");
     process.exit(1);

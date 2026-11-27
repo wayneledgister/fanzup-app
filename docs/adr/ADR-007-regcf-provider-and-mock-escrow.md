@@ -1,6 +1,6 @@
 # ADR-007: Reg CF provider boundary and a standalone mock escrow service
 
-**Status:** Proposed (CR-002, L2 G1+G2) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** NFR-L2-01, NFR-L2-02, FR-L2-ESC-001
+**Status:** Accepted (CR-002, L2 G1+G2; Wayne, 2026-11-27, after build and merge) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** NFR-L2-01, NFR-L2-02, FR-L2-ESC-001
 
 ## Context
 Layer 2 needs an escrow agent, KYC/AML on investors, trades, fund moves, a close/disbursement step, refunds, and a way to pay distributions. North Capital's TransactAPI covers that workflow (issuer → offering → party → account → link → trade → fund move → close) and has a sandbox, but sandbox keys are issued by their integration team, not self-serve (checked 2026-10-03). Wayne asked for a mock API "if an api with a sandbox env is not available". The M1 `PaymentProvider` (ADR-003) models a card processor, not an offering escrow, so stretching it would mix two different money models.

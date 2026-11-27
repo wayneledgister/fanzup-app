@@ -1,6 +1,6 @@
 # ADR-005: Correlation ids via AsyncLocalStorage and Postgres settings
 
-**Status:** Proposed (G2, M1) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** NFR-OPS-04, NFR-COMP-11, M1 exit test 4
+**Status:** Accepted (G2, M1; Wayne, 2026-11-27, after build and merge) · **Date:** 2026-10-03 · **Decider:** Wayne · **Requirements:** NFR-OPS-04, NFR-COMP-11, M1 exit test 4
 
 ## Context
 M1 must show every step of a funding or refund traceable by one id, across the API, the worker, provider calls and the SQL money functions that write audit and ledger rows themselves.
