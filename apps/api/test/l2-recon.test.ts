@@ -22,6 +22,12 @@ import {
 
 const kinds = async (k: L2Kit, pool: string) => (await openBreaks(k.sql, pool)).map((b) => b.kind);
 const days = (d: number) => new Date(Date.now() + d * 86_400_000);
+/**
+ * Days after the kit's clock. Ops are stamped with the kit clock, which runs a few seconds ahead of the real clock
+ * after `advance`, so a horizon measured from `Date.now()` can fall seconds short of a business-day boundary: run on
+ * a Friday, real-now + 10 days is 5 business days after the op, not 6, and L2-T-039 failed.
+ */
+const kitDays = (k: L2Kit, d: number) => new Date(k.clock.getTime() + d * 86_400_000);
 /** A second trade + fund move at the provider naming `externalId` (one FanZuP never asked for). */
 function strayFundMove(k: L2Kit, offering: string, account: string, externalId: string, amount = 50_00) {
   const t = k.engine.createTrade({ offeringId: offering, accountId: account, units: 1, unitPrice: amount, amount, externalId }, `stray-trade-${randomUUID()}`);
@@ -213,22 +219,22 @@ describe("Layer 2 reconciliation kinds and the pause rule (design §5.1)", () =>
     await tick(k);
     const [op] = await asService(k.sql, (tx) => tx<{ status: string }[]>`select status from public.pool_ops where kind = 'refund' and subject_id = ${r.json().investmentId}`);
     expect(op.status).toBe("failed");
-    await reconcileL2Ledger(k, { poolId: pool, now: days(3) });
+    await reconcileL2Ledger(k, { poolId: pool, now: kitDays(k, 3) });
     expect(await kinds(k, pool)).toEqual([]);
     k.regcf.failNext("refundFundMove", "permanent", "refund_refused_test");
     strayFundMove(k, (await poolRow(k.sql, pool)).offering, await accountOf(k, fan.id), randomUUID(), 30_00);
     await advance(k, 3);
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    await reconcileL2Ledger(k, { poolId: pool, now: days(10) });
+    await reconcileL2Ledger(k, { poolId: pool, now: kitDays(k, 10) });
     expect((await kinds(k, pool)).sort()).toEqual(["refund_overdue", "refund_overdue", "stray_fund_move_aged"]);
     // The alert fires when each break first opens, not again on every run while it stays open (review round 2, PR #12).
-    await reconcileL2Ledger(k, { poolId: pool, now: days(11) });
+    await reconcileL2Ledger(k, { poolId: pool, now: kitDays(k, 11) });
     const overdueAlerts = errors.mock.calls.filter((c) => String(c[0]).includes('"msg":"refund.overdue"'));
     errors.mockRestore();
     expect(overdueAlerts).toHaveLength(2);
     // refund_overdue never pauses; stray_fund_move_aged does (material).
     await asService(k.sql, (tx) => tx`update public.pool_breaks set resolved_at = now(), resolution = 'test' where pool_id = ${pool} and kind = 'stray_fund_move_aged'`);
-    expect(await isPoolPayoutPaused(k.sql, pool, days(10))).toBe(false);
+    expect(await isPoolPayoutPaused(k.sql, pool, kitDays(k, 10))).toBe(false);
   });
 });
 
