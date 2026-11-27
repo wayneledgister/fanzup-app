@@ -20,7 +20,7 @@ This agreement is between you (the artist, or the business you represent) and Fa
 
 ## 2. Your campaign
 
-2.1 **Contents.** Your campaign states its type (show, tour, album, music video or documentary), funding goal, deadline (between [7] and [60] days from going live), story, use of funds, risks, perks with quantities and expected delivery dates, and 2–3 milestones with the share of funds released at each (by default 50% on funding and 50% after a verified milestone).
+2.1 **Contents.** Your campaign states its type (show, tour, album, music video or documentary), funding goal, deadline (between [7] and [60] days from going live), story, use of funds, risks, perks with quantities and expected delivery dates, and 2–3 tranches with the share of funds released at each: the first on funding and 1–2 more, each released after FanZuP verifies a milestone (by default 50% on funding and 50% after one verified milestone).
 
 2.2 **Truthfulness.** Everything on your campaign must be accurate and not misleading, and must be **your own words and plans**. Describe risks honestly. Don't promise anything you can't deliver, and don't describe a backing as an investment, a return, ownership, royalties or a revenue share. *(FanZuP's copy rules ban investment language in Layer 1.)*
 
@@ -93,4 +93,4 @@ You'll indemnify FanZuP against third-party claims (including backers' claims) a
 This agreement applies to each campaign until all perks are delivered, all funds are released or refunded and all disputes are closed. FanZuP may update this agreement with [30] days' notice; changes don't apply to a campaign already live unless the law requires.
 
 ---
-**Sources:** `specs/00-brief.md`; `specs/01-requirements.md` FR-CMP-001…007, FR-PAY-005/007/010, FR-FUL-001…004, FR-DSP-001…005, FR-ID-004/006/008, FR-TAX-001…005, FR-PRV-006; `packages/shared/src/policy.ts` (`campaign`, `processing`, `fulfillment`); `docs/brand/fees.html`; E1 card C.
+**Sources:** `specs/00-brief.md`; `specs/01-requirements.md` FR-CMP-001…007, FR-PAY-005/007/010, FR-FUL-001…004, FR-DSP-001…005, FR-ID-004/006/008, FR-TAX-001…005, FR-PRV-006; `packages/shared/src/policy.ts` (`campaign`, `processing`); `specs/01-requirements.md` Appendix A (`fulfillment.newDateDays`, `disputes.holdback`); `docs/brand/fees.html`; E1 card C.

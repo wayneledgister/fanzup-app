@@ -53,7 +53,7 @@ Owner: [Wayne / data owner]. Reviewed: annually and at each new data class. Dele
 | 18+ attestation and policy acceptances | consents | 7 years after account closure *(proposed)* | Delete | Legal claims |
 | Backings, ledger entries, refunds, payouts | ledger_* (append-only) | ≥ 7 years | Keep pseudonymised; archive | Tax, accounting, partner requirements; NFR-COMP-12 |
 | Audit events | audit tables + object-locked daily export | ≥ 7 years | Archive | NFR-COMP-11/12 |
-| Shipping addresses | encrypted fields | Later of delivery + 90 days and expected delivery + 180 days | Purge | NFR-SEC-08, retention.addressDays |
+| Shipping addresses | encrypted fields | Later of delivery + 90 days and expected delivery + 180 days | Purge | NFR-SEC-08; requirements Appendix A `retention.addressDays` |
 | Ticket codes | tickets | Event date + [90] days *(proposed)* | Delete | Contract |
 | Identity verification | Partner-held; FanZuP stores references and status only | Partner's schedule; references 7 years | Request partner deletion where permitted | FR-ID-004, FR-PRV-003 |
 | Tax information (TIN), information returns | Tax/TIN vendor; references in FanZuP | [7] years | Per vendor | IRS rules; Brief Q7 |

@@ -40,3 +40,6 @@ For trademark, right-of-publicity or other complaints, email [legal@fanzup.com] 
 
 ## 7. Marketplace deliverables
 FanZuP doesn't host deliverables exchanged between artists and providers. Disputes over who owns work made by a provider are between the artist and the provider (see the Provider Terms).
+
+---
+**Sources:** 17 U.S.C. §512 (statute-based); `specs/01-requirements.md` FR-PLT-005 (user uploads), FR-CMP-007 (pausing a campaign).

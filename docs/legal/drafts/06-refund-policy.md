@@ -9,11 +9,11 @@ This policy explains when backers get money back on FanZuP, and how. It's part o
 ## When you get a full refund
 | Situation | What happens | Timing |
 |---|---|---|
-| The campaign doesn't reach its goal by the deadline | **Every backer is refunded in full, automatically**, including any extra amount | Started within [1 hour] of the campaign closing |
+| The campaign doesn't reach its goal by the deadline | **Every backer is refunded in full, automatically**, including any extra amount | We aim to start them within [1 hour] of the campaign closing *(product target, not a guarantee; attorney to confirm wording)* |
 | You cancel while the campaign is still live | Full refund of your backing | Started at once |
 | You reduce your perk or quantity while the campaign is live | The difference is refunded | Started at once |
 | Your payment was processed after the deadline, or for a campaign that had stopped accepting backings | Full refund, with an email explaining why | Started within [1 hour] |
-| Your payment amount didn't match your backing | Full refund; the backing is not created | Started within [1 hour] |
+| Your payment amount didn't match your backing | Your payment is held and refunded in full | Started within [1 hour] |
 | Your perk is late and you choose to cancel | Full refund | Started within [1 business day] of your choice |
 | FanZuP cancels a campaign (for example for fraud or a broken promise) | Full refund to every backer | Started within [1 business day] of the cancellation |
 
@@ -40,4 +40,4 @@ Please contact us before disputing a charge with your bank. We can usually refun
 FanZuP doesn't process payments for marketplace services, so it can't refund them. Refunds for work arranged with a provider are between you and the provider.
 
 ---
-**Sources:** `specs/01-requirements.md` FR-PAY-003/011, FR-BCK-003/004, FR-FUL-003, FR-DSP-001/003/005, FR-CMP-007; `packages/shared/src/policy.ts` (`refunds.autoInitiateMinutes`, `adminSlaBusinessDays`).
+**Sources:** `specs/01-requirements.md` FR-PAY-003/011, FR-BCK-003/004, FR-FUL-003, FR-DSP-001/003/005, FR-CMP-007; `packages/shared/src/policy.ts` (`refunds.autoInitiateMinutes`, `adminSlaBusinessDays`); `specs/00-brief.md` success metrics.

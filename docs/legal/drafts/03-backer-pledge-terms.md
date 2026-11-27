@@ -25,7 +25,7 @@ When you back a campaign, you're entering into an arrangement with the **artist*
 
 2.4 **One deadline.** Every campaign has a single deadline shown on its page. A payment processed after the deadline is refunded in full.
 
-2.5 **If the goal isn't met by the deadline, every backer is refunded in full**, including any extra amount. Refunds are started automatically within [1 hour] of the campaign closing. *(Attorney: confirm FanZuP absorbs card fees on failed-campaign refunds so backers get 100% back — E1 card C default.)*
+2.5 **If the goal isn't met by the deadline, every backer is refunded in full**, including any extra amount. We aim to start refunds within [1 hour] of the campaign closing. *(Attorney: the 1-hour figure is a product target (brief success metric, ≥ 99.9% of failed-campaign refunds), not a spec guarantee; keep it as "aim" or drop the time. Also confirm FanZuP absorbs card fees on failed-campaign refunds so backers get 100% back — E1 card C default.)*
 
 2.6 **If the goal is met,** the campaign is funded and funds are released to the artist in tranches (by default 50% on funding and 50% after FanZuP verifies the milestone the artist set). Stretch goals never change the funding goal.
 
@@ -63,4 +63,4 @@ During a test-mode beta, every money screen says so. No real money moves, you'll
 FanZuP may suspend a campaign that looks fraudulent or broken. While it's paused, no money moves and you'll see the date of the next update. If the campaign is cancelled, backers are refunded under the Refund and Cancellation Policy.
 
 ---
-**Sources:** `specs/00-brief.md`; `specs/01-requirements.md` FR-PAY-001/003, FR-BCK-001…005, FR-CMP-004/007, FR-FUL-001…004, FR-DSP-001…003, FR-PRV-006, FR-PLT-006; `packages/shared/src/policy.ts` (`campaign.defaultTranchesPct`, `checkout.holdMinutes`, `tickets.maxPerOrder`, `refunds.autoInitiateMinutes`, `fulfillment.newDateDays`); E1 card C.
+**Sources:** `specs/00-brief.md`; `specs/01-requirements.md` FR-PAY-001/003, FR-BCK-001…005, FR-CMP-004/007, FR-FUL-001…004, FR-DSP-001…003, FR-PRV-006, FR-PLT-006; `packages/shared/src/policy.ts` (`campaign.defaultTranchesPct`, `checkout.holdMinutes`, `tickets.maxPerOrder`, `refunds.autoInitiateMinutes`); `specs/01-requirements.md` Appendix A (`fulfillment.newDateDays`); brief success metrics (failed-campaign refund timing); E1 card C.

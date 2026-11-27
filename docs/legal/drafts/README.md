@@ -2,11 +2,15 @@
 
 **Status:** FIRST DRAFTS, 2026-11-27. Prepared with AI assistance from the product specs in this repository, for FanZuP LLC's attorney to review, correct and finalize. **None of these documents is legal advice, and none may be published or accepted by users until counsel approves it** (FR-PRV-001, NFR-COMP-16).
 
+**Not wired into the product.** No app page, route or build step reads these files. `apps/web/src/pages/public/Legal.tsx` still shows the "being finalized with counsel" placeholder, and `POLICY.legal` versions are unchanged. Publishing a counsel-approved version is a separate code change.
+
 ## How to read these drafts
 - `[BRACKETS]` are placeholders to fill in (addresses, dates, vendor names, numbers counsel must confirm).
 - **Attorney review** boxes flag a clause that is a business assumption, a legal judgement, or a choice between options.
 - **Open question** tags (for example `MKT-Q1`, `Brief Q6`) point to the counsel question register below. Clauses that depend on an unanswered question are written for the current product (no live money in beta, no money in the marketplace) and say so.
 - Every factual statement about how FanZuP works is taken from the specs named in each document's "Sources" line. If the product changes, the document must change too.
+- **Marketplace sources live in PR #27.** The services-marketplace facts (Provider Terms, Privacy Notice §6, Acceptable Use §6, the marketplace lines of the Refund Policy and retention schedule) come from `specs/marketplace/*`, CR-005 and ADR-010 on branch `feat/services-marketplace` (PR #27). Until that PR merges, those files aren't on `main`; if PR #27 changes, re-check these sections.
+- Some values cited as `policy.ts` keys (`fulfillment.newDateDays`, `retention.addressDays`, `disputes.holdback`) are defined in `specs/01-requirements.md` Appendix A, not yet in code.
 - Fees are **TBD** everywhere. The only fee stated is card processing passed through at cost (`docs/brand/fees.html`, `POLICY.processing`), and even that needs confirming.
 
 ## What exists today

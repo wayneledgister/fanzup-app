@@ -119,13 +119,13 @@ There are no reviews or ratings in the beta. If they're added, FanZuP will only 
 
 15.2 FanZuP may suspend or remove your profile at any time under section 3.4 or the Terms of Service. FanZuP may also end the Marketplace or change it; it will give reasonable notice where practical.
 
-15.3 Sections 5, 6, 7, 8.2, 9, 10, 11 and 15 survive.
+15.3 Sections 5, 6, 7, 8.2, 9, 10, 11, 15 and 17 survive.
 
 ## 16. Changes to these terms
 We may update these Provider Terms. For material changes we'll give at least [30] days' notice by email or in the app, and may require you to accept the new version before you can keep your profile listed. Acceptance is recorded with the version and time.
 
 ## 17. Disputes, governing law, notices
-Section [x] (Disputes) and section [y] (Governing law) of the Terms of Service apply. Notices to FanZuP: [legal@fanzup.com], FanZuP LLC, [physical address, Virginia]. *(Open question P-2.)*
+Sections 15 (Disputes) and 16 (General, including governing law) of the Terms of Service apply. Notices to FanZuP: [legal@fanzup.com], FanZuP LLC, [physical address, Virginia]. *(Open question P-2.)*
 
 ---
-**Sources:** `specs/marketplace/01-requirements.md` FR-MKT-001…012, NFR-MKT-01/04/05; `specs/marketplace/discovery.md` MKT-Q1…Q8; ADR-010; `packages/shared/src/policy.ts` `marketplace`.
+**Sources:** `specs/marketplace/01-requirements.md` FR-MKT-001…012, NFR-MKT-01/04/05; `specs/marketplace/discovery.md` MKT-Q1…Q8; ADR-010; `packages/shared/src/policy.ts` `marketplace`. *These marketplace specs are in PR #27 (branch `feat/services-marketplace`) and reach `main` when it merges.*
