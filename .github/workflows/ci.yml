@@ -68,6 +68,9 @@ jobs:
       - run: pnpm --filter @fanzup/shared test
       - name: Mock escrow service (Layer 2 demo rails, ADR-007)
         run: pnpm --filter @fanzup/mock-escrow typecheck && pnpm --filter @fanzup/mock-escrow test
+      - name: Vercel can compile the API (needs the TypeScript JS API, which TypeScript 7 doesn't ship)
+        working-directory: apps/api
+        run: node -e "const ts=require('typescript'); if (typeof ts.transpileModule !== 'function') { console.error('apps/api needs typescript 5.x/6.x, got ' + ts.version); process.exit(1) }"
       - run: pnpm --filter @fanzup/api typecheck
       - run: pnpm --filter @fanzup/api test
       - run: pnpm --filter @fanzup/api build

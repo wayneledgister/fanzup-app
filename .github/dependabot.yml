@@ -5,6 +5,11 @@ updates:
     schedule: { interval: weekly }
     groups:
       minor-and-patch: { update-types: [minor, patch] }
+    ignore:
+      # apps/api stays on TypeScript 5.x: Vercel compiles the API with the TypeScript JS API,
+      # which TypeScript 7 doesn't ship. Bump it by hand once Vercel supports TS 7.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule: { interval: weekly }
