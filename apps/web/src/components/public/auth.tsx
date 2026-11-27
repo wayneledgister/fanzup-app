@@ -86,14 +86,9 @@ export function PasswordInput({ id, value, onChange, invalid, autoComplete = "cu
   );
 }
 
-export function passwordScore(pwd: string): number {
-  let s = 0;
-  if (pwd.length >= 8) s++;
-  if (/[a-z]/.test(pwd) && /[A-Z]/.test(pwd)) s++;
-  if (/\d/.test(pwd)) s++;
-  if (/[^a-zA-Z0-9]/.test(pwd)) s++;
-  return s;
-}
+/** Shared with the mobile app (CR-004). */
+export { passwordScore } from "@fanzup/shared/auth-rules";
+import { passwordScore } from "@fanzup/shared/auth-rules";
 
 export function PasswordStrength({ value }: { value: string }) {
   if (!value) return <p className="text-sm text-muted">At least 8 characters, with a mix of letters, numbers and symbols.</p>;
@@ -176,4 +171,4 @@ export function StepsList({ steps }: { steps: ReactNode[] }) {
   );
 }
 
-export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export { EMAIL_RE } from "@fanzup/shared/auth-rules";

@@ -52,6 +52,37 @@ for (const file of L2_FILES) {
   });
 }
 
+// Mobile app (CR-004, NFR-MOB-03): Layer 1 only — no securities wording at all, no "escrow" while no custodian exists.
+// Whole non-comment lines are checked (JSX text isn't quoted). Shared copy both clients render is checked too; it may
+// state the negatives ("it is not an investment"), so only the Brand §7.4 list, intermediary and escrow rules apply.
+const MOBILE_BANNED = [...BANNED, ...INTERMEDIARY, ...TEMPLATE_BANNED.slice(BANNED.length)];
+const mobileRoot = path.resolve(root, "..", "..", "mobile");
+function walkMobile(d) {
+  if (!fs.existsSync(d)) return;
+  for (const f of fs.readdirSync(d)) {
+    const p = path.join(d, f);
+    if (fs.statSync(p).isDirectory()) { walkMobile(p); continue; }
+    if (!/\.tsx?$/.test(f)) continue;
+    fs.readFileSync(p, "utf8").split("\n").forEach((line, i) => {
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+      // Brand list on the whole line (as for web src); Layer 1 extras on user-facing text only: string literals and JSX text.
+      const text = [...(line.match(/"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g) ?? []), ...[...line.matchAll(/>([^<>{}]+)</g)].map((m) => m[1]), /^[^<>{}=;()]*$/.test(line) ? line : ""].join(" ");
+      const hits = [...[...BANNED, ...INTERMEDIARY].filter(([re]) => re.test(line)), ...MOBILE_BANNED.slice(BANNED.length + INTERMEDIARY.length).filter(([re]) => re.test(text))];
+      for (const [, name] of hits) { bad++; console.log(`mobile/${path.relative(mobileRoot, p)}:${i + 1}  [${name}]  ${line.trim().slice(0, 110)}`); }
+    });
+  }
+}
+walkMobile(path.join(mobileRoot, "app"));
+walkMobile(path.join(mobileRoot, "src"));
+const SHARED_COPY = path.resolve(root, "..", "..", "..", "packages", "shared", "src", "backing-copy.ts");
+if (fs.existsSync(SHARED_COPY)) {
+  fs.readFileSync(SHARED_COPY, "utf8").split("\n").forEach((line, i) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+    const text = (line.match(/"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g) ?? []).join(" ");
+    for (const [re, name] of [...BANNED, ...INTERMEDIARY, TEMPLATE_BANNED[BANNED.length]]) if (re.test(text)) { bad++; console.log(`shared/src/backing-copy.ts:${i + 1}  [${name}]  ${line.trim().slice(0, 110)}`); }
+  });
+}
+
 // The rendered Layer 2 notices and mock Form C are checked by scripts/check-l2-render.ts (run after this file by
 // `lint:copy`): every one must carry the D-2 sentence and pass the rules above.
 if (bad) { console.error(`\n${bad} copy violation(s).`); process.exit(1); }

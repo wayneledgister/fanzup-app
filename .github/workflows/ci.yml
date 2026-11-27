@@ -26,6 +26,25 @@ jobs:
       - run: pnpm lint:copy
       - run: pnpm --filter @fanzup/web build
 
+  mobile:
+    # CR-004: the Expo app. Typecheck, unit tests, and an iOS + Android JS bundle (proves Metro resolves the monorepo
+    # and @fanzup/shared). Native binaries are built on EAS, not here (mobile design §7).
+    name: Mobile · typecheck, tests, iOS + Android bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @fanzup/mobile typecheck
+      - run: pnpm --filter @fanzup/mobile test
+      - name: Bundle for iOS and Android (expo export)
+        run: pnpm --filter @fanzup/mobile exec expo export --platform ios --platform android --output-dir dist
+        env:
+          CI: "1"
+          EXPO_OFFLINE: "1"
+
   api:
     # Money path: migrations + ledger invariants + RLS + API flow tests against real Postgres.
     name: API · migrations, ledger, RLS, flow tests

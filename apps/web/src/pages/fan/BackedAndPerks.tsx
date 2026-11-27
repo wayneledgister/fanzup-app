@@ -5,6 +5,7 @@ import { ArtistArt, Badge, Button, Callout, Card, Container, EmptyState, PageHea
 import { RequireAccount } from "@/components/RequireAccount";
 import { api, type MyBacking } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/format";
+import { campaignStatusLabel, MONEY_STATE_COPY } from "@fanzup/shared/backing-copy";
 
 /**
  * Source: FanZuP MerchBag.tsx backing history (new).
@@ -14,19 +15,8 @@ import { formatDate, formatMoney } from "@/lib/format";
  * reports (FR-DSP-003, P0b) and PDF receipts (P1) come later; nothing here is mock data.
  */
 
-const MONEY: Record<MyBacking["moneyState"], { label: string; tone: "gold" | "success" | "info" | "warning" | "neutral"; help: string }> = {
-  pending: { label: "Payment pending", tone: "warning", help: "We're waiting for your payment to be confirmed." },
-  held: { label: "Held until the deadline", tone: "gold", help: "If the goal isn't reached by the deadline, you're refunded in full automatically." },
-  with_artist: { label: "Released in stages", tone: "info", help: "The campaign is funded. The artist receives the money as each milestone is verified." },
-  released: { label: "Released to the artist", tone: "success", help: "Every milestone has been released to the artist." },
-  refunding: { label: "Refund on its way", tone: "warning", help: "Your refund has started. It usually reaches your card within 5 business days." },
-  refunded: { label: "Refunded", tone: "neutral", help: "You were refunded in full." },
-  canceled: { label: "Not completed", tone: "neutral", help: "This checkout wasn't completed. Nothing was charged." },
-};
-
-const CAMPAIGN: Record<string, string> = {
-  live: "Live", funded: "Funded", released: "Funded · all milestones released", failed: "Didn't reach its goal", refunded: "Didn't reach its goal · refunded", closed: "Closed",
-};
+/** Copy shared with the mobile app (CR-004): one wording for where a fan's money is. */
+const MONEY = MONEY_STATE_COPY;
 
 export default function BackedAndPerksPage() {
   return (
@@ -89,7 +79,7 @@ function BackingRow({ b }: { b: MyBacking }) {
         <div className="grid gap-3 text-sm sm:grid-cols-3">
           <div>
             <p className="text-xs uppercase tracking-wide text-muted">Campaign</p>
-            <p>{CAMPAIGN[b.campaign.status] ?? b.campaign.status}</p>
+            <p>{campaignStatusLabel(b.campaign.status)}</p>
           </div>
           <div>
             <p className="text-xs uppercase tracking-wide text-muted">Your perk</p>

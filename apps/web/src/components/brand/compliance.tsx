@@ -9,6 +9,7 @@ import { Link } from "react-router";
 import type { ReactNode } from "react";
 import { Callout } from "./primitives";
 import { formatDate, parseDate } from "@/lib/format";
+import { REFUND_PROMISE, TEST_MODE_NOTICE } from "@fanzup/shared/backing-copy";
 import { useConfig } from "@/lib/config";
 
 /**
@@ -19,16 +20,8 @@ import { useConfig } from "@/lib/config";
  */
 export function EscrowNotice({ compact = false }: { compact?: boolean }) {
   return (
-    <Callout tone="gold" icon={<ShieldCheck />} title="Refunded in full if the goal isn't met">
-      {compact ? (
-        "If the goal isn't reached by the deadline, every backer is refunded in full automatically."
-      ) : (
-        <>
-          Your card is charged when you back. If the campaign doesn't reach its goal by the deadline, every backer is refunded in full,
-          automatically. If it does, the artist receives the money in stages. Backing gets you the perks listed; it is not an investment and
-          doesn't include any share of the artist's earnings.
-        </>
-      )}
+    <Callout tone="gold" icon={<ShieldCheck />} title={REFUND_PROMISE.title}>
+      {compact ? REFUND_PROMISE.compact : REFUND_PROMISE.full}
     </Callout>
   );
 }
@@ -41,15 +34,14 @@ export function TestModeNotice({ className }: { className?: string }) {
   // Shown until the API confirms live mode — which FR-PAY-008 refuses in M1 — so it never flickers off wrongly.
   if (cfg && !cfg.testMode) return null;
   return (
-    <Callout tone="warning" icon={<FlaskConical />} title="Test mode — no real money moves" className={className}>
-      FanZuP is in a test-money beta.{" "}
+    <Callout tone="warning" icon={<FlaskConical />} title={TEST_MODE_NOTICE.title} className={className}>
+      {TEST_MODE_NOTICE.intro}{" "}
       {cfg?.provider === "stripe-test" ? (
-        // Design §12.1 / SETUP Part C: this card's funds are available immediately, so artist payouts don't wait for funds.
-        <>Pay with the test card <span className="num">4000 0000 0000 0077</span> (any future expiry date, any CVC).</>
+        <>Pay with the test card <span className="num">{TEST_MODE_NOTICE.stripeTestCard}</span> {TEST_MODE_NOTICE.stripeTestCardHint}.</>
       ) : (
         <>Pay with a test card.</>
       )}{" "}
-      Artists don't owe perks for test backings; anything they send is a bonus.
+      {TEST_MODE_NOTICE.closing}
     </Callout>
   );
 }

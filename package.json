@@ -9,6 +9,7 @@
     "dev": "pnpm --parallel --filter @fanzup/web --filter @fanzup/api --filter @fanzup/mock-escrow dev",
     "dev:web": "pnpm --filter @fanzup/web dev",
     "dev:api": "pnpm --filter @fanzup/api dev",
+    "dev:mobile": "pnpm --filter @fanzup/mobile start",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

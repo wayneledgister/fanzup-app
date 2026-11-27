@@ -246,3 +246,10 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - Spec changes from the fixes: the agent worker logs in as `fanzup_agent` via `AGENT_DATABASE_URL` when deployed (design §2/§4/§9, ADR-008 decision 3, SETUP D3); column-limited inserts; `agent_runs.actor_kind` generated; lease 30 min with fenced completions; `artist_identity_status` and `agent_v_weekly_actions.subject_id` dropped.
 - Tests run here: API 358/358 (28 files), shared green, `pnpm -r typecheck` clean.
 
+## 2026-11-27 · CR-004 mobile app, Phase MOB-1 (`feat/mobile-app`)
+- Wayne asked for the React Native app with web and native both supported. CR-004 accepted (v-now, MOB-1). Specs: `specs/mobile/01…03`, ADR-009, `docs/MOBILE.md`.
+- Shared-code move (no web behaviour change): `@fanzup/shared` gains `api-client`, `checkout-flow`, `backing-copy`, `format`, `auth-rules`. The web's `lib/api.ts`, `lib/format.ts`, `Checkout.tsx`, `BackedAndPerks.tsx`, `CampaignDetail.tsx`, `SignUp.tsx`, `components/brand/compliance.tsx` and `components/public/auth.tsx` import them; their exports are unchanged.
+- Built `apps/mobile` (Expo SDK 58 / RN 0.88 / React 19.3): Explore, campaign, auth (sign up, log in, verify, forgot), checkout (PaymentSheet or sandbox form), Backed, Account. No API change.
+- Deviation from design: none. One wording note: `categorize` now also reads Stripe React Native's `declineCode` / `stripeErrorCode` fields; Stripe.js shapes are handled as before.
+- `lint:copy` extended to `apps/mobile` (Layer 1 rules on user-facing text) and `packages/shared/src/backing-copy.ts`.
+- Tests run here: shared 88/88, web 12/12, mobile 9/9; `pnpm -r typecheck`, `lint:copy`, web build and `expo export` (iOS + Android) clean. API tests and e2e not run here (CI).

@@ -3,9 +3,10 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { ArrowLeft, CircleAlert, Gift, Headphones, Mic2 } from "lucide-react";
 import { loadConfig } from "@/lib/config";
 import { Button, Callout, Checkbox, ChoiceCard, Field, IconChip, TextInput } from "@/components/brand";
-import { AuthCard, EMAIL_RE, PasswordInput, PasswordStrength, passwordScore } from "@/components/public/auth";
+import { AuthCard, PasswordInput, PasswordStrength } from "@/components/public/auth";
 import { safeNext, supabase } from "@/lib/supabase";
 import { anonId } from "@/lib/attribution";
+import { signUpErrors, signUpFailure, signUpMetadata } from "@fanzup/shared/auth-rules";
 
 /**
  * Source: FPS SignUpFlows.tsx (choice → credentials, artist variant).
@@ -37,14 +38,9 @@ export default function SignUp() {
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<string>();
 
-  const errors = {
-    name: !name.trim() ? "Tell us what to call you." : name.length > 60 ? "Keep it under 60 characters." : undefined,
-    email: !email ? "Enter your email address." : !EMAIL_RE.test(email) ? "That doesn't look like an email address." : undefined,
-    pwd: !pwd ? "Create a password." : passwordScore(pwd) < 3 ? "Use at least 8 characters with upper and lower case letters and a number." : undefined,
-    adult: !adult ? "You need to be 18 or older to use FanZuP." : undefined,
-    terms: !terms ? "You'll need to agree to continue." : undefined,
-  };
-  const show = (k: keyof typeof errors) => (submitted ? errors[k] : undefined);
+  const errors = signUpErrors({ name, email, password: pwd, adult, terms });
+  const errorKey = { name: "name", email: "email", pwd: "password", adult: "adult", terms: "terms" } as const;
+  const show = (k: keyof typeof errorKey) => (submitted ? errors[errorKey[k]] : undefined);
   const afterVerify = next || (role === "artist" ? "/artist-onboarding/basic" : "/explore");
 
   const submit = async (e: React.FormEvent) => {
@@ -67,22 +63,11 @@ export default function SignUp() {
       password: pwd,
       options: {
         emailRedirectTo: redirect,
-        data: {
-          display_name: name.trim(),
-          adult_attested: true,
-          terms_version: cfg.legal.termsVersion,
-          privacy_version: cfg.legal.privacyVersion,
-          anon_id: anonId(),
-        },
+        data: signUpMetadata(name, cfg.legal, anonId()),
       },
     });
     setLoading(false);
-    if (error) {
-      const msg = error.message.toLowerCase();
-      if (msg.includes("already registered")) return setFailure("This email already has an account. Log in instead.");
-      if (msg.includes("password")) return setFailure(error.message);
-      return setFailure("We couldn't create your account just now. Please try again in a moment.");
-    }
+    if (error) return setFailure(signUpFailure(error.message));
     if (data.session) return navigate(afterVerify, { replace: true }); // confirmations off (local dev only)
     navigate(`/verify-email?email=${encodeURIComponent(email.trim())}&next=${encodeURIComponent(afterVerify)}`, { replace: true });
   };
