@@ -12,6 +12,7 @@
 | MKT-T-006 | API tests (21): flag, lifecycle, re-review, browse filters, request rules, contact reveal, daily limit, suspension, RLS, no-money migration | §9 | ✅ |
 | MKT-T-007 | Web: `/services`, `/services/:slug` + request form, `/services/requests`, `/provider`, `/provider/requests`, `/admin/providers`; nav entries behind the server flag | FR-MKT-011 | ✅ |
 | MKT-T-008 | Mobile: Services tab (hidden unless flag), provider screen + request form, My service requests (from Services and Account) | FR-MKT-012 | ✅ |
+| MKT-T-015 | Docs in step (SDD audit): `docs/API.md` rows, README section and flag list, `docs/SETUP.md` A7, `docs/MOBILE.md`, FR-PLT-001 flag list, worklog, changelog, traceability regenerated | CR-005 | ✅ |
 | MKT-T-009 | *(Wayne)* Recruit ~20 providers across 4+ categories; 5 short interviews (discovery E2) | discovery E2 | ⏳ Wayne |
 | MKT-T-010 | *(Wayne)* Add MKT-Q1…Q8 to the custody/MTL counsel engagement | D-MKT-1 | ⏳ Wayne |
 | MKT-T-011 | Provider Terms and privacy-notice update before the flag goes on for real users | CR-005 ripple | Backlog (counsel) |

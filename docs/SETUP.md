@@ -100,6 +100,15 @@ TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres pnpm t
 - RLS
 - shared rules matching the database
 
+### A7. Try the services marketplace locally (CR-005; no money)
+The marketplace is off by default everywhere (`flag.marketplace`). Locally, turn it on in the database (local only: on a hosted project use the audited staff route below):
+```bash
+psql "postgresql://postgres:postgres@127.0.0.1:55322/postgres" \
+  -c "update public.platform_settings set value = 'true' where key = 'flag.marketplace'"
+```
+Then `pnpm dev`, sign in as any verified user and open `/provider` to create a provider profile and listings and submit it; sign in as the reviewer (`/admin/providers`, needs the TOTP step) to list it; sign in as an artist (`nova@fanzup.test`) and send a request from `/services`. On the phone, the Services tab appears once the API reports `flags.marketplace`.
+**Hosted (staging) when Wayne decides to open it:** `POST /api/v1/staff/flags/marketplace` with `{"on": true, "reason": "…"}` from a staff session with a second factor (audited `flag.set`). Before real users see it: Provider Terms and the privacy-notice update (CR-005).
+
 ---
 
 ## Part B: Create the hosted Supabase projects

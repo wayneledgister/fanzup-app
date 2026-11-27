@@ -5,7 +5,7 @@
 A new module beside campaigns, in the existing apps. No new service, no new partner, no new secret.
 
 ```
-apps/api/src/marketplace/        gate.ts · routes.ts (public, artist, provider, staff)
+apps/api/src/marketplace/        routes.ts (flag gate, public, artist, provider, staff routes) · service.ts (`provider.review` executor)
 supabase/migrations/20261127000100_marketplace.sql
 packages/shared/src/marketplace.ts   categories, schemas, copy, status rules (web + mobile + API)
 apps/web/src/pages/services/*    Browse, Provider, MyRequests, ProviderEditor, ProviderInbox
@@ -24,7 +24,7 @@ apps/mobile/app/(tabs)/services.tsx · app/services/[slug].tsx · app/services/r
 - Audit: request state changes and provider submissions write `audit_events` with ids only.
 
 ## 3. API
-All under `/api/v1`, all behind `marketplaceGate` (404 `marketplace_disabled` when the flag is off).
+All under `/api/v1`, all behind the flag gate in `routes.ts` (404 `marketplace_disabled` when the flag is off). Every route is also indexed in [`docs/API.md`](../../docs/API.md) (access, gate, shared contract), which CI checks against the registered routes.
 
 | Route | Who | Does |
 |---|---|---|
@@ -81,3 +81,7 @@ See ADR-010. In short: a booking will be a ledger subject like a backing; the ar
 | Personal data minimised | Contact only after accept, email only with consent (NFR-MKT-04) |
 | Store rules | Services performed outside the app aren't in-app purchases; MKT-1 has no payment at all |
 | Open risks | Two-sided cold start (discovery A1/A2); counsel on MKT-2; staff review load (single operator) |
+
+## Change log
+- 2026-11-27: first version (CR-005, PR #27).
+- 2026-11-27: SDD documentation audit: §1 names the files as built (no `gate.ts`: the gate lives in `routes.ts`; the `provider.review` executor in `service.ts`); §3 points at `docs/API.md`.

@@ -15,7 +15,7 @@ Consequential, expensive-to-reverse choices get a full ADR in this folder (templ
 | [ADR-007](ADR-007-regcf-provider-and-mock-escrow.md) | Reg CF provider boundary and a standalone mock escrow service | Proposed (CR-002, L2 G1+G2) · built and merged | 2026-10-03 | CR-002 |
 | [ADR-008](ADR-008-agent-layer.md) | Agent layer as an advisory sidecar with its own read-only database role | Proposed (CR-003, AGT G1+G2) · built and merged (PR #24) | 2026-11-26 | CR-003 |
 | [ADR-009](ADR-009-mobile-app.md) | Native app with Expo + React Native, sharing business rules with the web through `@fanzup/shared` | Proposed (CR-004) · built and merged (PR #25) | 2026-11-27 | CR-004 |
-| ADR-010 | Services marketplace: no money in MKT-1, one money boundary for MKT-2 | Accepted (CR-005) · in draft PR #27 | 2026-11-27 | CR-005 |
+| [ADR-010](ADR-010-services-marketplace-money-boundary.md) | Services marketplace: no money in MKT-1, one money boundary for MKT-2 | Accepted (CR-005; Wayne's decisions D-MKT-1/2) · PR #27 | 2026-11-27 | CR-005 |
 
 **Open:** ADR-003…009 are still *Proposed* because the G2/G1+G2 sign-offs they hang on are Wayne's to give (`specs/session-state.md`, pending decisions). The code that implements them is merged; marking them *Accepted* is a sign-off, not an edit.
 
