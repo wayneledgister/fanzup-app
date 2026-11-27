@@ -17,7 +17,7 @@ function documentedRoutes(): string[] {
   expect(end, "docs/API.md is missing its routes:end marker").toBeGreaterThan(start);
   const rows: string[] = [];
   for (const line of text.slice(start, end).split("\n")) {
-    const m = line.match(/^\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|\s*`([^`]+)`\s*\|/);
+    const m = line.match(/^\|\s*(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\s*\|\s*`([^`]+)`\s*\|/);
     if (m) rows.push(`${m[1]} ${m[2]}`);
   }
   return rows;
