@@ -30,7 +30,7 @@ When an alerting tool is connected, wire it to exactly these signals with the E1
 ## First five minutes (any SEV1 or SEV2)
 1. **Write down the time** and what you saw. Start a note; it becomes the postmortem timeline.
 2. **Is it from a deploy?** Vercel and Render show the last deploy time. If the problem started within an hour of one, roll back now (`deploy-and-rollback.md` §5) and investigate after.
-3. **Contain money.** If money may be moving wrongly: suspend the worker (Render → fanzup-worker → **Suspend**). That stops settlement, refunds and payouts; checkouts still work and captures queue as provider events, which the worker processes when resumed. If checkout itself is the problem, there's no pause switch yet (gap R-3a): roll back, or as a last resort take the API down by removing `STRIPE_WEBHOOK_SECRET` in Vercel and redeploying (it then serves 503 `misconfigured`, nothing is charged) — Stripe keeps retrying webhooks for up to 3 days, so none are lost.
+3. **Contain money.** If money may be moving wrongly: suspend the worker (Render → fanzup-worker → **Suspend**). That stops settlement, refunds and payouts; checkouts still work and captures queue as provider events, which the worker processes when resumed. If checkout itself is the problem, there's no pause switch yet (gap R-3a): roll back, or as a last resort take the API down by removing `STRIPE_WEBHOOK_SECRET` in Vercel and redeploying (it then serves 503 `misconfigured`, nothing is charged) — Stripe keeps retrying failed webhooks (for up to 3 days in live mode, for a shorter period in test mode), and any it gives up on can be resent from the dashboard, so none are lost.
 4. **Get a correlation id** from the error (user's screen, `api.error` line, alert line) and run `staff trace <id>`.
 5. **Pick the section below** and follow it.
 
@@ -53,7 +53,7 @@ When an alerting tool is connected, wire it to exactly these signals with the E1
    - **400 signature:** `STRIPE_WEBHOOK_SECRET` in Vercel doesn't match the endpoint's signing secret (it changes if the endpoint is recreated). Copy it again, redeploy.
    - **503 misconfigured / database_unavailable:** see §7 / §6.
    - **500:** find the `api.error` line by time, trace its correlation id.
-2. Once fixed, Stripe retries automatically (up to 3 days). To hurry one: Stripe → the event → **Resend**.
+2. Once fixed, Stripe retries automatically (up to 3 days in live mode; test mode retries for a shorter period, so check for events it gave up on). To hurry one, or to recover one Stripe stopped retrying: Stripe → the event → **Resend**.
 3. Events stored but failing to process (`failed_events` queue; `provider_event.dead_letter` alert): read the error on the row, fix the cause, then `POST /api/v1/staff/provider-events/:id/replay` with a reason.
 4. **Late captures are safe:** a capture that lands after its campaign settled is refunded automatically (FR-PAY-003); watch for `capture.stray` and confirm its refund op completes.
 5. **Check:** `staff queue failed_events` empty; pending backings move to `held`.
@@ -83,7 +83,7 @@ When an alerting tool is connected, wire it to exactly these signals with the E1
 
 ## 5. Suspected fraud campaign (SEV2; SEV1 once money is real)
 **Symptom:** reports from fans, odd backing patterns (many small backings from new accounts, card testing), evidence that looks fake, an artist identity that doesn't hold up.
-1. **Don't verify any milestone** on it. Verification is the only way money reaches the artist (FR-PAY-005), and it needs your second factor.
+1. **Don't verify any milestone** on it. Tranche 1 is paid automatically when a campaign is funded; every later tranche needs your verification with a second factor (FR-PAY-005), so a campaign that hasn't reached its deadline yet has received nothing. If it's live and suspect, refund its backings before the deadline (step 3) rather than let it fund.
 2. Look at it: `staff trace` on its backings, the artist's onboarding status in Stripe Connect, the agent review packet if the agent layer is on (`GET /api/v1/staff/agents/proposals?subjectId=<campaign>`; advisory only).
 3. Refund individual backings if needed: `staff refund <backingId>` (privileged, reason, delayed above the threshold; refused if it would run after the deadline — a failing campaign refunds everyone automatically).
 4. There's **no suspend or takedown action yet** (break-glass suspension FR-CMP-007 is M2). Until then: don't verify, refund what's needed, and if the campaign must disappear from discovery, remove it with a reviewed SQL change and record it.

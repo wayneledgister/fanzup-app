@@ -27,7 +27,7 @@ Run through this on the PR. Each line is quick; skipping one is how a bad deploy
 | 1 | CI is green on the PR: Web, API, Mobile and E2E jobs | PR → Checks. E2E isn't a required check yet (readiness C-4), so look at it yourself |
 | 2 | The Vercel preview works | PR → Vercel bot comment → open the preview; `…/api/health` returns `ok:true` (or the intended 503 `misconfigured` if preview env vars aren't set) |
 | 3 | Migrations are expand-only, or the contract step's callers are already gone | Read every new file in `supabase/migrations/`. Any `drop`, `rename`, `alter … type`, `not null` without default, or changed function signature → stop and split the PR |
-| 4 | Ledger or audit tables touched? | Any migration that touches `ledger_*`, `audit_*`, money functions or RLS on them needs a second review pass (NFR-OPS-07; single-maintainer rule: recorded agent review + a day's delay) |
+| 4 | Ledger or audit tables touched? | Any migration that touches `ledger_*`, `audit_*`, money functions or RLS on them needs a second review pass (NFR-OPS-07; the single-maintainer rule proposed in the backlog is a recorded agent review plus a delay before merge) |
 | 5 | New env var? | Added to `apps/api/src/env.ts`, `apps/api/.env.example`, `docs/SETUP.md` D1/D2, `render.yaml` (if the worker needs it) and **set in Vercel/Render before merging**. A deployed API with missing config serves 503 `misconfigured` (by design, NFR-SEC-04) |
 | 6 | New route? | Row in `docs/API.md` (the drift test fails otherwise) |
 | 7 | Risky path behind a flag? | New user-facing money or marketplace behaviour ships with its flag off (`flag.*` in `platform_settings`); turn it on after the deploy is verified |
@@ -95,7 +95,7 @@ Pick the least destructive option that works:
 3. **Point-in-time restore (last resort; data loss).** Supabase → Database → Backups → **Point in time** → a time just before the bad migration. Everything written after that time is lost, including backings, provider events and ledger postings. Before you do it:
    - Turn the worker off (Render → Suspend) so nothing settles during the restore.
    - Note the restore time; afterwards, every Stripe event and money movement after it must be replayed or reconciled: run `staff recon run` and work every break (incidents §4) before resuming the worker.
-   - Needs the Pro plan with the PITR add-on (NFR-OPS-01/02). **The staging project is on a plan without backups and is currently paused**, and `fanzup-prod` doesn't exist yet (readiness R-2, risk R-01). Until that's fixed, option 3 isn't available.
+   - Needs the Pro plan with the PITR add-on (NFR-OPS-01/02). **The staging project appears to be on the Free plan (only Free projects pause), which has no restorable backups, and it is currently paused**, and `fanzup-prod` doesn't exist yet (readiness R-2, risk R-01). Until that's fixed, option 3 isn't available.
 4. **Never** run `supabase db reset --linked` on a hosted project: it drops the data and loads the seed (published passwords, a staff account; NFR-SEC-07, SETUP B3a).
 
 ### 5.5 After any rollback
