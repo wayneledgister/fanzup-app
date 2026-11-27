@@ -3,6 +3,8 @@
  *  - layer2:   Reg CF securities surfaces (investor KYC, investing, holdings, revenue-share Pools). A SERVER flag
  *              (CR-002, L2 design §2): the API serves Layer 2 only with the mock Reg CF provider (local/CI) and the
  *              database flag on, and reports it as `flags.layer2` in GET /v1/config.
+ *  - marketplace: the artist services marketplace (CR-005). A SERVER flag like layer2: `flag.marketplace` in the
+ *              database, reported as `flags.marketplace`; a production build ignores client overrides for it.
  *  - postBeta: Post-Beta surfaces (secondary soft transfer, holder votes). A client flag.
  *
  * Client overrides — `VITE_FLAG_<NAME>=true` at build time, or `?flags=layer2,postBeta` in the URL (kept for the
@@ -14,15 +16,15 @@
 import { useSyncExternalStore } from "react";
 import { useConfig } from "./config";
 
-export type Flag = "layer2" | "postBeta";
-const ALL: Flag[] = ["layer2", "postBeta"];
+export type Flag = "layer2" | "postBeta" | "marketplace";
+const ALL: Flag[] = ["layer2", "postBeta", "marketplace"];
 const KEY = "fanzup.flags";
 
 /** True in a production build. A function so tests can stub `import.meta.env.PROD`. */
 const isProd = () => !!(import.meta.env as Record<string, unknown>).PROD;
 
 /** Flags whose client overrides a production build ignores (the server decides). */
-const SERVER_ONLY_IN_PROD: ReadonlySet<Flag> = new Set(["layer2"]);
+const SERVER_ONLY_IN_PROD: ReadonlySet<Flag> = new Set(["layer2", "marketplace"]);
 
 function envDefault(flag: Flag): boolean {
   if (isProd() && SERVER_ONLY_IN_PROD.has(flag)) return false;
@@ -73,7 +75,7 @@ export function reloadOverrides() {
 }
 
 /** Server flags as GET /v1/config reports them (null while loading or when the API is unreachable). */
-export type ServerFlags = { layer2?: boolean; layer2Completion?: boolean } | null | undefined;
+export type ServerFlags = { layer2?: boolean; layer2Completion?: boolean; marketplace?: boolean } | null | undefined;
 
 /**
  * The one rule for whether a flag is on (pure; unit-tested in test/flags.test.ts):
@@ -83,8 +85,8 @@ export type ServerFlags = { layer2?: boolean; layer2Completion?: boolean } | nul
  *  - other flags: the client override/env.
  */
 export function resolveFlag(flag: Flag, client: boolean, server: ServerFlags, prod = isProd()): boolean {
-  if (flag !== "layer2") return client;
-  const serverOn = !!server?.layer2;
+  if (flag !== "layer2" && flag !== "marketplace") return client;
+  const serverOn = !!server?.[flag];
   return prod ? serverOn : client || serverOn;
 }
 

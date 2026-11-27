@@ -5,7 +5,8 @@ Add your entry in the PR that makes the change, under **Unreleased**.
 
 ## Unreleased
 - **Docs: specs and wire contracts brought up to date with `main`** (SDD audit, 2026-11-27). Added `docs/API.md` (every API route, with a CI test that fails on drift), the generated requirements traceability matrix `specs/traceability.md` (CI fails when stale), the ADR index and decision log `docs/adr/README.md`, this changelog, and a current `specs/session-state.md`. M1 design §4.2 gains the routes it was missing. No behaviour change; `buildApp` takes an optional `onRoute` callback for the route inventory.
-- *Open:* services marketplace MKT-1 (CR-005, ADR-010) — draft PR #27. User-policy first drafts for counsel — draft PR #28.
+- **#27 Services marketplace, Phase MKT-1 (CR-005, ADR-010).** Vetted third-party providers, listings, service requests, provider accept/decline and staff vetting (`provider.review`) on web and mobile, behind `flag.marketplace` (off). Moves no money: artist and provider pay off-platform until counsel picks the MKT-2 flow of funds. 13 routes under `/v1/services`, `/v1/provider`, `/v1/staff/marketplace` (`docs/API.md`); migration `20261127000100_marketplace.sql`; `@fanzup/shared/marketplace`. End-to-end journey `e2e/marketplace.spec.ts` (provider lists, staff vets, artist requests, provider accepts) runs in the CI E2E job.
+- *Open:* user-policy first drafts for counsel — draft PR #28.
 
 ## 2026-11-27
 - **#26 fix(deploy): keep the API on TypeScript 5.9 so Vercel can build it.** Vercel compiles `apps/api` with the TypeScript JS API, which TypeScript 7 (from #16) doesn't ship. `apps/api` pins `typescript ~5.9.3`; CI checks the API's TypeScript has `transpileModule`; Dependabot ignores TypeScript major bumps. Decision log DL-001.

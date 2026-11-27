@@ -8,6 +8,10 @@ const COPY: Record<Flag, { title: string; body: string }> = {
     title: "Investing isn't open yet",
     body: "Revenue-share Pools aren't available right now. You can still back campaigns, subscribe, and shop merch and tickets.",
   },
+  marketplace: {
+    title: "Services aren't open yet",
+    body: "The services marketplace for artists isn't available right now. You can still run and back campaigns.",
+  },
   postBeta: {
     title: "Coming after launch",
     body: "This feature is planned for after the Beta and isn't available yet.",

@@ -147,8 +147,12 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
 
   /** FR-PLT-001: flag changes are privileged and audited. Layer 2 additionally needs REGCF_PROVIDER=mock, refused when deployed. */
   app.post<{ Params: { flag: string } }>("/flags/:flag", async (req) => {
-    if (req.params.flag !== "layer2" && req.params.flag !== "agents") throw new HttpError(404, "not_found", "Unknown flag.");
+    if (!["layer2", "agents", "marketplace"].includes(req.params.flag)) throw new HttpError(404, "not_found", "Unknown flag.");
     const b = z.object({ on: z.boolean(), reason: z.string() }).parse(req.body);
+    if (req.params.flag === "marketplace") {
+      // CR-005: the services marketplace moves no money in MKT-1 (ADR-010), so it needs no provider.
+      return { action: await privileged(d, { action: "flag.set", subjectId: null, reason: b.reason, params: { flag: "marketplace", on: b.on } }) };
+    }
     if (req.params.flag === "agents") {
       // CR-003: the agent layer is advisory; turning it on needs no provider (the agent worker brings its own model config).
       return { action: await privileged(d, { action: "flag.set", subjectId: null, reason: b.reason, params: { flag: "agents", on: b.on } }) };

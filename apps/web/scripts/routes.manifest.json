@@ -712,5 +712,47 @@
 "ds/DesignSystem",
 "",
 "src/pages/ComponentShowcase.tsx + DesignSystemDocs.tsx + IconLibrary.tsx + LayoutGrid.tsx"
+],
+[
+"public",
+"/services",
+"services/Browse",
+"marketplace",
+"(new) CR-005 MKT-1 services browse \u2014 FR-MKT-005"
+],
+[
+"fan",
+"/services/requests",
+"services/MyRequests",
+"marketplace",
+"(new) CR-005 MKT-1 artist's service requests \u2014 FR-MKT-010"
+],
+[
+"public",
+"/services/:slug",
+"services/ProviderPage",
+"marketplace",
+"(new) CR-005 MKT-1 provider page + request form \u2014 FR-MKT-006/007"
+],
+[
+"fan",
+"/provider",
+"services/ProviderEditor",
+"marketplace",
+"(new) CR-005 MKT-1 provider profile + listings \u2014 FR-MKT-003/004"
+],
+[
+"fan",
+"/provider/requests",
+"services/ProviderInbox",
+"marketplace",
+"(new) CR-005 MKT-1 provider inbox \u2014 FR-MKT-009"
+],
+[
+"admin",
+"/admin/providers",
+"admin/ServiceProviders",
+"marketplace",
+"(new) CR-005 MKT-1 staff vetting \u2014 FR-MKT-008"
 ]
 ]

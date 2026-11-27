@@ -4,6 +4,8 @@ The app lives in `apps/mobile` (Expo SDK 58, React Native 0.88, Expo Router). It
 
 What's in it (Phase MOB-1): Explore (live / funded), campaign page, sign up / log in / verify / forgot password, checkout (Stripe PaymentSheet, or the sandbox form locally), My backings, Account. No Layer 2, no artist or staff screens.
 
+Added by CR-005 (MKT-1): a **Services** tab (browse vetted providers, provider page with the request form) and **My service requests** (from Services and Account). The tab is hidden unless the API reports `flags.marketplace`; provider and staff tools stay on the web.
+
 You don't need Xcode or Android Studio. Day to day you use **Expo Go** on your phone; store builds run in the cloud on **EAS Build**.
 
 ## 1. Run it on your phone (Expo Go, local stack)

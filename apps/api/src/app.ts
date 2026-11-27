@@ -25,6 +25,7 @@ import type { RegCfProvider } from "./regcf";
 import { l2CreatorRoutes, l2DevRoutes, l2FanRoutes, l2InvestorRoutes, l2StaffReadRoutes, l2StaffRoutes } from "./l2/routes";
 import { l2On } from "./l2/gate";
 import { l2Tick } from "./l2/service";
+import { marketplaceOn, marketplaceRoutes, marketplaceStaffRoutes, providerRoutes } from "./marketplace/routes";
 
 /** Public path prefix. Vercel routes /api/* to this service and does NOT strip the prefix. */
 export const API_PREFIX = "/api";
@@ -140,7 +141,8 @@ export async function buildApp(deps: Deps, opts: BuildOptions = {}): Promise<Fas
     // FR-PLT-001: the server's view of the flags (the web app's ?flags= override reveals mock-only screens, never data).
     // `layer2Completion` (L2 design §2, L2-T-038): the completion routes (an investor's own investment + cancel) answer
     // because the mock provider is configured, whatever the DB flag says. Never true in a deployed environment.
-    flags: { layer2: await l2On(deps).catch(() => false), layer2Completion: !!deps.regcf && !deps.env.deployed },
+    flags: { layer2: await l2On(deps).catch(() => false), layer2Completion: !!deps.regcf && !deps.env.deployed,
+      marketplace: await marketplaceOn(deps).catch(() => false) },
     legal: { termsVersion: POLICY.legal.termsVersion, privacyVersion: POLICY.legal.privacyVersion },
   }));
 
@@ -151,6 +153,10 @@ export async function buildApp(deps: Deps, opts: BuildOptions = {}): Promise<Fas
   await app.register(artistRoutes(deps), { prefix: `${API_PREFIX}/v1/artist` });
   await app.register(staffRoutes(deps), { prefix: `${API_PREFIX}/v1/staff` });
   await app.register(internalRoutes(deps), { prefix: `${API_PREFIX}/internal` });
+  // Services marketplace (CR-005): every route behind `flag.marketplace`; no money (ADR-010).
+  await app.register(marketplaceRoutes(deps), { prefix: `${API_PREFIX}/v1/services` });
+  await app.register(providerRoutes(deps), { prefix: `${API_PREFIX}/v1/provider` });
+  await app.register(marketplaceStaffRoutes(deps), { prefix: `${API_PREFIX}/v1/staff/marketplace` });
   // Layer 2 (CR-002; design §2, §9): entry routes behind the server-side layer2 gate (provider + flag); completion
   // routes (investor cancel / own investment, staff money view / recon / collection state) need the mock provider only.
   await app.register(l2FanRoutes(deps), { prefix: `${API_PREFIX}/v1` });

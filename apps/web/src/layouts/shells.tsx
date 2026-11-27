@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, ScrollRestoration, useLocation } from "react-rou
 import {
   Disc3, Fingerprint,
   Bell, CalendarDays, Compass, Gem, Home, LayoutDashboard, LineChart, Menu, Package, Radio, Receipt, Settings, ShieldCheck,
-  Sparkles, Ticket, Upload, User, Users, Wallet, X, Megaphone, Landmark, Vote, ClipboardList,
+  Sparkles, Ticket, Upload, User, Users, Wallet, X, Megaphone, Landmark, Vote, ClipboardList, Wrench, Briefcase, Inbox, Store,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFlag, setFlag, allFlags, useLayer2Completion } from "@/lib/flags";
@@ -38,14 +38,16 @@ function AccountActions({ mobile = false, onDone }: { mobile?: boolean; onDone?:
 }
 
 /** `completion`: a layer2 item also shown on the server's completion signal (flag off; L2-T-038, review round 2 finding 2). */
-type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta"; completion?: boolean; end?: boolean };
+type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta" | "marketplace"; completion?: boolean; end?: boolean };
 
 /* ── Public (marketing + discovery) ─────────────────────── */
 
 export function PublicShell() {
   const [open, setOpen] = useState(false);
+  const marketplace = useFlag("marketplace");
   const links = [
     { to: "/explore", label: "Discover" },
+    ...(marketplace ? [{ to: "/services", label: "Services" }] : []),
     { to: "/#how-it-works", label: "How it works" },
     { to: "/for-artists", label: "For artists" },
     { to: "/fees", label: "Fees" },
@@ -184,6 +186,9 @@ const FAN_NAV: NavItem[] = [
   { to: "/pools", label: "Pools", icon: Disc3, flag: "layer2" },
   { to: "/portfolio", label: "Portfolio", icon: LineChart, flag: "layer2", completion: true },
   { to: "/governance", label: "Holder votes", icon: Vote, flag: "postBeta" },
+  // CR-005 (FR-MKT-011): the services marketplace, only when the server flag is on.
+  { to: "/services", label: "Services", icon: Wrench, flag: "marketplace" },
+  { to: "/provider", label: "Provider profile", icon: Briefcase, flag: "marketplace", end: true },
 ];
 const FAN_SECONDARY: NavItem[] = [
   { to: "/profile", label: "Profile", icon: User },
@@ -198,6 +203,8 @@ const CREATOR_NAV: NavItem[] = [
   { to: "/creator/content", label: "Content", icon: Upload },
   { to: "/creator/events", label: "Events", icon: CalendarDays },
   { to: "/creator/streaming", label: "Live", icon: Radio },
+  { to: "/services", label: "Find services", icon: Wrench, flag: "marketplace" },
+  { to: "/services/requests", label: "Service requests", icon: Inbox, flag: "marketplace" },
   { to: "/creator/payouts", label: "Payouts", icon: Landmark },
   { to: "/creator/tax", label: "Tax documents", icon: Receipt },
 ];
@@ -208,13 +215,16 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/admin/kyc", label: "Identity review", icon: Users },
   { to: "/admin/pools", label: "Pools (Layer 2)", icon: Disc3, flag: "layer2" },
   { to: "/admin/investors", label: "Investor KYC", icon: Fingerprint, flag: "layer2" },
+  { to: "/admin/providers", label: "Service providers", icon: Store, flag: "marketplace" },
 ];
 
 function SideNav({ items, secondary, onNavigate }: { items: NavItem[]; secondary?: NavItem[]; onNavigate?: () => void }) {
   const layer2 = useFlag("layer2");
   const postBeta = useFlag("postBeta");
+  const marketplace = useFlag("marketplace");
   const completion = useLayer2Completion();
-  const visible = (i: NavItem) => !i.flag || (i.flag === "layer2" ? layer2 || (!!i.completion && completion) : postBeta);
+  const visible = (i: NavItem) =>
+    !i.flag || (i.flag === "layer2" ? layer2 || (!!i.completion && completion) : i.flag === "marketplace" ? marketplace : postBeta);
   const link = (i: NavItem) => (
     <NavLink
       key={i.to}
@@ -332,9 +342,10 @@ export const AdminShell = () => <AppFrame items={ADMIN_NAV} mode="admin" />;
 function DevFlagPanel() {
   const layer2 = useFlag("layer2");
   const postBeta = useFlag("postBeta");
+  const marketplace = useFlag("marketplace");
   const [open, setOpen] = useState(false);
   if (!import.meta.env.DEV) return null;
-  const vals = { layer2, postBeta };
+  const vals = { layer2, postBeta, marketplace };
   return (
     <div className="fixed bottom-20 right-4 z-50 lg:bottom-4">
       {open ? (

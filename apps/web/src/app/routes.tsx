@@ -107,6 +107,12 @@ const P98 = lazy(() => import("@/pages/admin/Pools"));
 const P99 = lazy(() => import("@/pages/admin/Pool"));
 const P100 = lazy(() => import("@/pages/admin/Investors"));
 const P101 = lazy(() => import("@/pages/ds/DesignSystem"));
+const P102 = lazy(() => import("@/pages/services/Browse"));
+const P103 = lazy(() => import("@/pages/services/MyRequests"));
+const P104 = lazy(() => import("@/pages/services/ProviderPage"));
+const P105 = lazy(() => import("@/pages/services/ProviderEditor"));
+const P106 = lazy(() => import("@/pages/services/ProviderInbox"));
+const P107 = lazy(() => import("@/pages/admin/ServiceProviders"));
 
 const S = (n: ReactNode) => <Suspense fallback={<RouteFallback />}>{n}</Suspense>;
 
@@ -124,6 +130,8 @@ export const router = createBrowserRouter([
       { path: "/trust", element: S(<P7 />) },
       { path: "/legal/:doc", element: S(<P8 />) },
       { path: "/support", element: S(<P9 />) },
+      { path: "/services", element: S(<FeatureRoute flag="marketplace"><P102 /></FeatureRoute>) },
+      { path: "/services/:slug", element: S(<FeatureRoute flag="marketplace"><P104 /></FeatureRoute>) },
     ],
   },
   {
@@ -207,6 +215,9 @@ export const router = createBrowserRouter([
       { path: "/investments/:id", element: S(<FeatureRoute flag="layer2" allowCompletion><P50 /></FeatureRoute>) },
       { path: "/portfolio/:poolId/transfer", element: S(<FeatureRoute flag="postBeta"><P51 /></FeatureRoute>) },
       { path: "/governance", element: S(<FeatureRoute flag="postBeta"><P52 /></FeatureRoute>) },
+      { path: "/services/requests", element: S(<FeatureRoute flag="marketplace"><P103 /></FeatureRoute>) },
+      { path: "/provider", element: S(<FeatureRoute flag="marketplace"><P105 /></FeatureRoute>) },
+      { path: "/provider/requests", element: S(<FeatureRoute flag="marketplace"><P106 /></FeatureRoute>) },
     ],
   },
   {
@@ -240,6 +251,7 @@ export const router = createBrowserRouter([
       { path: "/admin/pools", element: S(<FeatureRoute flag="layer2" allowCompletion><P98 /></FeatureRoute>) },
       { path: "/admin/pools/:id", element: S(<FeatureRoute flag="layer2" allowCompletion><P99 /></FeatureRoute>) },
       { path: "/admin/investors", element: S(<FeatureRoute flag="layer2" allowCompletion><P100 /></FeatureRoute>) },
+      { path: "/admin/providers", element: S(<FeatureRoute flag="marketplace"><P107 /></FeatureRoute>) },
     ],
   },
   { path: "/ds", element: S(<P101 />) },

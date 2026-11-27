@@ -80,6 +80,19 @@ export const POLICY = {
   /** NFR-SEC-13, FR-TAX-004 (E1 Security). Recorded at M1; enforced at M2. */
   rateLimits: { backingPerMinute: 5, backingPerHour: 20, writesPerMinutePerUser: 60, writesPerMinutePerIp: 120 },
   staff: { idleTimeoutMinutes: 15 },
+  /** Services marketplace, Phase MKT-1 (CR-005, specs/marketplace/01-requirements.md). No money; policy defaults. */
+  marketplace: {
+    /** FR-MKT-007: new service requests per user per UTC day (anti-spam). */
+    requestsPerDay: 10,
+    /** FR-MKT-004. */
+    maxListings: 10,
+    /** FR-MKT-003. */
+    maxCategories: 5,
+    maxLinks: 5,
+    /** FR-MKT-004: starting-price guide ceiling ($100,000). */
+    maxPriceFromMinor: 10_000_000,
+    pageSize: 20,
+  },
   /** Agent layer, Phase 0 (CR-003, specs/agents/02-design.md §3). Advisory only; nothing here gates money. */
   agents: {
     /** FR-AGT-F-003: attempts before a task is dead (or, after a model failure, ships deterministic-only). */

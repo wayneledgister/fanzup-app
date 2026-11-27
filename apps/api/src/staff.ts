@@ -15,6 +15,7 @@ import { log, redact } from "./log";
 import type { Deps } from "./app";
 import { processEventById } from "./inbox";
 import { commitDistribution } from "./l2/service";
+import { executeProviderReview } from "./marketplace/service";
 
 export async function requireStaff(req: FastifyRequest, d: Pick<Deps, "verify" | "sql">): Promise<Claims> {
   const u = await requireUser(req, d.verify);
@@ -36,7 +37,9 @@ export type ActionName =
   | "pool.review" | "pool.collection_execute" | "investor.kyc_decide" | "pool_tranche.verify" | "pool.distribution_commit" | "pool.collection_state"
   | "pool.deposit_simulate" | "flag.set" | "pool_op.replay" | "pool_break.resolve"
   // Agent layer (CR-003): a staff verdict on an agent proposal. Not a money action; changes nothing but the verdict.
-  | "agent_proposal.verdict";
+  | "agent_proposal.verdict"
+  // Services marketplace (CR-005, FR-MKT-008): list, request changes or suspend a provider. Not a money action.
+  | "provider.review";
 
 /**
  * Layer 2 break kinds only staff close (`pool_break.resolve`, review round 3 follow-up): money-path breaks raised by the
@@ -249,6 +252,9 @@ const EXECUTORS: Record<ActionName, Executor> = {
     if (!rows.length) throw new HttpError(409, "verdict_exists", "This proposal already has a verdict.");
     return rows[0];
   },
+  "provider.review": async (d, a) => {
+    await executeProviderReview(d.sql, a.subject_id!, a.actor_id, a.params as { decision: string; note: string | null; version: string });
+  },
   "flag.set": async (d, a) => {
     const p = a.params as { flag: string; on: boolean };
     await asService(d.sql, (tx) => tx`
@@ -276,6 +282,8 @@ async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | n
         left join public.artists a on a.id = c.artist_id where p.id = $1) a`,
     // Staff can't decide their own KYC: the "owner" of an investor subject is the investor.
     "investor.kyc_decide": "(select $1::uuid as owner_id) a",
+    // Staff can't vet their own provider profile (FR-MKT-008).
+    "provider.review": "public.service_providers a where a.id = $1",
   };
   const clause = from[action];
   if (!clause) return null;
