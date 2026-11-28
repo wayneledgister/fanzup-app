@@ -13,6 +13,7 @@ Direct-to-fan funding for independent artists. *Fund the culture. Own the future
 
 **Start here:**
 - **[docs/SETUP.md](docs/SETUP.md):** step-by-step setup, including everything that needs your accounts.
+- **[specs/runbooks/](specs/runbooks/README.md):** deploy, rollback and incident runbooks (severity matrix, top failure modes, postmortem template). Readiness review: [specs/05-readiness.md](specs/05-readiness.md); risk log: [specs/risks.md](specs/risks.md); money-flow FMEA: [specs/fmea.md](specs/fmea.md); architecture diagrams: [specs/diagrams/](specs/diagrams/README.md).
 - [docs/API.md](docs/API.md): every API route, its access level, gate, shared contract and spec (CI fails if it drifts from the code).
 - [docs/adr/](docs/adr/README.md): architecture decisions (ADR index and decision log); [ADR-001](docs/adr/ADR-001-monorepo.md) explains why this is one repo.
 - [docs/MOBILE.md](docs/MOBILE.md): running the iOS/Android app and the store path.

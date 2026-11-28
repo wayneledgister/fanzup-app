@@ -63,6 +63,17 @@ One row per condition carried forward in `gates/G2-design.md` pass 2 ("Condition
 | L2: verify `cap_overflow_minor` against fan share − Σ payouts at commit | PR #11 review round 2 | Waterfall data stored only after SQL check | S | 2026-10-12 |
 | M1: on real Stripe, confirm wait-for-funds payout retries aren't replaying a stored `balance_insufficient` for 24 h (use the attempt generation if so) | PR #7 fixer note | Payouts resume as soon as the float is topped up | S | 2026-10-12 |
 
+## From the readiness review (2026-11-27, `specs/05-readiness.md`)
+Closed-beta blockers B1–B8 are tracked in the review itself; these are the smaller items it found.
+
+| Item | Origin | Value hypothesis | Size | Added |
+|---|---|---|---|---|
+| Operator script: `staff replay-op <id>`, `staff replay-event <id>`, `staff flag <flag> on\|off` (routes exist) | Readiness D-2a; runbooks | Incident steps run from one tool, not hand-made API calls | S | 2026-11-27 |
+| Staff route to resolve a core recon break raised by the money path (`amount_mismatch`, `currency_mismatch`, `waiting_funds`), privileged with a reason | Readiness D-2b; incidents §4 | No SQL in an incident | S | 2026-11-27 |
+| Degrade switches `flag.checkout` / `flag.payouts` honoured by the API and worker (NFR-OPS-12) | Readiness R-3a; risk R-15 | Stop checkout or payouts in under 5 minutes without a rollback | S | 2026-11-27 |
+| Bump `react-router` (pinned 7.13.0) to ≥ 7.18.2 and `zod` to a patched line; `pnpm audit --audit-level high` in CI | Readiness S-4; risk R-09 | No known high CVEs ship | S | 2026-11-27 |
+| "Pending backings older than 30 min" and outbox-age signals in `/api/health` for the external monitor | FMEA F-04, F-08 | Webhook backlogs and stalls page someone | S | 2026-11-27 |
+
 ## Agent layer, Phases 1–3 (CR-003)
 Origin: `specs/agents/00-strategy.md` §4. Each is built when its milestone's data exists, in shadow mode first.
 
