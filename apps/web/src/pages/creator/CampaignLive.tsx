@@ -191,7 +191,7 @@ function StatusBanner({ c, onChanged }: { c: MyCampaign; onChanged: () => void }
       );
     case "in_review":
       return (
-        <Callout tone="warning" icon={<CalendarCheck />} title={`Submitted for review on ${formatDay(c.updatedAt)}`} className="mb-6">
+        <Callout tone="warning" icon={<CalendarCheck />} title={`In review since ${formatDay(c.updatedAt)}`} className="mb-6">
           Our team checks every campaign before it goes live, {POLICY.campaign.reviewEstimate}. We'll email you when it's approved or if anything needs changes.
         </Callout>
       );

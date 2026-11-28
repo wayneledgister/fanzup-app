@@ -79,7 +79,7 @@ export function nextSteps(artist: MyArtist | null): NextStep[] {
       id: "payout",
       label: started ? "Finish setting up your payout account" : "Connect your payout account",
       detail: "We verify your identity through it, and you need it before a campaign can be submitted.",
-      to: "/creator?payout=start",
+      to: "/creator", // the web renders a button that starts hosted onboarding
     });
   }
   if (!live.length) steps.push({ id: "first-campaign", label: "Start your first campaign", detail: "Set a goal, a deadline and the perks you'll deliver.", to: "/creator/campaigns/new/basics" });

@@ -128,7 +128,7 @@ function statusLine(c: MyCampaignSummary) {
     case "draft":
       return <>Last edited {formatDay(c.updatedAt)}</>;
     case "in_review":
-      return <>Submitted {formatDay(c.updatedAt)} · our team is reviewing it, {POLICY.campaign.reviewEstimate}</>;
+      return <>In review since {formatDay(c.updatedAt)} · {POLICY.campaign.reviewEstimate}</>;
     case "revisions_requested":
       return <>Our reviewers asked for changes</>;
     case "approved":
