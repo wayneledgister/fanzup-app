@@ -83,7 +83,56 @@ See ADR-010. In short: a booking will be a ledger subject like a backing; the ar
 | Store rules | Services performed outside the app aren't in-app purchases; MKT-1 has no payment at all |
 | Open risks | Two-sided cold start (discovery A1/A2); counsel on MKT-2; staff review load (single operator) |
 
+## 12. Closed beta (CR-007, ADR-012)
+### 12.1 Data (migration `20261128000100_marketplace_beta.sql`)
+| Object | Key columns / value | Notes |
+|---|---|---|
+| setting `marketplace.audience` | `"invited"` \| `"open_requests"` \| `"everyone"` | read by `public.marketplace_audience()`; written only by the `marketplace.audience` executor |
+| `marketplace_invites` | `id`, `code_hash` (unique, SHA-256 hex), `email` (citext), `name`, `kind` (`provider`\|`artist`), `note`, `created_by`, `expires_at`, `redeemed_by`, `redeemed_at`, `revoked_at` | partial unique index: one open invite per email |
+| `marketplace_members` | `user_id` (pk → profiles), `kind`, `invite_id`, `joined_at`, `removed_at`, `removed_by` | `removed_at` set = no access; re-inviting a removed member reactivates the row |
+| `consents.kind` | adds `provider_terms` | append-only as before |
+
+RLS on, nothing granted to `anon`/`authenticated` (NFR-MKT-03). No money objects (NFR-MKT-01; the migration test reads both marketplace migrations).
+
+### 12.2 Access (`apps/api/src/marketplace/access.ts`)
+`accessFor(sql, user | null)` → `{ audience, member, staff, canBrowse, canRequest, canProvide }`:
+
+| Audience | canBrowse | canRequest | canProvide |
+|---|---|---|---|
+| `invited` | member or staff | member | member of kind `provider` |
+| `open_requests` | signed in and verified | signed in (verified on the route) | member of kind `provider` |
+| `everyone` | anyone | signed in | signed in |
+
+`canRequest`/`canProvide` still need a verified email and (for requests) an artist profile, as before. Route checks: browse and provider page → `canBrowse` (an invalid or expired token counts as signed out there); `POST /services/requests` → `canRequest`; reading your own requests (`GET /services/requests`) and withdrawing one need only ownership, so someone removed from the beta can still see and close what they sent; `PUT /provider` creating a profile and `POST /provider/submit` → `canProvide` + current Provider Terms; `POST /provider/requests/:id/respond` → current Provider Terms (a removed member who still has a listed profile can answer requests already sent to them until staff suspend it). `GET /provider`, `PUT /provider` on an existing profile, `PUT /provider/listings` and the inbox need only the owner. `GET /services/access` and `POST /services/join` sit behind the flag only.
+
+### 12.3 Invites
+- Code: 18 random bytes, base64url (24 characters). The route hashes it and passes only the hash and invite id to `privileged()`, so `privileged_actions.params` never holds the code (NFR-MKT-08); the route returns the code after the action executes.
+- Redemption runs in one transaction: lock the invite row by hash, check open and unexpired, compare `lower(invite.email)` with `public.marketplace_requester_email(user)`, mark redeemed, upsert the member (`provider` wins over `artist`), audit `marketplace.member.joined`.
+
+### 12.4 Provider Terms and the launch guard
+- `POLICY.legal.providerTerms = { version, approved }` and `POLICY.legal.privacyCoversMarketplace`. `POST /me/acceptances` accepts `{ kind: "provider_terms", version }` and checks it against the current version.
+- `hasProviderTerms(tx, user)`: a `consents` row of kind `provider_terms` with the current version.
+- `POST /staff/flags/marketplace {on: true}` in a deployed environment (`env.deployed`) refuses with 409 `legal_not_ready` unless both values are true. The check runs before `privileged()`, so a refusal leaves no failed action.
+
+### 12.5 Staff routes
+| Route | Does |
+|---|---|
+| `POST /staff/marketplace/audience` | `{ audience, reason }` → privileged `marketplace.audience` |
+| `GET /staff/marketplace/invites` · `POST /staff/marketplace/invites` · `POST /staff/marketplace/invites/:id/revoke` | FR-MKT-022 |
+| `GET /staff/marketplace/members` · `POST /staff/marketplace/members/:userId/remove` | FR-MKT-027 |
+| `GET /staff/marketplace/metrics` | FR-MKT-028 |
+
+### 12.6 Web
+- `useMarketplaceAccess()` reads `/services/access` (cached per session, refetched after join and sign-in); nav entries use `canBrowse`.
+- `/services/join`: signed out → sign-in link with `next` back to the join page; signed in → redeem, then go to `/provider` (provider invite) or `/services`.
+- `/provider`: the Provider Terms card appears above the form until the current version is accepted; save/submit buttons stay disabled until then.
+- `/admin/marketplace`: audience switch (with reason), invite form (shows the link once, with a copy button), invite and member tables, metrics tiles.
+
+### 12.7 Mobile
+The Services tab hides unless `/services/access.canBrowse` (was `config.flags.marketplace`). No new screens (CR-007: mobile deprioritised).
+
 ## Change log
 - 2026-11-27: first version (CR-005, PR #27).
 - 2026-11-27: SDD documentation audit: §1 names the files as built (no `gate.ts`: the gate lives in `routes.ts`; the `provider.review` executor in `service.ts`); §3 points at `docs/API.md`.
 - 2026-11-27: code-review fixes (PR #27): stable listing ids, review version token, reserved slugs, unique-race errors map to 409, needed-by date allows for time zones west of UTC.
+- 2026-11-27: §12 closed beta (CR-007, ADR-012): audience setting, invites, members, Provider Terms acceptance, launch guard, staff beta page.

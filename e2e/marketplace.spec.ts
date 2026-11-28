@@ -3,11 +3,14 @@
  * Real Supabase Auth, the API and the web app. MKT-1 moves no money (ADR-010): nothing here is charged.
  *
  *  API (operator):  flag off → 404 marketplace_disabled; staff turns `flag.marketplace` on (audited `flag.set`).
- *  Browser (provider on a phone): create profile → add a service → submit for review.
+ *  API (staff, CR-007): invite the provider and the artist (closed beta, audience `invited`; privileged `marketplace.invite`).
+ *  Browser (provider on a phone): open the invite link → join → accept the Provider Terms → create profile → add a
+ *                                 service → submit for review.
  *  Browser (staff, aal2):         /admin/providers → list the provider.
- *  Browser (artist):              /services → search → provider page → request → My requests ("Waiting for the provider").
+ *  Browser (artist):              invite link → join → /services → search → provider page → request → My requests ("Waiting for the provider").
  *  Browser (provider):            /provider/requests → accept with a note.
  *  Browser (artist):              My requests shows "Accepted", the note and the provider's contact email.
+ *  Browser (staff):               /admin/marketplace shows both invites redeemed and the beta numbers.
  *  The flag goes back to its earlier value at the end, so the other journeys see the default (off) state.
  */
 import { randomUUID } from "node:crypto";
@@ -50,6 +53,16 @@ async function staffLogIn(page: Page, email: string, next: string) {
   throw new Error("staff TOTP sign-in did not complete");
 }
 
+/** Open an invite link signed out, as an invitee would: sign-in happens on the way, then the invite is redeemed (CR-007). */
+async function joinViaLink(page: Page, link: string, email: string, credential: string) {
+  await page.goto(link);
+  await expect(page).toHaveURL(/\/login\?next=/);
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(credential); // ggignore
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByTestId("join-done")).toContainText("You're in");
+}
+
 const logOut = (page: Page) => page.context().clearCookies().then(() => page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); }));
 
 type Config = { flags: { marketplace: boolean }; legal: { termsVersion: string; privacyVersion: string } };
@@ -85,9 +98,35 @@ test("services marketplace: provider lists, staff vets, artist requests, provide
     });
     expect(made.error, made.error?.message).toBeNull();
 
-    // ── Provider: profile → one service → submit (FR-MKT-003/004) ──
-    await logIn(page, providerEmail, providerCredential, "/provider");
+    // ── Closed beta (CR-007): outsiders are refused; staff invite the provider and the artist ──
+    expect((await api<{ error?: string }>("/services")).status).toBe(401);
+    const inviteFor = async (email: string, kind: "provider" | "artist") => {
+      const create = () => api<{ code: string; invite: { status: string } }>("/staff/marketplace/invites", { token: staff, body: { email, kind, reason: `E2E closed-beta invite (${kind})` } });
+      let r = await create();
+      if (r.status === 409) {
+        // An open invite left by an earlier local run that stopped before joining: revoke it and invite again.
+        const list = await api<{ items: { id: string; email: string; status: string }[] }>("/staff/marketplace/invites", { token: staff });
+        for (const i of list.body.items.filter((x) => x.email === email && (x.status === "open" || x.status === "expired"))) {
+          await api(`/staff/marketplace/invites/${i.id}/revoke`, { token: staff, body: { reason: "E2E: replace a leftover invite" } });
+        }
+        r = await create();
+      }
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      expect(r.body.invite.status).toBe("open");
+      return `/services/join#code=${encodeURIComponent(r.body.code)}`;
+    };
+    const providerLink = await inviteFor(providerEmail, "provider");
+    const artistLink = await inviteFor("nova@fanzup.test", "artist");
+
+    // ── Provider: invite link → join → Provider Terms → profile → one service → submit (FR-MKT-003/004/023/025) ──
+    await joinViaLink(page, providerLink, providerEmail, providerCredential);
+    await shot(page, "0-provider-joined");
+    await page.getByRole("button", { name: "Set up my provider profile" }).click();
     await expect(page.getByRole("heading", { name: "Your provider profile" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create profile" })).toBeDisabled();
+    await page.getByTestId("provider-terms").getByText("I've read and agree to the Provider Terms").click();
+    await page.getByTestId("accept-provider-terms").click();
+    await expect(page.getByTestId("provider-terms")).toBeHidden();
     await expect(page.getByText("FanZuP doesn't handle payment for services yet").first()).toBeVisible();
     await page.getByLabel("Name artists will see").fill(providerName);
     await page.getByLabel("Profile address").fill(slug);
@@ -112,8 +151,8 @@ test("services marketplace: provider lists, staff vets, artist requests, provide
     await expect(page.getByText("in review").first()).toBeVisible();
     await shot(page, "1-provider-submitted");
 
-    // Not listed yet: the public directory doesn't show it (FR-MKT-008).
-    expect((await api(`/services/providers/${slug}`)).status).toBe(404);
+    // Not listed yet: even a caller who may browse (staff) gets 404 from the directory (FR-MKT-008). Anonymous callers get 401 in the closed beta.
+    expect((await api(`/services/providers/${slug}`, { token: staff })).status).toBe(404);
 
     // ── Staff vetting at aal2 (privileged provider.review) ──
     await logOut(page);
@@ -128,11 +167,12 @@ test("services marketplace: provider lists, staff vets, artist requests, provide
     await expect(row).toBeHidden();
     await page.getByRole("tab", { name: "listed" }).click();
     await expect(page.getByTestId("staff-providers").locator("div.p-4", { hasText: `/${slug}` })).toBeVisible();
-    await expect.poll(async () => (await api(`/services/providers/${slug}`)).status, { timeout: 20_000 }).toBe(200);
+    await expect.poll(async () => (await api(`/services/providers/${slug}`, { token: staff })).status, { timeout: 20_000 }).toBe(200);
 
     // ── Artist: browse → provider page → request (FR-MKT-001/002/005) ──
     await logOut(page);
-    await logIn(page, "nova@fanzup.test", SEED_PASSWORD, "/services");
+    await joinViaLink(page, artistLink, "nova@fanzup.test", SEED_PASSWORD);
+    await page.getByRole("button", { name: "Browse services" }).click();
     await expect(page.getByRole("heading", { name: "Find the people who help you finish the work" })).toBeVisible();
     await page.getByLabel("Search").fill("master");
     await page.getByRole("button", { name: "Search" }).click();
@@ -173,6 +213,14 @@ test("services marketplace: provider lists, staff vets, artist requests, provide
     await expect(answered).toContainText("Happy to help");
     await expect(answered.getByRole("link", { name: contactEmail })).toBeVisible();
     await shot(page, "6-artist-accepted");
+
+    // ── Staff: the beta page shows the redeemed invites and the numbers (FR-MKT-022/028/029) ──
+    await logOut(page);
+    await staffLogIn(page, "reviewer@fanzup.test", "/admin/marketplace");
+    await expect(page.getByTestId("beta-metrics")).toContainText("Providers listed");
+    await expect(page.getByTestId("invites").locator("div.p-4", { hasText: providerEmail })).toContainText("redeemed");
+    await expect(page.getByTestId("members")).toContainText(providerName);
+    await shot(page, "7-staff-beta");
   } finally {
     if (!wasOn) await setFlag(false);
   }

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import postgres from "postgres";
 import { CATEGORY_KEYS, MKT_OFF_PLATFORM_NOTICE } from "@fanzup/shared/marketplace";
+import { POLICY } from "@fanzup/shared/policy";
 import { asService } from "../src/db";
 import { createUser, ids, kit, tokenWith, type Kit } from "./helpers";
 
@@ -20,6 +21,8 @@ let providerId: string;
 const api = (method: "GET" | "POST" | "PUT", url: string, auth?: string, payload?: unknown) =>
   k.app.inject({ method, url: `/api/v1${url}`, headers: auth ? { authorization: auth } : {}, payload: payload as never });
 const setFlag = (on: boolean) => api("POST", "/staff/flags/marketplace", staff, { on, reason: on ? "Open the marketplace for the test" : "Close the marketplace again" });
+/** CR-007: providers accept the current Provider Terms first (FR-MKT-025). The beta tests are in marketplace-beta.test.ts. */
+const acceptTerms = (auth: string) => api("POST", "/me/acceptances", auth, { documents: [{ kind: "provider_terms", version: POLICY.legal.providerTerms.version }] });
 const profile = (over: Record<string, unknown> = {}) => ({
   slug: "ada-mixes", displayName: "Ada Mixes", headline: "Mixing and mastering for indie records", bio: "Ten years in the studio.",
   city: "Austin", remoteOk: true, categories: ["mixing_mastering", "production"], links: ["https://example.com/ada"], contactEmail: "ada@example.com", ...over,
@@ -47,6 +50,7 @@ beforeAll(async () => {
   artist = `Bearer ${await tokenWith(ids.nova)}`;
   fan = `Bearer ${await tokenWith(ids.fan)}`;
   provider = await createUser(k.sql, { name: "Ada" });
+  for (const a of [provider.auth, staff]) expect((await acceptTerms(a)).statusCode).toBe(201);
 });
 afterAll(async () => k?.close());
 
@@ -64,6 +68,8 @@ describe("FR-MKT-001: flag off by default", () => {
     expect((await api("POST", "/staff/flags/marketplace", artist, { on: true, reason: "Open the marketplace" })).statusCode).toBe(403);
     expect((await setFlag(true)).statusCode).toBe(200);
     expect((await api("GET", "/config")).json().flags.marketplace).toBe(true);
+    // These MKT-1 tests run with the beta audience opened to everyone (CR-007, FR-MKT-021).
+    expect((await api("POST", "/staff/marketplace/audience", staff, { audience: "everyone", reason: "Run the MKT-1 tests open to all" })).statusCode).toBe(200);
   });
 });
 
@@ -84,6 +90,7 @@ describe("FR-MKT-003/004/008: provider lifecycle", () => {
   });
   it("refuses a taken slug, a bad link and listings outside the profile's categories", async () => {
     const other = await createUser(k.sql);
+    await acceptTerms(other.auth);
     expect((await api("PUT", "/provider", other.auth, profile({ contactEmail: "x@example.com" }))).json().error).toBe("slug_taken");
     expect((await api("PUT", "/provider", provider.auth, profile({ links: ["http://example.com"] }))).statusCode).toBe(400);
     expect((await api("PUT", "/provider", other.auth, profile({ slug: "requests", contactEmail: "x@example.com" }))).statusCode).toBe(400);
@@ -254,16 +261,18 @@ describe("FR-MKT-008: suspension", () => {
 });
 
 describe("NFR-MKT-01/03: no money, no direct client access", () => {
-  it("the migration has no money objects", () => {
-    const sqlText = readFileSync(join(import.meta.dirname, "../../../supabase/migrations/20261127000100_marketplace.sql"), "utf8")
-      .split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
-    expect(sqlText).not.toMatch(/ledger|backings|outbound_ops|provider_events|account_kind|balance/i);
+  it("the migrations have no money objects (MKT-1 and the CR-007 closed beta)", () => {
+    for (const f of ["20261127000100_marketplace.sql", "20261128000100_marketplace_beta.sql"]) {
+      const sqlText = readFileSync(join(import.meta.dirname, "../../../supabase/migrations", f), "utf8")
+        .split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+      expect(sqlText, f).not.toMatch(/ledger|backings|outbound_ops|provider_events|account_kind|balance/i);
+    }
   });
   it("anon and authenticated can't read or write the tables directly", async () => {
     const raw = postgres(k.db.url, { max: 1, onnotice: () => {} });
     try {
       for (const role of ["anon", "authenticated"]) {
-        for (const t of ["service_providers", "service_listings", "service_requests"]) {
+        for (const t of ["service_providers", "service_listings", "service_requests", "marketplace_invites", "marketplace_members"]) {
           await expect(raw.begin(async (tx) => { await tx.unsafe(`set local role ${role}`); await tx.unsafe(`select * from public.${t} limit 1`); }), `${role} ${t}`).rejects.toThrow(/permission denied/);
         }
       }

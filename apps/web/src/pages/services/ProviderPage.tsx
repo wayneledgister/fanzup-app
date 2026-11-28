@@ -4,6 +4,7 @@ import { ArrowLeft, CircleAlert, ExternalLink, Info, MapPin, Send } from "lucide
 import { Badge, Button, Callout, Card, Checkbox, Container, EmptyState, Field, PageHeader, SectionHeading, Select, TextArea, TextInput } from "@/components/brand";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { ClosedBeta, isClosedBeta } from "@/components/services/ClosedBeta";
 import { dollarsToMinor } from "@fanzup/shared/money";
 import type { MyCampaignSummary } from "@fanzup/shared/schemas";
 import {
@@ -20,11 +21,13 @@ export default function ServiceProviderPage() {
   const [p, setP] = useState<Provider | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<ListingView | null>(null);
+  const [denied, setDenied] = useState<unknown>(null);
 
   useEffect(() => {
-    api.serviceProvider(slug).then(setP).catch((e) => setError(e instanceof ApiError && e.status === 404 ? "We couldn't find that provider." : "We couldn't load this provider. Try again."));
+    api.serviceProvider(slug).then(setP).catch((e) => isClosedBeta(e) ? setDenied(e) : setError(e instanceof ApiError && e.status === 404 ? "We couldn't find that provider." : "We couldn't load this provider. Try again."));
   }, [slug]);
 
+  if (denied) return <ClosedBeta error={denied} />;
   if (error) {
     return (
       <Container size="md" className="py-16">

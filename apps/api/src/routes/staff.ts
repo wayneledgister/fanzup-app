@@ -10,6 +10,7 @@ import { cancelAction, privileged, requireStaff, singleOperatorMode } from "../s
 import { StaffQueueType } from "@fanzup/shared/schemas";
 import { runReconciliation } from "../recon";
 import type { Deps } from "../app";
+import { legalReady } from "../marketplace/access";
 
 const Uuid = z.string().uuid();
 const Reason = z.object({ reason: z.string() });
@@ -151,6 +152,10 @@ export const staffRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     const b = z.object({ on: z.boolean(), reason: z.string() }).parse(req.body);
     if (req.params.flag === "marketplace") {
       // CR-005: the services marketplace moves no money in MKT-1 (ADR-010), so it needs no provider.
+      // CR-007 launch guard (FR-MKT-026): a deployed environment opens it only once counsel's approval is in the code.
+      if (b.on && d.env.deployed && !legalReady()) {
+        throw new HttpError(409, "legal_not_ready", "The marketplace can't open yet: the Provider Terms and the privacy-notice update need counsel's approval first (POLICY.legal).");
+      }
       return { action: await privileged(d, { action: "flag.set", subjectId: null, reason: b.reason, params: { flag: "marketplace", on: b.on } }) };
     }
     if (req.params.flag === "agents") {

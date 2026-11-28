@@ -30,7 +30,8 @@ export const meRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     const u = await requireUser(req, d.verify);
     const body = AcceptanceRequest.parse(req.body);
     for (const doc of body.documents) {
-      const current = doc.kind === "terms" ? POLICY.legal.termsVersion : doc.kind === "privacy" ? POLICY.legal.privacyVersion : "v1";
+      const current = doc.kind === "terms" ? POLICY.legal.termsVersion : doc.kind === "privacy" ? POLICY.legal.privacyVersion
+        : doc.kind === "provider_terms" ? POLICY.legal.providerTerms.version : "v1";
       if (doc.version !== current) throw new HttpError(409, "version_not_current", "Those terms have changed. Reload the page and review the current version.");
     }
     const ua = String(req.headers["user-agent"] ?? "").slice(0, 400) || null;

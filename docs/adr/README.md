@@ -17,6 +17,7 @@ Consequential, expensive-to-reverse choices get a full ADR in this folder (templ
 | [ADR-009](ADR-009-mobile-app.md) | Native app with Expo + React Native, sharing business rules with the web through `@fanzup/shared` | Accepted 2026-11-27 (CR-004; built and merged (PR #25)) | 2026-11-27 | CR-004 |
 | [ADR-010](ADR-010-services-marketplace-money-boundary.md) | Services marketplace: no money in MKT-1, one money boundary for MKT-2 | Accepted (CR-005; Wayne's decisions D-MKT-1/2) · PR #27 | 2026-11-27 | CR-005 |
 | [ADR-011](ADR-011-artist-screens-read-model.md) | Artist screens read only owner API data (`MyArtist`, `MyCampaign`); sections without a backend are left out, not faked | Accepted (CR-006) | 2026-11-27 | CR-006 |
+| [ADR-012](ADR-012-marketplace-beta-access-and-terms.md) | Marketplace closed beta: cohort access by invite, Provider Terms versions in code, launch guard | Accepted (CR-007) | 2026-11-27 | CR-007 |
 
 **2026-11-27:** Wayne accepted ADR-003…009 (decision card in the docs-audit thread): built, reviewed and merged, so the record now matches what runs. The gate sign-offs (M1 G2/G3, AGT, CR-004/005 self-reviews) are separate and still pending. Changing one of these decisions now needs a superseding ADR.
 

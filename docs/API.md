@@ -1,5 +1,5 @@
 # FanZuP API reference (wire contract)
-**Owner:** Wayne (product) · engineering · **Status:** active · **Date:** 2026-11-27 · **Touches:** FR-PLT-001, NFR-OPS-04, FR-CMP-009, ADR-003, ADR-005, ADR-007, ADR-008, ADR-009, ADR-010, ADR-011
+**Owner:** Wayne (product) · engineering · **Status:** active · **Date:** 2026-11-27 · **Touches:** FR-PLT-001, NFR-OPS-04, FR-CMP-009, ADR-003, ADR-005, ADR-007, ADR-008, ADR-009, ADR-010, ADR-011, ADR-012
 
 Every HTTP route the API registers, in one table. **This file is checked in CI**: `apps/api/test/api-contract.test.ts` builds the app twice — locally with every optional module on (sandbox payments, mock Reg CF, cron secret) and as a deployed staging API (Stripe test provider) — and fails if a route exists that isn't listed here, or a listed route no longer exists. When you add, rename or remove a route, update this table, the owning design doc's API section and, if a client calls it, `packages/shared/src/api-client.ts` in the same PR. `pnpm --filter @fanzup/api api:routes` prints the live list.
 
@@ -11,7 +11,7 @@ The detailed request, response and error shapes stay in the design docs (the **S
 - **Correlation id:** every response carries `x-correlation-id`; a valid inbound `x-correlation-id` is kept (ADR-005).
 - **Idempotency:** money-creating POSTs (`/v1/backings`, `/v1/pools/:id/investments`) require `Idempotency-Key`; the same key always gets the same outcome, including the same error.
 - **Access levels** (M1 design §4.1): *public*; *user* = valid Supabase token; *verified* = user with a confirmed email (checked in the database); *owner* = owns the artist/campaign/Pool in the path; *staff (aal2)* = row in `staff` + second factor, otherwise `403 second_factor_required`; *signed* = provider signature, no user.
-- **Gates:** `marketplace` = 404 `marketplace_disabled` unless `flag.marketplace` is on (CR-005). `layer2` = 404 `layer2_disabled` unless `REGCF_PROVIDER=mock` **and** `flag.layer2` is on; *mock Reg CF (completion)* = needs the mock provider only, so money in flight finishes with the flag off (L2 design §2). Dev routes are never registered in a deployed environment.
+- **Gates:** `marketplace` = 404 `marketplace_disabled` unless `flag.marketplace` is on (CR-005); inside it, the closed-beta audience (`marketplace.audience`, CR-007) answers 401 to signed-out callers and 403 `invite_only` to people outside it. `layer2` = 404 `layer2_disabled` unless `REGCF_PROVIDER=mock` **and** `flag.layer2` is on; *mock Reg CF (completion)* = needs the mock provider only, so money in flight finishes with the flag off (L2 design §2). Dev routes are never registered in a deployed environment.
 - **Privileged action:** recorded through `privileged()` with a typed reason, reviewer ≠ owner, audited; single-operator delays and daily limits apply to money actions (M1 design §3.6).
 
 ## Routes
@@ -60,7 +60,7 @@ The detailed request, response and error shapes stay in the design docs (the **S
 | POST | `/api/v1/investor/kyc` | verified | `layer2` | `KycStartRequest` |  | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
 | GET | `/api/v1/investor/me` | user | `layer2` | `InvestorMeView` |  | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
 | GET | `/api/v1/me` | user | — | `Me` |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
-| POST | `/api/v1/me/acceptances` | user | — | `AcceptanceRequest` |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
+| POST | `/api/v1/me/acceptances` | user | — | `AcceptanceRequest` | kinds include `provider_terms` (CR-007) | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | GET | `/api/v1/me/backings` | user | — | `{ backings: MyBacking[] }` |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | GET | `/api/v1/pools` | public | `layer2` | `PoolCardView[]` |  | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
 | POST | `/api/v1/pools/:id/investments` | verified | `layer2` | `InvestRequest` → `InvestResponse` | Idempotency-Key | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
@@ -74,6 +74,8 @@ The detailed request, response and error shapes stay in the design docs (the **S
 | POST | `/api/v1/provider/requests/:id/respond` | verified (provider) | `marketplace` | `RespondInput` → `ServiceRequestView` | once per request | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | POST | `/api/v1/provider/submit` | verified (own profile) | `marketplace` | `{ provider: MyProvider }` | to staff review | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | GET | `/api/v1/services` | public | `marketplace` | `ServiceList` | no money in MKT-1 (ADR-010) | [MKT §3](../specs/marketplace/02-design.md#3-api) |
+| GET | `/api/v1/services/access` | public (token optional) | `marketplace` | `MarketplaceAccess` | what the caller may do in the closed beta; clients hide entry points with it | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
+| POST | `/api/v1/services/join` | verified | `marketplace` | `JoinInput` → `{ member }` | single-use invite; account email must match; 410 `invite_invalid` | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
 | GET | `/api/v1/services/providers/:slug` | public | `marketplace` | `ProviderPage` | listed providers only | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | GET | `/api/v1/services/requests` | verified | `marketplace` | `{ items: ServiceRequestView[] }` |  | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | POST | `/api/v1/services/requests` | verified (artist) | `marketplace` | `ServiceRequestInput` → `ServiceRequestView` | daily limit; one open request per listing | [MKT §3](../specs/marketplace/02-design.md#3-api) |
@@ -84,7 +86,7 @@ The detailed request, response and error shapes stay in the design docs (the **S
 | POST | `/api/v1/staff/agents/proposals/:id/verdict` | staff (aal2) | — |  | privileged action | [AGT §5](../specs/agents/02-design.md#5-staff-api-appsapisrcroutesstaffts-additions) |
 | POST | `/api/v1/staff/backings/:id/refund` | staff (aal2) | — |  | privileged action | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | POST | `/api/v1/staff/campaigns/:id/review` | staff (aal2) | — |  | privileged action | [M1 §4.2](../specs/02-design.md#42-endpoints) |
-| POST | `/api/v1/staff/flags/:flag` | staff (aal2) | — |  | privileged `flag.set`; `:flag` ∈ `layer2`, `agents`, `marketplace` | [M1 §4.2](../specs/02-design.md#42-endpoints), [AGT §5](../specs/agents/02-design.md#5-staff-api-appsapisrcroutesstaffts-additions) |
+| POST | `/api/v1/staff/flags/:flag` | staff (aal2) | — |  | privileged `flag.set`; `:flag` ∈ `layer2`, `agents`, `marketplace`; `marketplace` on is refused when deployed until counsel's approval is in `POLICY.legal` (409 `legal_not_ready`, CR-007) | [M1 §4.2](../specs/02-design.md#42-endpoints), [AGT §5](../specs/agents/02-design.md#5-staff-api-appsapisrcroutesstaffts-additions) |
 | GET | `/api/v1/staff/l2/investors` | staff (aal2) | mock Reg CF (completion) |  |  | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
 | POST | `/api/v1/staff/l2/investors/:userId/kyc` | staff (aal2) | `layer2` |  | privileged action | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
 | POST | `/api/v1/staff/l2/pool-breaks/:id/resolve` | staff (aal2) | mock Reg CF (completion) |  | privileged action | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
@@ -103,6 +105,13 @@ The detailed request, response and error shapes stay in the design docs (the **S
 | GET | `/api/v1/staff/l2/queue` | staff (aal2) | mock Reg CF (completion) |  |  | [L2 §9](../specs/l2/02-design.md#9-api-surface-behind-the-layer2-gate-except-where-noted) |
 | GET | `/api/v1/staff/marketplace/providers` | staff (aal2) | `marketplace` | `?status=` |  | [MKT §3](../specs/marketplace/02-design.md#3-api) |
 | POST | `/api/v1/staff/marketplace/providers/:id/review` | staff (aal2) | `marketplace` | `ProviderReviewInput` | privileged `provider.review`; reviewer ≠ owner | [MKT §3](../specs/marketplace/02-design.md#3-api) |
+| POST | `/api/v1/staff/marketplace/audience` | staff (aal2) | `marketplace` | `AudienceInput` | privileged `marketplace.audience` | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
+| GET | `/api/v1/staff/marketplace/invites` | staff (aal2) | `marketplace` | `{ items: InviteView[] }` |  | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
+| POST | `/api/v1/staff/marketplace/invites` | staff (aal2) | `marketplace` | `InviteInput` → `{ invite, code }` | privileged `marketplace.invite`; code answered once, stored as SHA-256 | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
+| POST | `/api/v1/staff/marketplace/invites/:id/revoke` | staff (aal2) | `marketplace` |  | privileged `marketplace.invite_revoke` | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
+| GET | `/api/v1/staff/marketplace/members` | staff (aal2) | `marketplace` | `{ items: MemberView[] }` |  | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
+| POST | `/api/v1/staff/marketplace/members/:userId/remove` | staff (aal2) | `marketplace` |  | privileged `marketplace.member_remove`; not yourself | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
+| GET | `/api/v1/staff/marketplace/metrics` | staff (aal2) | `marketplace` | `MarketplaceMetrics` | counts only (discovery E1/E2) | [MKT §12](../specs/marketplace/02-design.md#12-closed-beta-cr-007-adr-012) |
 | POST | `/api/v1/staff/outbound-ops/:id/replay` | staff (aal2) | — |  | privileged action | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | POST | `/api/v1/staff/provider-events/:id/replay` | staff (aal2) | — |  | privileged action | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | GET | `/api/v1/staff/queue` | staff (aal2) | — | `StaffQueueType` (query) |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
@@ -124,4 +133,5 @@ The detailed request, response and error shapes stay in the design docs (the **S
 ## Change log
 - 2026-11-27: CR-006: contracts for `GET /artist` (`MyArtist`), `GET /artist/campaigns/:id` (`MyCampaign`), submit, publish and payout-account; web calls them through `api-client` (`myArtist`, `myCampaign`, `submitCampaign`, `publishCampaign`, `connectPayoutAccount`). No route added or removed.
 - 2026-11-27: CR-005 (PR #27): 13 services-marketplace routes behind `flag.marketplace`; `marketplace` added to `POST /staff/flags/:flag`.
+- 2026-11-27: CR-007: 9 closed-beta routes (access, join, staff audience/invites/members/metrics); launch guard on the marketplace flag; `provider_terms` acceptance.
 - 2026-11-27: Created from the registered routes (84) during the SDD documentation audit; added the CI drift test.

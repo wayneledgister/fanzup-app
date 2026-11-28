@@ -41,7 +41,7 @@ const HttpsUrl = z.string().max(300).url().refine((u) => u.startsWith("https://"
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date like 2027-03-01");
 
 /** Words that are routes under /services (review finding 4). Must match the migration's check. */
-export const RESERVED_SLUGS = ["requests", "new", "edit", "provider", "providers", "search"] as const;
+export const RESERVED_SLUGS = ["requests", "new", "edit", "provider", "providers", "search", "join"] as const;
 
 /** FR-MKT-003. */
 export const ProviderProfileInput = z.object({
@@ -182,3 +182,74 @@ export function providerStatusCopy(s: ProviderStatus): string {
 
 /** The limits clients show in hints (same numbers the schemas enforce). */
 export const POLICY_LIMITS = { maxCategories: M.maxCategories, maxLinks: M.maxLinks, maxListings: M.maxListings, requestsPerDay: M.requestsPerDay } as const;
+
+// ── Closed beta (CR-007; requirements §5, design §12, ADR-012) ──
+/** FR-MKT-021. `invited` is the default (Wayne, D-MKT-3, 2026-11-27). */
+export const AUDIENCES = ["invited", "open_requests", "everyone"] as const;
+export const Audience = z.enum(AUDIENCES);
+export type Audience = z.infer<typeof Audience>;
+export const MEMBER_KINDS = ["provider", "artist"] as const;
+export const MemberKind = z.enum(MEMBER_KINDS);
+export type MemberKind = z.infer<typeof MemberKind>;
+
+export const AudienceInput = z.object({ audience: Audience, reason: z.string() });
+/** FR-MKT-022. */
+export const InviteInput = z.object({
+  email: z.string().trim().email().max(200),
+  kind: MemberKind,
+  name: z.string().trim().max(80).nullish(),
+  note: z.string().trim().max(500).nullish(),
+  reason: z.string(),
+});
+export type InviteInput = z.infer<typeof InviteInput>;
+/** FR-MKT-023. Codes are 24 base64url characters (18 random bytes). */
+export const JoinInput = z.object({ code: z.string().trim().regex(/^[A-Za-z0-9_-]{24}$/, "That invite link looks incomplete. Open it again from your invite.") });
+
+/** FR-MKT-024: what the caller may do. The API enforces the same rules on every route (NFR-MKT-09). */
+export interface MarketplaceAccess {
+  audience: Audience;
+  signedIn: boolean;
+  member: { kind: MemberKind } | null;
+  canBrowse: boolean;
+  canRequest: boolean;
+  canProvide: boolean;
+  providerTerms: { version: string; approved: boolean; accepted: boolean };
+}
+export type InviteStatus = "open" | "redeemed" | "revoked" | "expired";
+export interface InviteView {
+  id: string;
+  email: string;
+  name: string | null;
+  kind: MemberKind;
+  note: string | null;
+  status: InviteStatus;
+  createdAt: string;
+  expiresAt: string;
+  redeemedAt: string | null;
+}
+export interface MemberView {
+  userId: string;
+  displayName: string;
+  kind: MemberKind;
+  joinedAt: string;
+  removedAt: string | null;
+  providerStatus: ProviderStatus | null;
+}
+/** FR-MKT-028. Counts only. */
+export interface MarketplaceMetrics {
+  members: Record<MemberKind, number>;
+  invites: Record<InviteStatus, number>;
+  providers: Record<ProviderStatus, number>;
+  listedByCategory: Partial<Record<CategoryKey, number>>;
+  requests: Record<RequestStatus, number>;
+  acceptanceRate: number | null;
+  medianResponseHours: number | null;
+  requestsLast7Days: number;
+  requestsLast30Days: number;
+}
+
+export const MKT_INVITE_ONLY = "The services marketplace is in a closed beta. Ask the FanZuP team for an invite.";
+export const MKT_TERMS_DRAFT_NOTE =
+  "The Provider Terms are being finalised with our lawyers. During the closed beta you're agreeing to the draft the FanZuP team shared with you; we'll ask you to accept the final version before it applies.";
+export const audienceLabel = (a: Audience) =>
+  a === "invited" ? "Invited people only" : a === "open_requests" ? "Invited providers, any signed-in artist" : "Everyone";

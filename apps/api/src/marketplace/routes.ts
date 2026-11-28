@@ -6,10 +6,12 @@
  * ownership against the verified user in its own `where` clause. Contact details appear only for the counterpart of an
  * accepted request (NFR-MKT-04).
  */
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { POLICY } from "@fanzup/shared/policy";
 import {
+  AudienceInput, InviteInput, JoinInput, type InviteView, type MarketplaceAccess, type MarketplaceMetrics, type MemberView,
   Category, ListingsInput, ProviderProfileInput, ProviderReviewInput, RespondInput, ServiceRequestInput,
   type ListingView, type MyProvider, type ProviderPage, type ServiceList, type ServiceRequestView,
 } from "@fanzup/shared/marketplace";
@@ -17,7 +19,8 @@ import { asService, n, type Claims, type Tx } from "../db";
 import { HttpError, requireVerifiedUser } from "../lib/auth";
 import { privileged, requireStaff } from "../staff";
 import type { Deps } from "../app";
-import { audit, PROVIDER_CHANGED, REVIEW_FROM, VERSION } from "./service";
+import { audit, INVITE_EXISTS, PROVIDER_CHANGED, REVIEW_FROM, VERSION } from "./service";
+import { accessFor, hasProviderTerms, INVITE_ONLY, requireProviderTerms, viewer, type Access } from "./access";
 
 const M = POLICY.marketplace;
 
@@ -30,6 +33,13 @@ const NOT_FOUND = () => new HttpError(404, "not_found", "We couldn't find that."
 const gate = (d: Deps) => async (_req: FastifyRequest) => {
   if (!(await marketplaceOn(d))) throw DISABLED();
 };
+/** FR-MKT-021 / NFR-MKT-09: signed out → 401 (so clients can offer sign-in), signed in but outside the audience → 403. */
+function need(a: Access, what: "canBrowse" | "canRequest" | "canProvide") {
+  if (a[what]) return;
+  if (!a.signedIn) throw new HttpError(401, "unauthenticated", "Sign in to continue.");
+  throw INVITE_ONLY();
+}
+const hashCode = (code: string) => createHash("sha256").update(code).digest("hex");
 const uuid = (id: string) => {
   if (!z.string().uuid().safeParse(id).success) throw NOT_FOUND();
   return id;
@@ -92,6 +102,7 @@ export const marketplaceRoutes = (d: Deps): FastifyPluginAsync => async (app) =>
 
   // FR-MKT-005. Most recently listed first; never ranked by money (no paid placement in MKT-1).
   app.get("/", async (req): Promise<ServiceList> => {
+    need(await accessFor(d.sql, await viewer(req, d.verify)), "canBrowse");
     const q = z.object({
       category: Category.optional(),
       q: z.string().trim().max(80).optional(),
@@ -122,6 +133,7 @@ export const marketplaceRoutes = (d: Deps): FastifyPluginAsync => async (app) =>
 
   // FR-MKT-006.
   app.get<{ Params: { slug: string } }>("/providers/:slug", async (req): Promise<ProviderPage> => {
+    need(await accessFor(d.sql, await viewer(req, d.verify)), "canBrowse");
     const slug = z.string().regex(/^[a-z0-9-]{3,60}$/).safeParse(req.params.slug);
     if (!slug.success) throw NOT_FOUND();
     return asService(d.sql, async (tx) => {
@@ -134,6 +146,7 @@ export const marketplaceRoutes = (d: Deps): FastifyPluginAsync => async (app) =>
   // FR-MKT-007.
   app.post("/requests", async (req, reply) => {
     const u = await requireVerifiedUser(req, d.verify, d.sql);
+    need(await accessFor(d.sql, u), "canRequest");
     const b = ServiceRequestInput.parse(req.body);
     // The client sends its local calendar date; allow "tomorrow" anywhere west of UTC (review finding 3).
     const yesterdayUtc = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
@@ -171,6 +184,46 @@ export const marketplaceRoutes = (d: Deps): FastifyPluginAsync => async (app) =>
       return view;
     });
     return reply.status(201).send(requestView(row, "artist"));
+  });
+
+  // FR-MKT-024 (CR-007): what the caller may do. Behind the flag only; clients hide entry points with it.
+  app.get("/access", async (req): Promise<MarketplaceAccess> => {
+    const u = await viewer(req, d.verify);
+    const a = await accessFor(d.sql, u);
+    const accepted = u ? await asService(d.sql, (tx) => hasProviderTerms(tx, u.sub)) : false;
+    return {
+      audience: a.audience, signedIn: a.signedIn, member: a.member, canBrowse: a.canBrowse, canRequest: a.canRequest, canProvide: a.canProvide,
+      providerTerms: { version: POLICY.legal.providerTerms.version, approved: POLICY.legal.providerTerms.approved, accepted },
+    };
+  });
+
+  // FR-MKT-023 (CR-007): redeem a single-use invite bound to the account's email.
+  app.post("/join", async (req) => {
+    const u = await requireVerifiedUser(req, d.verify, d.sql);
+    const parsed = JoinInput.safeParse(req.body);
+    const INVALID = () => new HttpError(410, "invite_invalid", "This invite link doesn't work any more. Ask the FanZuP team for a new one.");
+    if (!parsed.success) throw INVALID();
+    return asService(d.sql, async (tx) => {
+      const [inv] = await tx<{ id: string; email: string; kind: "provider" | "artist"; open: boolean }[]>`
+        select id, email::text, kind, (redeemed_at is null and revoked_at is null and expires_at > now()) as open
+          from public.marketplace_invites where code_hash = ${hashCode(parsed.data.code)} for update`;
+      if (!inv?.open) throw INVALID();
+      const [me] = await tx<{ email: string | null }[]>`select public.marketplace_requester_email(${u.sub}) as email`;
+      if (!me?.email || me.email.toLowerCase() !== inv.email.toLowerCase()) {
+        throw new HttpError(403, "invite_email_mismatch", "This invite was sent to a different email address. Sign in with the account that got the invite.");
+      }
+      await tx`update public.marketplace_invites set redeemed_at = now(), redeemed_by = ${u.sub} where id = ${inv.id}`;
+      // A provider invite upgrades an artist member; an artist invite never downgrades a provider. Re-joining clears a removal.
+      const [m] = await tx<{ kind: "provider" | "artist" }[]>`
+        insert into public.marketplace_members (user_id, kind, invite_id) values (${u.sub}, ${inv.kind}, ${inv.id})
+        on conflict (user_id) do update
+          set kind = case when public.marketplace_members.kind = 'provider' and public.marketplace_members.removed_at is null then 'provider' else excluded.kind end,
+              invite_id = excluded.invite_id, removed_at = null, removed_by = null,
+              joined_at = case when public.marketplace_members.removed_at is null then public.marketplace_members.joined_at else now() end
+        returning kind`;
+      await audit(tx, u.sub, "marketplace.member.joined", "marketplace_invite", inv.id, { kind: m.kind });
+      return { member: { kind: m.kind } };
+    });
   });
 
   // FR-MKT-010.
@@ -226,6 +279,13 @@ export const providerRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   app.put("/", async (req) => {
     const u = userOf(req);
     const b = ProviderProfileInput.parse(req.body);
+    // Creating a profile needs provider access and the current Provider Terms (CR-007, FR-MKT-021/025); editing an
+    // existing one needs only ownership (design §12.2).
+    const [has] = await asService(d.sql, (tx) => tx`select 1 from public.service_providers where owner_id = ${u.sub}`);
+    if (!has) {
+      need(await accessFor(d.sql, u), "canProvide");
+      await asService(d.sql, (tx) => requireProviderTerms(tx, u.sub));
+    }
     return saveProfile(u, b).catch((e: { code?: string; constraint_name?: string }) => {
       // Two saves racing past the checks below hit the unique constraints (review finding 5).
       if (e.code === "23505" && e.constraint_name === "service_providers_slug_key") throw new HttpError(409, "slug_taken", "That profile address is taken. Try another.");
@@ -239,6 +299,7 @@ export const providerRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
       const [taken] = await tx`select 1 from public.service_providers where slug = ${b.slug} and owner_id <> ${u.sub}`;
       if (taken) throw new HttpError(409, "slug_taken", "That profile address is taken. Try another.");
       if (!existing) {
+        await requireProviderTerms(tx, u.sub);
         const [p] = await tx<ProviderRow[]>`
           insert into public.service_providers (owner_id, slug, display_name, headline, bio, city, remote_ok, categories, links, contact_email)
           values (${u.sub}, ${b.slug}, ${b.displayName}, ${b.headline}, ${b.bio ?? null}, ${b.city ?? null}, ${b.remoteOk},
@@ -310,7 +371,9 @@ export const providerRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
 
   app.post("/submit", async (req) => {
     const u = userOf(req);
+    need(await accessFor(d.sql, u), "canProvide");
     return asService(d.sql, async (tx) => {
+      await requireProviderTerms(tx, u.sub);
       const p = await mine(tx, u.sub);
       if (!["draft", "changes_requested"].includes(p.status)) throw new HttpError(409, "not_submittable", "Only drafts and profiles with requested changes can be submitted.");
       const [active] = await tx`select 1 from public.service_listings where provider_id = ${p.id} and active limit 1`;
@@ -333,6 +396,7 @@ export const providerRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     const id = uuid(req.params.id);
     const b = RespondInput.parse(req.body);
     return asService(d.sql, async (tx) => {
+      await requireProviderTerms(tx, u.sub);
       const [r] = await tx<{ id: string }[]>`
         update public.service_requests r set status = ${b.decision}, provider_note = ${b.note ?? null}, responded_at = now()
           from public.service_providers p
@@ -379,5 +443,119 @@ export const marketplaceStaffRoutes = (d: Deps): FastifyPluginAsync => async (ap
     // Staff decide on the version they read (review finding 2): an edit since then, or another decision, refuses this one.
     if (p.version !== b.version) throw PROVIDER_CHANGED();
     return { action: await privileged(d, { action: "provider.review", subjectId: id, reason: b.reason, params: { decision: b.decision, note: b.note ?? null, version: b.version } }) };
+  });
+
+  // ── Closed beta (CR-007, design §12.5) ──
+  /** FR-MKT-021. */
+  app.post("/audience", async (req) => {
+    const b = AudienceInput.parse(req.body);
+    const action = await privileged(d, { action: "marketplace.audience", subjectId: null, reason: b.reason, params: { audience: b.audience } });
+    return { action, audience: b.audience };
+  });
+
+  const inviteSelect = (tx: Tx) => tx`
+    select id, email::text, name, kind, note, created_at, expires_at, redeemed_at,
+           case when redeemed_at is not null then 'redeemed' when revoked_at is not null then 'revoked'
+                when expires_at <= now() then 'expired' else 'open' end as status
+      from public.marketplace_invites`;
+  type InviteRow = { id: string; email: string; name: string | null; kind: InviteView["kind"]; note: string | null; status: InviteView["status"]; created_at: Date; expires_at: Date; redeemed_at: Date | null };
+  const inviteView = (r: InviteRow): InviteView => ({
+    id: r.id, email: r.email, name: r.name, kind: r.kind, note: r.note, status: r.status,
+    createdAt: r.created_at.toISOString(), expiresAt: r.expires_at.toISOString(), redeemedAt: r.redeemed_at?.toISOString() ?? null,
+  });
+
+  /** FR-MKT-022. */
+  app.get("/invites", async () => {
+    const rows = await asService(d.sql, (tx) => tx<InviteRow[]>`${inviteSelect(tx)} order by created_at desc limit 200`);
+    return { items: rows.map(inviteView) };
+  });
+
+  /** FR-MKT-022. The code is answered once and only its hash is stored or passed on (NFR-MKT-08). */
+  app.post("/invites", async (req, reply) => {
+    const b = InviteInput.parse(req.body);
+    const email = b.email.toLowerCase();
+    // Checked before privileged() so a duplicate doesn't leave a failed action; the unique index decides a race.
+    const [open] = await asService(d.sql, (tx) => tx`
+      select 1 from public.marketplace_invites where email = ${email} and redeemed_at is null and revoked_at is null and expires_at > now()`);
+    if (open) throw INVITE_EXISTS();
+    const code = randomBytes(18).toString("base64url");
+    const inviteId = randomUUID();
+    const action = await privileged(d, {
+      action: "marketplace.invite", subjectId: inviteId, reason: b.reason,
+      params: { inviteId, codeHash: hashCode(code), email, kind: b.kind, name: b.name || null, note: b.note || null, days: M.inviteDays },
+    });
+    const [row] = await asService(d.sql, (tx) => tx<InviteRow[]>`${inviteSelect(tx)} where id = ${inviteId}`);
+    return reply.status(201).send({ action: { ...action, result: undefined }, invite: inviteView(row), code });
+  });
+
+  app.post<{ Params: { id: string } }>("/invites/:id/revoke", async (req) => {
+    const id = uuid(req.params.id);
+    const b = z.object({ reason: z.string() }).parse(req.body);
+    const [inv] = await asService(d.sql, (tx) => tx<{ open: boolean }[]>`
+      select (redeemed_at is null and revoked_at is null) as open from public.marketplace_invites where id = ${id}`);
+    if (!inv) throw NOT_FOUND();
+    if (!inv.open) throw new HttpError(409, "invite_not_open", "Only open invites can be revoked.");
+    const action = await privileged(d, { action: "marketplace.invite_revoke", subjectId: id, reason: b.reason });
+    const [row] = await asService(d.sql, (tx) => tx<InviteRow[]>`${inviteSelect(tx)} where id = ${id}`);
+    return { action, invite: inviteView(row) };
+  });
+
+  /** FR-MKT-027. */
+  app.get("/members", async () => {
+    const rows = await asService(d.sql, (tx) => tx<{ user_id: string; display_name: string; kind: MemberView["kind"]; joined_at: Date; removed_at: Date | null; provider_status: MemberView["providerStatus"] }[]>`
+      select m.user_id, p.display_name, m.kind, m.joined_at, m.removed_at, sp.status as provider_status
+        from public.marketplace_members m join public.profiles p on p.id = m.user_id
+        left join public.service_providers sp on sp.owner_id = m.user_id
+       order by m.removed_at nulls first, m.joined_at desc limit 500`);
+    return {
+      items: rows.map((r): MemberView => ({
+        userId: r.user_id, displayName: r.display_name, kind: r.kind, joinedAt: r.joined_at.toISOString(),
+        removedAt: r.removed_at?.toISOString() ?? null, providerStatus: r.provider_status,
+      })),
+    };
+  });
+
+  app.post<{ Params: { userId: string } }>("/members/:userId/remove", async (req) => {
+    const userId = uuid(req.params.userId);
+    const b = z.object({ reason: z.string() }).parse(req.body);
+    const [m] = await asService(d.sql, (tx) => tx`select 1 from public.marketplace_members where user_id = ${userId} and removed_at is null`);
+    if (!m) throw new HttpError(409, "not_member", "That person isn't a current beta member.");
+    return { action: await privileged(d, { action: "marketplace.member_remove", subjectId: userId, reason: b.reason }), ok: true };
+  });
+
+  /** FR-MKT-028 (discovery E1/E2). Counts only, no names or contact data. */
+  app.get("/metrics", async (): Promise<MarketplaceMetrics> => {
+    return asService(d.sql, async (tx) => {
+      const count = async (q: ReturnType<Tx>) => Object.fromEntries((await q as unknown as { k: string; c: bigint }[]).map((r) => [r.k, n(r.c)]));
+      const members = await count(tx`select kind as k, count(*) as c from public.marketplace_members where removed_at is null group by kind`);
+      const invites = await count(tx`
+        select case when redeemed_at is not null then 'redeemed' when revoked_at is not null then 'revoked'
+                    when expires_at <= now() then 'expired' else 'open' end as k, count(*) as c
+          from public.marketplace_invites group by 1`);
+      const providers = await count(tx`select status as k, count(*) as c from public.service_providers group by status`);
+      const listedByCategory = await count(tx`
+        select c as k, count(*) as c from public.service_providers, unnest(categories) c where status = 'listed' group by c`);
+      const requests = await count(tx`select status as k, count(*) as c from public.service_requests group by status`);
+      const [t] = await tx<{ median_h: number | null; d7: bigint; d30: bigint }[]>`
+        select percentile_cont(0.5) within group (order by extract(epoch from responded_at - created_at) / 3600.0)
+                 filter (where responded_at is not null and status in ('accepted', 'declined') and provider_note is distinct from 'This provider is no longer listed.') as median_h,
+               count(*) filter (where created_at > now() - interval '7 days') as d7,
+               count(*) filter (where created_at > now() - interval '30 days') as d30
+          from public.service_requests`;
+      const zero = <K extends string>(keys: readonly K[], got: Record<string, number>) => Object.fromEntries(keys.map((k) => [k, got[k] ?? 0])) as Record<K, number>;
+      const req = zero(["sent", "accepted", "declined", "withdrawn"] as const, requests);
+      const answered = req.accepted + req.declined;
+      return {
+        members: zero(["provider", "artist"] as const, members),
+        invites: zero(["open", "redeemed", "revoked", "expired"] as const, invites),
+        providers: zero(["draft", "in_review", "changes_requested", "listed", "suspended"] as const, providers),
+        listedByCategory,
+        requests: req,
+        acceptanceRate: answered ? Math.round((req.accepted / answered) * 1000) / 1000 : null,
+        medianResponseHours: t.median_h == null ? null : Math.round(Number(t.median_h) * 10) / 10,
+        requestsLast7Days: n(t.d7),
+        requestsLast30Days: n(t.d30),
+      };
+    });
   });
 };

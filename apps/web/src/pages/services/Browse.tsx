@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { ArrowRight, CircleAlert, MapPin, RefreshCw, Search, Store, Wrench } from "lucide-react";
 import { Badge, Button, Callout, Card, Checkbox, Container, EmptyState, Field, PageHeader, Select, TextInput } from "@/components/brand";
 import { api } from "@/lib/api";
+import { ClosedBeta, isClosedBeta } from "@/components/services/ClosedBeta";
 import { MARKETPLACE_CATEGORIES, MKT_VETTING_NOTE, categoryLabel, priceFromLabel, turnaroundLabel, type ServiceResult } from "@fanzup/shared/marketplace";
 
 /**
@@ -18,6 +19,7 @@ export default function ServicesBrowse() {
   const [items, setItems] = useState<ServiceResult[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [denied, setDenied] = useState<unknown>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
   // Review finding 7: only the latest request may update the list, so a slow earlier search can't overwrite it.
@@ -34,12 +36,17 @@ export default function ServicesBrowse() {
         setItems((prev) => (more && prev ? [...prev, ...r.items] : r.items));
         setCursor(r.nextCursor);
       })
-      .catch(() => n === seq.current && setError(true))
+      .catch((e) => {
+        if (n !== seq.current) return;
+        if (isClosedBeta(e)) setDenied(e);
+        else setError(true);
+      })
       .finally(() => n === seq.current && setLoadingMore(false));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => load(), [category, query, remote]);
 
+  if (denied) return <ClosedBeta error={denied} />;
   return (
     <Container size="lg" className="flex flex-col gap-8 py-8">
       <PageHeader

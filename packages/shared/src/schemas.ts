@@ -26,7 +26,8 @@ export const FunnelEventRequest = z.object({
 export type FunnelEventRequest = z.infer<typeof FunnelEventRequest>;
 
 export const AcceptanceRequest = z.object({
-  documents: z.array(z.object({ kind: z.enum(["terms", "privacy", "adult_attestation"]), version: z.string().max(40) })).min(1).max(3),
+  // `provider_terms` (CR-007, FR-MKT-025): accepted by marketplace providers only; not part of sign-up.
+  documents: z.array(z.object({ kind: z.enum(["terms", "privacy", "adult_attestation", "provider_terms"]), version: z.string().max(40) })).min(1).max(4),
 });
 export type AcceptanceRequest = z.infer<typeof AcceptanceRequest>;
 

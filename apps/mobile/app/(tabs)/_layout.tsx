@@ -1,11 +1,12 @@
-/** Tabs: Explore, Services (only when the server's `flags.marketplace` is on; CR-005 FR-MKT-012), Backed, Account. Gold marks the active tab only. */
+/** Tabs: Explore, Services (only when the server's `flags.marketplace` is on and the caller is in the beta; CR-005 FR-MKT-012, CR-007), Backed, Account. Gold marks the active tab only. */
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { color, font } from "@/theme";
-import { useConfig } from "@/lib/config";
+import { useMarketplaceBrowse } from "@/lib/marketplace";
 
 export default function TabsLayout() {
-  const marketplace = !!useConfig()?.flags?.marketplace;
+  // CR-007: in the closed beta the tab follows the per-user access check, not just the server flag.
+  const marketplace = useMarketplaceBrowse();
   return (
     <Tabs
       screenOptions={{

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFlag, setFlag, allFlags, useLayer2Completion } from "@/lib/flags";
+import { useMarketplaceNav } from "@/lib/marketplace";
 import { Button, Logo, Container } from "@/components/brand";
 import { initials, useSession } from "@/lib/session";
 
@@ -37,14 +38,20 @@ function AccountActions({ mobile = false, onDone }: { mobile?: boolean; onDone?:
   );
 }
 
+/**
+ * `marketplace`: browse entry points, shown when the closed-beta access check allows browsing (CR-007).
+ * `marketplaceOwn`: the caller's own provider profile and requests, shown whenever the server flag is on, so a removed
+ * member can still answer requests already sent to them and read their own (design §12.2). Those pages handle refusals.
+ */
 /** `completion`: a layer2 item also shown on the server's completion signal (flag off; L2-T-038, review round 2 finding 2). */
-type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta" | "marketplace"; completion?: boolean; end?: boolean };
+type NavItem = { to: string; label: string; icon: ComponentType<{ className?: string }>; flag?: "layer2" | "postBeta" | "marketplace" | "marketplaceOwn"; completion?: boolean; end?: boolean };
 
 /* ── Public (marketing + discovery) ─────────────────────── */
 
 export function PublicShell() {
   const [open, setOpen] = useState(false);
-  const marketplace = useFlag("marketplace");
+  // CR-007 (FR-MKT-024): in the closed beta, only people the access check lets in see the marketplace.
+  const marketplace = useMarketplaceNav();
   const links = [
     { to: "/explore", label: "Discover" },
     ...(marketplace ? [{ to: "/services", label: "Services" }] : []),
@@ -188,7 +195,7 @@ const FAN_NAV: NavItem[] = [
   { to: "/governance", label: "Holder votes", icon: Vote, flag: "postBeta" },
   // CR-005 (FR-MKT-011): the services marketplace, only when the server flag is on.
   { to: "/services", label: "Services", icon: Wrench, flag: "marketplace" },
-  { to: "/provider", label: "Provider profile", icon: Briefcase, flag: "marketplace", end: true },
+  { to: "/provider", label: "Provider profile", icon: Briefcase, flag: "marketplaceOwn", end: true },
 ];
 const FAN_SECONDARY: NavItem[] = [
   { to: "/profile", label: "Profile", icon: User },
@@ -204,7 +211,7 @@ const CREATOR_NAV: NavItem[] = [
   { to: "/creator/events", label: "Events", icon: CalendarDays },
   { to: "/creator/streaming", label: "Live", icon: Radio },
   { to: "/services", label: "Find services", icon: Wrench, flag: "marketplace" },
-  { to: "/services/requests", label: "Service requests", icon: Inbox, flag: "marketplace" },
+  { to: "/services/requests", label: "Service requests", icon: Inbox, flag: "marketplaceOwn" },
   { to: "/creator/payouts", label: "Payouts", icon: Landmark },
   { to: "/creator/tax", label: "Tax documents", icon: Receipt },
 ];
@@ -216,15 +223,17 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/admin/pools", label: "Pools (Layer 2)", icon: Disc3, flag: "layer2" },
   { to: "/admin/investors", label: "Investor KYC", icon: Fingerprint, flag: "layer2" },
   { to: "/admin/providers", label: "Service providers", icon: Store, flag: "marketplace" },
+  { to: "/admin/marketplace", label: "Marketplace beta", icon: Users, flag: "marketplace" },
 ];
 
 function SideNav({ items, secondary, onNavigate }: { items: NavItem[]; secondary?: NavItem[]; onNavigate?: () => void }) {
   const layer2 = useFlag("layer2");
   const postBeta = useFlag("postBeta");
-  const marketplace = useFlag("marketplace");
+  const marketplace = useMarketplaceNav();
+  const marketplaceOwn = useFlag("marketplace");
   const completion = useLayer2Completion();
   const visible = (i: NavItem) =>
-    !i.flag || (i.flag === "layer2" ? layer2 || (!!i.completion && completion) : i.flag === "marketplace" ? marketplace : postBeta);
+    !i.flag || (i.flag === "layer2" ? layer2 || (!!i.completion && completion) : i.flag === "marketplace" ? marketplace : i.flag === "marketplaceOwn" ? marketplaceOwn : postBeta);
   const link = (i: NavItem) => (
     <NavLink
       key={i.to}

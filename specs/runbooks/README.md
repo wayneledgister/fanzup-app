@@ -7,6 +7,7 @@ These are the "it's 2am and something is wrong" documents. They describe the sys
 |---|---|
 | [`deploy-and-rollback.md`](deploy-and-rollback.md) | Shipping a change to staging or production, or undoing one |
 | [`incidents.md`](incidents.md) | Something is broken: severity matrix, first five minutes, the top failure modes, postmortem template |
+| [`marketplace-beta.md`](marketplace-beta.md) | Running the services-marketplace closed beta: inviting providers and artists, vetting, widening the audience, removing someone, closing it (CR-007) |
 
 Related: architecture diagrams in [`../diagrams/README.md`](../diagrams/README.md), risk log in [`../risks.md`](../risks.md), failure-mode analysis in [`../fmea.md`](../fmea.md), readiness review in [`../05-readiness.md`](../05-readiness.md). Account setup (one-time, by hand) stays in [`docs/SETUP.md`](../../docs/SETUP.md).
 

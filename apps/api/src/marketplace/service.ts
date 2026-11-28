@@ -36,3 +36,56 @@ export async function executeProviderReview(sql: Sql, subjectId: string, actorId
     }
   });
 }
+
+// ── Closed beta (CR-007, design §12). Executors for the privileged staff actions; none moves money. ──
+export const INVITE_EXISTS = () => new HttpError(409, "invite_exists", "This email already has an open invite. Revoke it first to send a new one.");
+
+/** `marketplace.audience` (FR-MKT-021). */
+export async function executeAudience(sql: Sql, actorId: string, p: { audience: string }) {
+  await asService(sql, async (tx) => {
+    await tx`insert into public.platform_settings (key, value, updated_by) values ('marketplace.audience', ${tx.json(p.audience)}, ${actorId})
+             on conflict (key) do update set value = excluded.value, updated_at = now(), updated_by = excluded.updated_by`;
+  });
+  return { audience: p.audience };
+}
+
+/**
+ * `marketplace.invite` (FR-MKT-022). Params hold the code's hash, never the code (NFR-MKT-08). An expired open
+ * invite for the same email is revoked in the same transaction, so a fresh one can take its place.
+ */
+export async function executeInvite(sql: Sql, actorId: string, p: { inviteId: string; codeHash: string; email: string; kind: string; name: string | null; note: string | null; days: number }) {
+  return asService(sql, async (tx) => {
+    await tx`update public.marketplace_invites set revoked_at = now(), revoked_by = ${actorId}
+              where email = ${p.email} and redeemed_at is null and revoked_at is null and expires_at <= now()`;
+    try {
+      await tx.savepoint((s) => s`
+        insert into public.marketplace_invites (id, code_hash, email, name, kind, note, created_by, expires_at)
+        values (${p.inviteId}, ${p.codeHash}, ${p.email}, ${p.name}, ${p.kind}, ${p.note}, ${actorId}, now() + make_interval(days => ${p.days}))`);
+    } catch (e) {
+      if ((e as { code?: string }).code === "23505") throw INVITE_EXISTS();
+      throw e;
+    }
+    await audit(tx, actorId, "marketplace.invite.created", "marketplace_invite", p.inviteId, { kind: p.kind });
+    return { inviteId: p.inviteId };
+  });
+}
+
+/** `marketplace.invite_revoke` (FR-MKT-022). */
+export async function executeInviteRevoke(sql: Sql, subjectId: string, actorId: string) {
+  await asService(sql, async (tx) => {
+    const [r] = await tx`update public.marketplace_invites set revoked_at = now(), revoked_by = ${actorId}
+                          where id = ${subjectId} and redeemed_at is null and revoked_at is null returning id`;
+    if (!r) throw new HttpError(409, "invite_not_open", "Only open invites can be revoked.");
+    await audit(tx, actorId, "marketplace.invite.revoked", "marketplace_invite", subjectId);
+  });
+}
+
+/** `marketplace.member_remove` (FR-MKT-027). Data stays; a listed provider is suspended separately (FR-MKT-008). */
+export async function executeMemberRemove(sql: Sql, subjectId: string, actorId: string) {
+  await asService(sql, async (tx) => {
+    const [r] = await tx`update public.marketplace_members set removed_at = now(), removed_by = ${actorId}
+                          where user_id = ${subjectId} and removed_at is null returning user_id`;
+    if (!r) throw new HttpError(409, "not_member", "That person isn't a current beta member.");
+    await audit(tx, actorId, "marketplace.member.removed", "profile", subjectId);
+  });
+}

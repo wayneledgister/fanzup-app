@@ -7,7 +7,7 @@ import type {
   BackCampaignRequest, BackCampaignResponse, BackingStatus, CampaignDetail, CampaignList, Me, MyArtist, MyBacking, MyCampaign, PublicConfig, FunnelEventRequest,
 } from "./schemas";
 import type {
-  ListingInput, MyProvider, ProviderPage, ProviderProfileInput, RespondInput, ServiceList, ServiceRequestInput, ServiceRequestView,
+  InviteView, ListingInput, MarketplaceAccess, MarketplaceMetrics, MemberView, MyProvider, ProviderPage, ProviderProfileInput, RespondInput, ServiceList, ServiceRequestInput, ServiceRequestView,
 } from "./marketplace";
 
 export class ApiError extends Error {
@@ -72,7 +72,7 @@ export function createApiClient(opts: ApiClientOptions) {
     },
     campaign: (slug: string) => request<CampaignDetail>(`/v1/campaigns/${encodeURIComponent(slug)}`),
     me: () => request<Me>("/v1/me"),
-    accept: (documents: { kind: "terms" | "privacy" | "adult_attestation"; version: string }[]) =>
+    accept: (documents: { kind: "terms" | "privacy" | "adult_attestation" | "provider_terms"; version: string }[]) =>
       request<{ ok: true }>("/v1/me/acceptances", { method: "POST", body: JSON.stringify({ documents }) }),
     /** idempotencyKey must be stable across retries of the same checkout (`checkout-key.ts`). */
     back: (body: BackCampaignRequest, idempotencyKey: string) =>
@@ -98,9 +98,24 @@ export function createApiClient(opts: ApiClientOptions) {
       if (p.remote) q.set("remote", "true");
       if (p.cursor) q.set("cursor", p.cursor);
       const qs = q.toString();
-      return request<ServiceList>(`/v1/services${qs ? `?${qs}` : ""}`, { signal, auth: false });
+      // Sends the token when signed in: in the closed beta, browsing needs an invite (FR-MKT-021).
+      return request<ServiceList>(`/v1/services${qs ? `?${qs}` : ""}`, { signal });
     },
-    serviceProvider: (slug: string) => request<ProviderPage>(`/v1/services/providers/${encodeURIComponent(slug)}`, { auth: false }),
+    serviceProvider: (slug: string) => request<ProviderPage>(`/v1/services/providers/${encodeURIComponent(slug)}`),
+    // ── Closed beta (CR-007) ──
+    marketplaceAccess: () => request<MarketplaceAccess>("/v1/services/access"),
+    joinMarketplace: (code: string) => request<{ member: { kind: "provider" | "artist" } }>("/v1/services/join", { method: "POST", body: JSON.stringify({ code }) }),
+    staffMarketplaceInvites: () => request<{ items: InviteView[] }>("/v1/staff/marketplace/invites"),
+    staffCreateInvite: (body: { email: string; kind: "provider" | "artist"; name?: string | null; note?: string | null; reason: string }) =>
+      request<{ invite: InviteView; code: string }>("/v1/staff/marketplace/invites", { method: "POST", body: JSON.stringify(body) }),
+    staffRevokeInvite: (id: string, reason: string) =>
+      request<{ invite: InviteView }>(`/v1/staff/marketplace/invites/${encodeURIComponent(id)}/revoke`, { method: "POST", body: JSON.stringify({ reason }) }),
+    staffMarketplaceMembers: () => request<{ items: MemberView[] }>("/v1/staff/marketplace/members"),
+    staffRemoveMember: (userId: string, reason: string) =>
+      request<{ ok: true }>(`/v1/staff/marketplace/members/${encodeURIComponent(userId)}/remove`, { method: "POST", body: JSON.stringify({ reason }) }),
+    staffSetAudience: (audience: "invited" | "open_requests" | "everyone", reason: string) =>
+      request<{ audience: string }>("/v1/staff/marketplace/audience", { method: "POST", body: JSON.stringify({ audience, reason }) }),
+    staffMarketplaceMetrics: () => request<MarketplaceMetrics>("/v1/staff/marketplace/metrics"),
     sendServiceRequest: (body: ServiceRequestInput) => request<ServiceRequestView>("/v1/services/requests", { method: "POST", body: JSON.stringify(body) }),
     myServiceRequests: () => request<{ items: ServiceRequestView[] }>("/v1/services/requests"),
     withdrawServiceRequest: (id: string) => request<ServiceRequestView>(`/v1/services/requests/${encodeURIComponent(id)}/withdraw`, { method: "POST" }),
