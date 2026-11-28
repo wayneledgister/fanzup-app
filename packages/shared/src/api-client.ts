@@ -4,7 +4,7 @@
  * current Supabase access token; `fetch` can be injected for tests.
  */
 import type {
-  BackCampaignRequest, BackCampaignResponse, BackingStatus, CampaignDetail, CampaignList, Me, MyBacking, PublicConfig, FunnelEventRequest,
+  BackCampaignRequest, BackCampaignResponse, BackingStatus, CampaignDetail, CampaignList, Me, MyArtist, MyBacking, MyCampaign, PublicConfig, FunnelEventRequest,
 } from "./schemas";
 import type {
   InviteView, ListingInput, MarketplaceAccess, MarketplaceMetrics, MemberView, MyProvider, ProviderPage, ProviderProfileInput, RespondInput, ServiceList, ServiceRequestInput, ServiceRequestView,
@@ -79,6 +79,16 @@ export function createApiClient(opts: ApiClientOptions) {
       request<BackCampaignResponse>("/v1/backings", { method: "POST", body: JSON.stringify(body), idempotencyKey }),
     backing: (id: string) => request<BackingStatus>(`/v1/backings/${encodeURIComponent(id)}`),
     myBackings: () => request<{ backings: MyBacking[] }>("/v1/me/backings"),
+    // ── Artist (owner) read model: CR-006, ADR-011 ──
+    /** 404 `no_artist` when the user has no artist profile yet. */
+    myArtist: (signal?: AbortSignal) => request<MyArtist>("/v1/artist", { signal }),
+    myCampaign: (id: string, signal?: AbortSignal) => request<MyCampaign>(`/v1/artist/campaigns/${encodeURIComponent(id)}`, { signal }),
+    /** FR-CMP-002: draft / changes requested → in review. 409 with a readable message when a rule isn't met. */
+    submitCampaign: (id: string) => request<{ status: "in_review"; reviewEstimate: string }>(`/v1/artist/campaigns/${encodeURIComponent(id)}/submit`, { method: "POST" }),
+    /** FR-CMP-002: approved → live; the deadline starts now. */
+    publishCampaign: (id: string) => request<{ status: "live"; endsAt: string }>(`/v1/artist/campaigns/${encodeURIComponent(id)}/publish`, { method: "POST" }),
+    /** Starts or resumes hosted payout onboarding (FR-ID-004); `onboardingUrl` is null once the account is ready. */
+    connectPayoutAccount: () => request<{ status: "verified" | "pending"; onboardingUrl: string | null }>("/v1/artist/payout-account", { method: "POST" }),
     event: (e: FunnelEventRequest) => request<null>("/v1/events", { method: "POST", body: JSON.stringify(e), auth: false }).catch(() => null),
     // ── Services marketplace (CR-005, MKT-1; no money) ──
     services: (p: { category?: string; q?: string; remote?: boolean; cursor?: string | null } = {}, signal?: AbortSignal) => {

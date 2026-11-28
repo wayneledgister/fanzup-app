@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { ClosedBeta, isClosedBeta } from "@/components/services/ClosedBeta";
 import { dollarsToMinor } from "@fanzup/shared/money";
+import type { MyCampaignSummary } from "@fanzup/shared/schemas";
 import {
   MKT_OFF_PLATFORM_NOTICE, MKT_VETTING_NOTE, ServiceRequestInput, categoryLabel, priceFromLabel, turnaroundLabel,
   type ListingView, type ProviderPage as Provider,
@@ -87,7 +88,7 @@ export default function ServiceProviderPage() {
   );
 }
 
-type MyCampaign = { id: string; title: string; status: string };
+type MyCampaign = Pick<MyCampaignSummary, "id" | "title" | "status">;
 
 function RequestForm({ listing, providerName }: { listing: ListingView; providerName: string }) {
   const s = useSession();
@@ -105,7 +106,7 @@ function RequestForm({ listing, providerName }: { listing: ListingView; provider
 
   useEffect(() => {
     if (!s.session) return;
-    api.request<{ campaigns: MyCampaign[] }>("/v1/artist")
+    api.myArtist()
       .then((a) => setCampaigns(a.campaigns.filter((c) => !["withdrawn", "closed"].includes(c.status))))
       .catch((e) => { if (e instanceof ApiError && e.code === "no_artist") setNoArtist(true); setCampaigns([]); });
   }, [s.session]);
