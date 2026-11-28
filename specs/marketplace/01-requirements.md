@@ -116,3 +116,69 @@ MKT-1 moves **no money**. Prices on listings are "starting at" guides for the co
 - **Paid playlist placement / streaming promotion:** pay-for-placement breaks most DSP terms; excluded as a category.
 - **Payments, deposits, holds, fees:** MKT-2, after counsel (discovery MKT-Q1…Q4) and Wayne's fee decision.
 - **Fans hiring providers:** not in MKT-1.
+
+## 5. Closed beta (CR-007, Phase MKT-1b)
+**Authority:** [CR-007](../changes/CR-007-marketplace-closed-beta.md) · **ADR:** [ADR-012](../../docs/adr/ADR-012-marketplace-beta-access-and-terms.md) · **Date:** 2026-11-27. Web first; mobile only follows the access check (FR-MKT-012). No money, no fees (CR-005 D-MKT-1/2).
+
+### FR-MKT-021: Beta audience
+**Story:** As the operator, I want to open the marketplace to a small invited group first, then widen it, so the beta stays manageable with one reviewer.
+- Setting `marketplace.audience`, default **`invited`**, changed only by the privileged staff action `marketplace.audience` (aal2, typed reason, audited).
+- `invited`: only members (FR-MKT-023) and staff can browse and send requests; only members invited as providers can create a provider profile.
+- `open_requests`: any verified, signed-in user can browse and send requests; creating a provider profile still needs a provider invite.
+- `everyone`: anyone can browse (signed out too); any verified user can request or create a provider profile (staff still vet every provider, FR-MKT-008).
+- With `flag.marketplace` off, FR-MKT-001 still applies: everything answers 404 whatever the audience.
+- Refused for someone outside the audience: 403 `invite_only` with "The services marketplace is in a closed beta. Ask the FanZuP team for an invite."
+**Priority:** P0
+
+### FR-MKT-022: Invites
+**Story:** As staff, I want to invite a named person as a provider or an artist, so only people I chose join the beta.
+- `POST /v1/staff/marketplace/invites` with email, kind (`provider` | `artist`), optional name and note, and a typed reason: privileged `marketplace.invite`. Answers the invite code **once**; the database keeps only its SHA-256 hash.
+- An invite expires after `POLICY.marketplace.inviteDays` (30) days and is single-use. At most one open invite per email (409 `invite_exists`).
+- `GET /v1/staff/marketplace/invites` lists invites with status (`open`, `redeemed`, `revoked`, `expired`); `POST …/invites/:id/revoke` (privileged `marketplace.invite_revoke`) revokes an open one.
+- Staff send the link (`/services/join#code=…`; the code is in the fragment, so it never reaches a server log) themselves; FanZuP sends no email in MKT-1b (no email provider yet).
+**Priority:** P0
+
+### FR-MKT-023: Redeem an invite
+**Story:** As an invited provider or artist, I want to open my link, sign in and be in.
+- `POST /v1/services/join` with the code; needs a verified user whose account email matches the invite's email (case-insensitive), so a forwarded link doesn't work for someone else (403 `invite_email_mismatch`, naming neither address).
+- Unknown, expired, revoked or used codes answer 410 `invite_invalid` with one message (no hint which).
+- Redeeming adds a member row (`kind` from the invite; a provider invite upgrades an artist member). Audited with ids only.
+**Priority:** P0
+
+### FR-MKT-024: Access check
+- `GET /v1/services/access` (behind the flag only) answers, for the caller (signed in or not): audience, member kind or null, `canBrowse`, `canRequest`, `canProvide`, and the Provider Terms state (`version`, `accepted`, `approved`).
+- The web nav, the artist dashboard entry and the mobile Services tab show the marketplace only when `canBrowse` is true. The API enforces the same rules (the check is a convenience, never the guard).
+**Priority:** P0
+
+### FR-MKT-025: Provider Terms acceptance
+**Story:** As FanZuP, I want every provider to have accepted the current Provider Terms before they're listed or answer artists, with a record of which version.
+- The Provider Terms version lives in `POLICY.legal.providerTerms.version`. Acceptance is a `provider_terms` row in `consents` (append-only, with IP and user agent) through `POST /v1/me/acceptances`.
+- Creating a provider profile, submitting for review, and responding to a request each need an acceptance of the **current** version: 409 `provider_terms_required` otherwise. A new version requires re-acceptance before the next of those actions; nothing already listed is hidden.
+- The provider editor shows the acceptance step with a link to `/legal/provider-terms`. While the terms aren't counsel-approved, that page says they're being finalised and the step says the beta runs on the draft shared by the FanZuP team.
+**Priority:** P0
+
+### FR-MKT-026: Launch guard
+- In a deployed environment, `POST /v1/staff/flags/marketplace {on: true}` is refused with 409 `legal_not_ready` unless `POLICY.legal.providerTerms.approved` and `POLICY.legal.privacyCoversMarketplace` are both true. Turning the flag off is always allowed.
+- Both values change only in a reviewed PR, which is where counsel's approval is recorded (FR-PRV-001: nothing is published until counsel approves).
+- Local and CI environments aren't guarded, so tests and demos run on the draft.
+**Priority:** P0
+
+### FR-MKT-027: Remove a member
+- `POST /v1/staff/marketplace/members/:userId/remove` (privileged `marketplace.member_remove`) ends a member's beta access at once. It doesn't delete their provider profile or requests; staff suspend a listed provider separately (FR-MKT-008).
+- `GET /v1/staff/marketplace/members` lists members (name, kind, joined, removed).
+**Priority:** P0
+
+### FR-MKT-028: Beta metrics (discovery E1/E2)
+- `GET /v1/staff/marketplace/metrics`: members by kind, invites by status, providers by status and category, requests by status, acceptance rate of answered requests, median hours to first response, requests in the last 7 and 30 days.
+- Counts only; no names or contact data.
+**Priority:** P0
+
+### FR-MKT-029: Web screens
+- `/services/join#code=` (sign in, then redeem; the code survives the sign-in redirect in sessionStorage; clear errors), the Provider Terms step in `/provider`, and a staff page `/admin/marketplace` with audience, invites (create → copy link once, revoke), members (remove) and metrics. `/admin/providers` (vetting) links to it.
+**Priority:** P0
+
+### Non-functional (closed beta)
+| ID | Requirement | Priority |
+|---|---|---|
+| NFR-MKT-08 | Invite codes are 144-bit random, stored only as SHA-256; codes never appear in logs, audit events or privileged-action params. Invite emails are visible to staff only. | P0 |
+| NFR-MKT-09 | Every access rule in FR-MKT-021 is enforced in the API on every route; client checks only hide entry points. | P0 |

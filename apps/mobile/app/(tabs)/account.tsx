@@ -8,7 +8,7 @@ import { SignInPrompt } from "@/components/SignInPrompt";
 import { apiHost, env } from "@/lib/env";
 import { openWeb } from "@/lib/links";
 import { useSession } from "@/lib/session";
-import { useConfig } from "@/lib/config";
+import { useMarketplaceBrowse } from "@/lib/marketplace";
 import { color, space, TOUCH } from "@/theme";
 
 const LINKS: { label: string; path: string; icon: React.ComponentProps<typeof Ionicons>["name"] }[] = [
@@ -21,7 +21,7 @@ const LINKS: { label: string; path: string; icon: React.ComponentProps<typeof Io
 
 export default function Account() {
   const session = useSession();
-  const marketplace = !!useConfig()?.flags?.marketplace;
+  const marketplace = useMarketplaceBrowse();
   return (
     <Screen>
       <Eyebrow>Account</Eyebrow>

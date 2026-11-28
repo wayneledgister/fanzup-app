@@ -106,8 +106,8 @@ The marketplace is off by default everywhere (`flag.marketplace`). Locally, turn
 psql "postgresql://postgres:postgres@127.0.0.1:55322/postgres" \
   -c "update public.platform_settings set value = 'true' where key = 'flag.marketplace'"
 ```
-Then `pnpm dev`, sign in as any verified user and open `/provider` to create a provider profile and listings and submit it; sign in as the reviewer (`/admin/providers`, needs the TOTP step) to list it; sign in as an artist (`nova@fanzup.test`) and send a request from `/services`. On the phone, the Services tab appears once the API reports `flags.marketplace`.
-**Hosted (staging) when Wayne decides to open it:** `POST /api/v1/staff/flags/marketplace` with `{"on": true, "reason": "…"}` from a staff session with a second factor (audited `flag.set`). Before real users see it: Provider Terms and the privacy-notice update (CR-005).
+The closed-beta audience starts as `invited` (CR-007). Either open it locally with `update public.platform_settings set value = '"everyone"' where key = 'marketplace.audience'`, or invite yourself from `/admin/marketplace` as the reviewer and open the link. Then `pnpm dev`, sign in as any verified user and open `/provider`, accept the Provider Terms, create a provider profile and listings and submit it; sign in as the reviewer (`/admin/providers`, needs the TOTP step) to list it; sign in as an artist (`nova@fanzup.test`) and send a request from `/services`. On the phone, the Services tab appears once the API reports `flags.marketplace`.
+**Hosted (staging) when Wayne decides to open it:** `POST /api/v1/staff/flags/marketplace` with `{"on": true, "reason": "…"}` from a staff session with a second factor (audited `flag.set`). Before real users see it: Provider Terms and the privacy-notice update (CR-005). A deployed API refuses to turn the flag on until `POLICY.legal.providerTerms.approved` and `privacyCoversMarketplace` are true (CR-007); the full operator steps are in [`runbooks/marketplace-beta.md`](../specs/runbooks/marketplace-beta.md).
 
 ---
 

@@ -47,3 +47,26 @@ describe("marketplace shared rules", () => {
     expect(requestStatusCopy("accepted").tone).toBe("success");
   });
 });
+
+describe("CR-007 closed beta: shared rules (FR-MKT-021/022/023/025)", async () => {
+  const m = await import("../src/marketplace");
+  const { POLICY } = await import("../src/policy");
+  it("audiences default to invited people only and have plain labels", () => {
+    expect(m.AUDIENCES[0]).toBe("invited");
+    expect(m.audienceLabel("invited")).toBe("Invited people only");
+    expect(m.Audience.safeParse("nobody").success).toBe(false);
+  });
+  it("invites need an email and a kind; join codes are 24 base64url characters", () => {
+    expect(m.InviteInput.safeParse({ email: "a@example.com", kind: "provider", reason: "Invite to the beta" }).success).toBe(true);
+    expect(m.InviteInput.safeParse({ email: "nope", kind: "provider", reason: "x" }).success).toBe(false);
+    expect(m.JoinInput.safeParse({ code: "A".repeat(24) }).success).toBe(true);
+    expect(m.JoinInput.safeParse({ code: "A".repeat(23) }).success).toBe(false);
+    expect(m.JoinInput.safeParse({ code: "A".repeat(23) + "/" }).success).toBe(false);
+  });
+  it("the Provider Terms are versioned and not approved until counsel signs off (FR-MKT-026)", () => {
+    expect(POLICY.legal.providerTerms.version).toMatch(/^\d{4}-\d{2}-\d{2}/);
+    if (!POLICY.legal.providerTerms.approved) expect(POLICY.legal.providerTerms.version).toMatch(/draft/);
+    expect(m.MKT_TERMS_DRAFT_NOTE).not.toMatch(/escrow|fee/i);
+    expect(m.RESERVED_SLUGS).toContain("join");
+  });
+});

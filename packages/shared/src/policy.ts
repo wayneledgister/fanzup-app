@@ -92,6 +92,8 @@ export const POLICY = {
     /** FR-MKT-004: starting-price guide ceiling ($100,000). */
     maxPriceFromMinor: 10_000_000,
     pageSize: 20,
+    /** FR-MKT-022 (CR-007): days an unredeemed beta invite stays valid. */
+    inviteDays: 30,
   },
   /** Agent layer, Phase 0 (CR-003, specs/agents/02-design.md §3). Advisory only; nothing here gates money. */
   agents: {
@@ -113,7 +115,18 @@ export const POLICY = {
     promptVersions: { campaign_review: "cr-1", ops_weekly: "ow-1" },
   },
   /** FR-PRV-001. Placeholder documents until counsel-approved versions (P0b). */
-  legal: { termsVersion: "2026-10-03-beta", privacyVersion: "2026-10-03-beta" },
+  legal: {
+    termsVersion: "2026-10-03-beta",
+    privacyVersion: "2026-10-03-beta",
+    /**
+     * FR-MKT-025/026 (CR-007, ADR-012). Providers accept this version before they create, submit or answer requests.
+     * `approved` flips to true only in the PR that records counsel's sign-off and publishes the text (MKT-T-026);
+     * until then a deployed environment refuses to turn `flag.marketplace` on.
+     */
+    providerTerms: { version: "2026-11-27-draft", approved: false },
+    /** True once the published privacy notice (`privacyVersion`) covers service requests and provider contact data. */
+    privacyCoversMarketplace: false,
+  },
 
   // ── Layer 2 (CR-002, demo on mock rails). Mirrored in platform_settings by migration 20261011000300 (sync test). ──
   /**

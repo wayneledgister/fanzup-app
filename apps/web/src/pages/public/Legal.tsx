@@ -3,7 +3,11 @@ import { Link, useParams } from "react-router";
 import { Button, Container, EmptyState, PageHeader } from "@/components/brand";
 
 /** Source: new. Terms and privacy documents are being drafted with counsel; no placeholder legal text is published. */
-const DOCS: Record<string, string> = { terms: "Terms of Service", privacy: "Privacy Policy", "campaign-terms": "Campaign Terms for Backers" };
+const DOCS: Record<string, string> = {
+  terms: "Terms of Service", privacy: "Privacy Policy", "campaign-terms": "Campaign Terms for Backers",
+  // CR-007 (FR-MKT-025): published here once counsel approves (POLICY.legal.providerTerms.approved).
+  "provider-terms": "Provider Terms",
+};
 
 export default function Legal() {
   const { doc = "" } = useParams();

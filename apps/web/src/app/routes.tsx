@@ -113,6 +113,8 @@ const P104 = lazy(() => import("@/pages/services/ProviderPage"));
 const P105 = lazy(() => import("@/pages/services/ProviderEditor"));
 const P106 = lazy(() => import("@/pages/services/ProviderInbox"));
 const P107 = lazy(() => import("@/pages/admin/ServiceProviders"));
+const P108 = lazy(() => import("@/pages/services/Join"));
+const P109 = lazy(() => import("@/pages/admin/MarketplaceBeta"));
 
 const S = (n: ReactNode) => <Suspense fallback={<RouteFallback />}>{n}</Suspense>;
 
@@ -131,6 +133,7 @@ export const router = createBrowserRouter([
       { path: "/legal/:doc", element: S(<P8 />) },
       { path: "/support", element: S(<P9 />) },
       { path: "/services", element: S(<FeatureRoute flag="marketplace"><P102 /></FeatureRoute>) },
+      { path: "/services/join", element: S(<FeatureRoute flag="marketplace"><P108 /></FeatureRoute>) },
       { path: "/services/:slug", element: S(<FeatureRoute flag="marketplace"><P104 /></FeatureRoute>) },
     ],
   },
@@ -252,6 +255,7 @@ export const router = createBrowserRouter([
       { path: "/admin/pools/:id", element: S(<FeatureRoute flag="layer2" allowCompletion><P99 /></FeatureRoute>) },
       { path: "/admin/investors", element: S(<FeatureRoute flag="layer2" allowCompletion><P100 /></FeatureRoute>) },
       { path: "/admin/providers", element: S(<FeatureRoute flag="marketplace"><P107 /></FeatureRoute>) },
+      { path: "/admin/marketplace", element: S(<FeatureRoute flag="marketplace"><P109 /></FeatureRoute>) },
     ],
   },
   { path: "/ds", element: S(<P101 />) },

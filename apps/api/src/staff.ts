@@ -15,7 +15,7 @@ import { log, redact } from "./log";
 import type { Deps } from "./app";
 import { processEventById } from "./inbox";
 import { commitDistribution } from "./l2/service";
-import { executeProviderReview } from "./marketplace/service";
+import { executeAudience, executeInvite, executeInviteRevoke, executeMemberRemove, executeProviderReview } from "./marketplace/service";
 
 export async function requireStaff(req: FastifyRequest, d: Pick<Deps, "verify" | "sql">): Promise<Claims> {
   const u = await requireUser(req, d.verify);
@@ -39,7 +39,9 @@ export type ActionName =
   // Agent layer (CR-003): a staff verdict on an agent proposal. Not a money action; changes nothing but the verdict.
   | "agent_proposal.verdict"
   // Services marketplace (CR-005, FR-MKT-008): list, request changes or suspend a provider. Not a money action.
-  | "provider.review";
+  | "provider.review"
+  // Marketplace closed beta (CR-007, FR-MKT-021/022/027): who's in the beta. Not money actions.
+  | "marketplace.audience" | "marketplace.invite" | "marketplace.invite_revoke" | "marketplace.member_remove";
 
 /**
  * Layer 2 break kinds only staff close (`pool_break.resolve`, review round 3 follow-up): money-path breaks raised by the
@@ -255,6 +257,10 @@ const EXECUTORS: Record<ActionName, Executor> = {
   "provider.review": async (d, a) => {
     await executeProviderReview(d.sql, a.subject_id!, a.actor_id, a.params as { decision: string; note: string | null; version: string });
   },
+  "marketplace.audience": (d, a) => executeAudience(d.sql, a.actor_id, a.params as { audience: string }),
+  "marketplace.invite": (d, a) => executeInvite(d.sql, a.actor_id, a.params as Parameters<typeof executeInvite>[2]),
+  "marketplace.invite_revoke": (d, a) => executeInviteRevoke(d.sql, a.subject_id!, a.actor_id),
+  "marketplace.member_remove": (d, a) => executeMemberRemove(d.sql, a.subject_id!, a.actor_id),
   "flag.set": async (d, a) => {
     const p = a.params as { flag: string; on: boolean };
     await asService(d.sql, (tx) => tx`
@@ -284,6 +290,8 @@ async function campaignOwner(sql: Sql, action: ActionName, subjectId: string | n
     "investor.kyc_decide": "(select $1::uuid as owner_id) a",
     // Staff can't vet their own provider profile (FR-MKT-008).
     "provider.review": "public.service_providers a where a.id = $1",
+    // Staff can't remove their own beta membership (CR-007, FR-MKT-027).
+    "marketplace.member_remove": "(select $1::uuid as owner_id) a",
   };
   const clause = from[action];
   if (!clause) return null;

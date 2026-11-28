@@ -8,7 +8,7 @@
 ## Summary
 | Requirements | ✅ tested | 🟡 code, no test ref | ⏳ designed/planned | ⚠️ spec only |
 |---|---|---|---|---|
-| 220 | 69 | 45 | 25 | 81 |
+| 231 | 80 | 45 | 25 | 81 |
 
 ## Matrix
 ### Core (M1–GA) · `specs/01-requirements.md` · 141 requirements
@@ -75,13 +75,13 @@
 | FR-GRO-005 | Backer wall and engagement badges | P2 | — | — | — | — | — | ⚠️ spec only |
 | FR-ANL-001 | Artist funnel | P1 | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/routes/me.ts`, `mobile/src/lib/ids.ts`, `web/src/lib/attribution.ts` +2 | ✅ tested |
 | FR-ANL-002 | Platform metrics | P1 | — | — | — | — | — | ⚠️ spec only |
-| FR-PRV-001 | Recorded acceptance of real documents | P0a | `02-design.md` | `docs/adr/ADR-004-full-account-auth.md` | `03-tasks.md` | `api/test/identity-staff.test.ts`, `api/test/staff-actions.test.ts` | `api/src/app.ts`, `api/src/routes/backings.ts`, `api/src/routes/me.ts` +6 | ✅ tested |
+| FR-PRV-001 | Recorded acceptance of real documents | P0a | `02-design.md` | `docs/adr/ADR-004-full-account-auth.md`, `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `03-tasks.md`, `marketplace/03-tasks.md` | `api/test/identity-staff.test.ts`, `api/test/staff-actions.test.ts` | `api/src/app.ts`, `api/src/routes/backings.ts`, `api/src/routes/me.ts` +6 | ✅ tested |
 | FR-PRV-002 | Export my data | P0b | — | — | — | — | — | ⚠️ spec only |
 | FR-PRV-003 | Delete my account | P0b | `mobile/02-design.md` | `docs/adr/ADR-009-mobile-app.md` | `mobile/03-tasks.md` | — | — | ⏳ designed/planned |
 | FR-PRV-004 | Public profile is opt-in | P0a | `02-design.md` | — | `03-tasks.md` | — | `supabase/migrations/20261004000500_m1_column_grants.sql` | 🟡 code, no test ref |
 | FR-PRV-005 | Consent for marketing and tracking | P0b | — | — | — | — | `mobile/src/lib/ids.ts`, `web/src/lib/attribution.ts` | 🟡 code, no test ref |
 | FR-PRV-006 | What artists may do with backer data | P0b | — | — | — | — | — | ⚠️ spec only |
-| FR-PLT-001 | Server-enforced feature flags | P0a | `l2/02-design.md` | — | `marketplace/03-tasks.md` | `api/test/l2-platform.test.ts` | `api/src/app.ts`, `api/src/l2/gate.ts`, `api/src/routes/staff.ts` +4 | ✅ tested |
+| FR-PLT-001 | Server-enforced feature flags | P0a | `l2/02-design.md` | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/l2-platform.test.ts` | `api/src/app.ts`, `api/src/l2/gate.ts`, `api/src/routes/staff.ts` +4 | ✅ tested |
 | FR-PLT-002 | Honest production scope | P0a | `02-design.md` | — | — | — | `web/src/pages/auth/SignUp.tsx`, `web/src/pages/discover/Explore.tsx` | 🟡 code, no test ref |
 | FR-PLT-003 | Locale-aware display | P1 | — | — | — | — | `api/src/lib/format.ts` | 🟡 code, no test ref |
 | FR-PLT-004 | Installable app | P2 | — | — | — | — | — | ⚠️ spec only |
@@ -220,7 +220,7 @@
 | NFR-MOB-07 | Buildable without a Mac toolchain | — | — | `docs/adr/ADR-009-mobile-app.md` | `mobile/03-tasks.md` | — | — | ⏳ designed/planned |
 | NFR-MOB-08 | Web stays fully supported | — | — | `docs/adr/ADR-009-mobile-app.md` | — | — | — | ⚠️ spec only |
 
-### Services marketplace (CR-005) · `specs/marketplace/01-requirements.md` · 27 requirements
+### Services marketplace (CR-005) · `specs/marketplace/01-requirements.md` · 38 requirements
 | ID | Requirement | Pri | Design | ADR | Tasks | Tests | Code | Status |
 |---|---|---|---|---|---|---|---|---|
 | FR-MKT-001 | Flag | P0 | `marketplace/02-design.md` | — | `marketplace/03-tasks.md` | `api/test/marketplace.test.ts`, `web/test/flags.test.ts`, `e2e/marketplace.spec.ts` | `api/src/marketplace/routes.ts`, `shared/src/schemas.ts`, `supabase/migrations/20261127000100_marketplace.sql` | ✅ tested |
@@ -234,7 +234,7 @@
 | FR-MKT-009 | Provider inbox and response | P0 | `marketplace/02-design.md` | — | `marketplace/03-tasks.md` | `api/test/marketplace.test.ts`, `e2e/marketplace.spec.ts` | `api/src/marketplace/routes.ts`, `web/src/pages/services/ProviderInbox.tsx`, `shared/src/marketplace.ts` +1 | ✅ tested |
 | FR-MKT-010 | My requests (artist) | P0 | `marketplace/02-design.md` | — | `marketplace/03-tasks.md` | `api/test/marketplace.test.ts`, `e2e/marketplace.spec.ts` | `api/src/marketplace/routes.ts`, `mobile/app/services/requests.tsx`, `web/src/pages/services/MyRequests.tsx` +1 | ✅ tested |
 | FR-MKT-011 | Web | P0 | — | — | `marketplace/03-tasks.md` | — | `web/src/layouts/shells.tsx` | 🟡 code, no test ref |
-| FR-MKT-012 | Mobile | P0 | — | — | `marketplace/03-tasks.md` | — | `mobile/app/(tabs)/_layout.tsx`, `mobile/app/(tabs)/services.tsx`, `mobile/app/services/[slug].tsx` +1 | 🟡 code, no test ref |
+| FR-MKT-012 | Mobile | P0 | — | — | `marketplace/03-tasks.md` | — | `mobile/app/(tabs)/_layout.tsx`, `mobile/app/(tabs)/services.tsx`, `mobile/app/services/[slug].tsx` +2 | 🟡 code, no test ref |
 | FR-MKT-013 | Quotes: provider sends a fixed quote with deliverables and dates against a request | P1 | — | — | `marketplace/03-tasks.md` | — | — | ⏳ designed/planned |
 | FR-MKT-014 | Paid bookings through the API, ledger and payment adapter; hold until delivery if couns… | P1 | — | `docs/adr/ADR-010-services-marketplace-money-boundary.md` | `marketplace/03-tasks.md` | — | — | ⏳ designed/planned |
 | FR-MKT-015 | Provider payout onboarding, tax info and sanctions screening before any payout | P1 | — | `docs/adr/ADR-010-services-marketplace-money-boundary.md` | `marketplace/03-tasks.md` | — | — | ⏳ designed/planned |
@@ -243,13 +243,24 @@
 | FR-MKT-018 | Link a booking to a campaign tranche as milestone evidence; provider credits on the cam… | P2 | — | — | `marketplace/03-tasks.md` | — | — | ⏳ designed/planned |
 | FR-MKT-019 | In-app message threads and notifications (email + push) | P2 | — | — | `marketplace/03-tasks.md` | — | — | ⏳ designed/planned |
 | FR-MKT-020 | Provider editing and inbox on mobile | P2 | — | — | `marketplace/03-tasks.md` | — | — | ⏳ designed/planned |
-| NFR-MKT-01 | No money in MKT-1. No marketplace code calls the payment provider, writes the ledger, o… | P0 | `marketplace/02-design.md` | `docs/adr/ADR-010-services-marketplace-money-boundary.md` | `marketplace/03-tasks.md` | `api/test/marketplace.test.ts` | `api/src/marketplace/routes.ts`, `api/src/marketplace/service.ts`, `shared/src/marketplace.ts` +1 | ✅ tested |
+| NFR-MKT-01 | No money in MKT-1. No marketplace code calls the payment provider, writes the ledger, o… | P0 | `marketplace/02-design.md` | `docs/adr/ADR-010-services-marketplace-money-boundary.md` | `marketplace/03-tasks.md` | `api/test/marketplace.test.ts` | `api/src/marketplace/access.ts`, `api/src/marketplace/routes.ts`, `api/src/marketplace/service.ts` +4 | ✅ tested |
 | NFR-MKT-02 | When money comes (MKT-2), it goes only through the API, the ledger and the PaymentProvi… | P1 | — | `docs/adr/ADR-010-services-marketplace-money-boundary.md` | — | — | — | ⚠️ spec only |
-| NFR-MKT-03 | Marketplace tables have RLS on with no anon/authenticated grants; all access goes throu… | P0 | `marketplace/02-design.md` | — | `marketplace/03-tasks.md` | `api/test/marketplace.test.ts` | `api/src/marketplace/routes.ts`, `supabase/migrations/20261127000100_marketplace.sql` | ✅ tested |
+| NFR-MKT-03 | Marketplace tables have RLS on with no anon/authenticated grants; all access goes throu… | P0 | `marketplace/02-design.md` | — | `marketplace/03-tasks.md` | `api/test/marketplace.test.ts` | `api/src/marketplace/routes.ts`, `supabase/migrations/20261127000100_marketplace.sql`, `supabase/migrations/20261128000100_marketplace_beta.sql` | ✅ tested |
 | NFR-MKT-04 | Contact details are never in list or page responses; only the accepted counterpart sees… | P0 | `marketplace/02-design.md` | — | — | `api/test/marketplace.test.ts` | `api/src/marketplace/routes.ts`, `mobile/app/services/[slug].tsx`, `mobile/app/services/requests.tsx` +4 | ✅ tested |
 | NFR-MKT-05 | Copy rules apply (pnpm lint:copy covers the new pages and the mobile app): no investmen… | P0 | — | — | `marketplace/03-tasks.md` | `shared/test/marketplace.test.ts` | `shared/src/marketplace.ts` | ✅ tested |
 | NFR-MKT-06 | Accessibility and layout as the rest of the app (WCAG 2.2 AA, 390 px, 44 px targets). | P0 | — | — | — | — | — | ⚠️ spec only |
 | NFR-MKT-07 | Every staff decision is a privileged action with an audit event; every request state ch… | P0 | — | — | `marketplace/03-tasks.md` | `api/test/marketplace.test.ts` | — | ✅ tested |
+| FR-MKT-021 | Beta audience | P0 | — | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts`, `api/test/marketplace.test.ts`, `shared/test/marketplace.test.ts` | `api/src/marketplace/access.ts`, `api/src/marketplace/routes.ts`, `api/src/marketplace/service.ts` +7 | ✅ tested |
+| FR-MKT-022 | Invites | P0 | `marketplace/02-design.md` | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts`, `shared/test/marketplace.test.ts`, `e2e/marketplace.spec.ts` | `api/src/marketplace/routes.ts`, `api/src/marketplace/service.ts`, `api/src/staff.ts` +4 | ✅ tested |
+| FR-MKT-023 | Redeem an invite | P0 | — | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts`, `shared/test/marketplace.test.ts`, `e2e/marketplace.spec.ts` | `api/src/marketplace/routes.ts`, `web/src/pages/services/Join.tsx`, `shared/src/marketplace.ts` +1 | ✅ tested |
+| FR-MKT-024 | Access check | P0 | — | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts` | `api/src/marketplace/access.ts`, `api/src/marketplace/routes.ts`, `mobile/src/lib/marketplace.ts` +3 | ✅ tested |
+| FR-MKT-025 | Provider Terms acceptance | P0 | — | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts`, `api/test/marketplace.test.ts`, `shared/test/marketplace.test.ts` +1 | `api/src/marketplace/access.ts`, `api/src/marketplace/routes.ts`, `web/src/pages/public/Legal.tsx` +4 | ✅ tested |
+| FR-MKT-026 | Launch guard | P0 | — | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts`, `shared/test/marketplace.test.ts` | `api/src/marketplace/access.ts`, `api/src/routes/staff.ts`, `shared/src/policy.ts` | ✅ tested |
+| FR-MKT-027 | Remove a member | P0 | `marketplace/02-design.md` | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts` | `api/src/marketplace/routes.ts`, `api/src/marketplace/service.ts`, `api/src/staff.ts` +2 | ✅ tested |
+| FR-MKT-028 | Beta metrics (discovery E1/E2) | P0 | `marketplace/02-design.md` | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts`, `e2e/marketplace.spec.ts` | `api/src/marketplace/routes.ts`, `web/src/pages/admin/MarketplaceBeta.tsx`, `shared/src/marketplace.ts` | ✅ tested |
+| FR-MKT-029 | Web screens | P0 | — | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `e2e/marketplace.spec.ts` | `web/src/pages/admin/MarketplaceBeta.tsx`, `web/src/pages/services/Join.tsx` | ✅ tested |
+| NFR-MKT-08 | Invite codes are 144-bit random, stored only as SHA-256; codes never appear in logs, au… | P0 | `marketplace/02-design.md` | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts` | `api/src/marketplace/routes.ts`, `api/src/marketplace/service.ts`, `web/src/pages/services/Join.tsx` +1 | ✅ tested |
+| NFR-MKT-09 | Every access rule in FR-MKT-021 is enforced in the API on every route; client checks on… | P0 | — | `docs/adr/ADR-012-marketplace-beta-access-and-terms.md` | `marketplace/03-tasks.md` | `api/test/marketplace-beta.test.ts` | `api/src/marketplace/access.ts`, `api/src/marketplace/routes.ts`, `web/src/lib/marketplace.ts` +1 | ✅ tested |
 
 ## Cited but not defined
 Ids that design, tasks or code cite but no requirements file defines — a typo, a retired id, or a requirement that lives in another document (for example a council record). Each needs a requirement, a fix, or a note.

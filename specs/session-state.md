@@ -4,7 +4,7 @@
 **In flight:**
 - Launch-gate docs (this PR): `specs/runbooks/`, `specs/risks.md` (RAID), `specs/fmea.md`, `specs/diagrams/`, `specs/05-readiness.md` (verdict **fix first**, blockers B1–B8).
 - Live artist screens and landing hero on real data (FR-PLT-002, M2 item 1) — separate thread.
-- Marketplace beta prep (CR-005): waits on counsel (Provider Terms, privacy update) and ~20 providers.
+- PR #31, marketplace closed beta (CR-007, ADR-012): invite-only audience (Wayne's D-MKT-3), email-bound single-use invites, versioned Provider Terms acceptance, launch guard on `flag.marketplace` until counsel's approval is in `POLICY.legal`, `/admin/marketplace`, `/services/join`, runbook `specs/runbooks/marketplace-beta.md`. Flag stays off; opening still waits on counsel and ~20 providers.
 - Draft PR #28, user-policy first drafts for counsel.
 **Pending decisions (Wayne):** G5 risk acceptances listed in `specs/05-readiness.md`; D-001 (late-capture deadline, `04-worklog.md`); G2 sign-off for M1 and G3; AGT G1+G2 and AGT-Q1; CR-004/CR-005 self-reviews; E1-A/B/C defaults hold (no live money, Stripe test only, FanZuP absorbs refund fees).
 **Manual steps (Wayne):** restore the paused staging Supabase project; create `fanzup-prod` (Pro + PITR) and production Vercel/Render config (B1); exit test 8 (`docs/SETUP.md` Part F; B2); pick an error tracker and uptime monitor (B3); protect `main` (B7); custom SMTP, DPAs, backup operator (B8); Stripe test keys/webhook/Connect/float; staff TOTP.

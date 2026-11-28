@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { CircleAlert, Inbox, Plus, Trash2 } from "lucide-react";
+import { CircleAlert, FileText, Inbox, Lock, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, Callout, Card, Checkbox, Container, Field, PageHeader, SectionHeading, Select, TextArea, TextInput } from "@/components/brand";
 import { RequireAccount } from "@/components/RequireAccount";
 import { api, ApiError } from "@/lib/api";
+import { refreshMarketplaceAccess, useMarketplaceAccess } from "@/lib/marketplace";
 import { dollarsToMinor } from "@fanzup/shared/money";
 import {
-  ListingsInput, MARKETPLACE_CATEGORIES, MKT_OFF_PLATFORM_NOTICE, POLICY_LIMITS, PRICE_UNITS, ProviderProfileInput, categoryLabel, providerStatusCopy,
+  ListingsInput, MARKETPLACE_CATEGORIES, MKT_INVITE_ONLY, MKT_OFF_PLATFORM_NOTICE, MKT_TERMS_DRAFT_NOTE, POLICY_LIMITS, PRICE_UNITS, ProviderProfileInput, categoryLabel, providerStatusCopy,
   type CategoryKey, type ListingInput, type MyProvider, type PriceUnit,
 } from "@fanzup/shared/marketplace";
 
@@ -38,6 +39,9 @@ function ProviderEditor() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // CR-007 (FR-MKT-021/025): provider access and the current Provider Terms come from the access check.
+  const access = useMarketplaceAccess();
+  const termsOk = !!access?.providerTerms.accepted;
 
   // Saving one section refreshes only that section, so unsaved edits in the other one survive (review finding 6).
   const apply = (x: MyProvider | null, only?: "profile" | "listings") => {
@@ -105,8 +109,18 @@ function ProviderEditor() {
     }
   };
 
+  if (access === null) {
+    return <Container size="md" className="py-16"><Callout tone="error" icon={<CircleAlert />} title="We couldn't check your marketplace access">Reload the page to try again.</Callout></Container>;
+  }
+  if (p === null && access && !access.canProvide) {
+    return (
+      <Container size="md" className="py-16">
+        <Callout tone="info" icon={<Lock />} title="Provider profiles are invite-only for now">{MKT_INVITE_ONLY}</Callout>
+      </Container>
+    );
+  }
   if (loadError) return <Container size="md" className="py-16"><Callout tone="error" icon={<CircleAlert />} title="We couldn't load your provider profile">Reload the page to try again.</Callout></Container>;
-  if (p === undefined) return <Container size="md" className="py-8"><div className="h-64 animate-pulse rounded-lg border border-line bg-surface" aria-busy="true" aria-label="Loading" /></Container>;
+  if (p === undefined || access === undefined) return <Container size="md" className="py-8"><div className="h-64 animate-pulse rounded-lg border border-line bg-surface" aria-busy="true" aria-label="Loading" /></Container>;
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [k]: e.target.value });
   const toggleCat = (c: CategoryKey) => setForm({ ...form, categories: form.categories.includes(c) ? form.categories.filter((x) => x !== c) : [...form.categories, c] });
@@ -128,6 +142,7 @@ function ProviderEditor() {
         </Callout>
       )}
       <Callout tone="info">{MKT_OFF_PLATFORM_NOTICE}</Callout>
+      {access && !termsOk && <ProviderTermsStep version={access.providerTerms.version} approved={access.providerTerms.approved} />}
 
       <Card className="flex flex-col gap-5">
         <SectionHeading title="Profile" />
@@ -154,7 +169,7 @@ function ProviderEditor() {
           {errors.categories && <p className="text-sm text-error">{errors.categories}</p>}
         </fieldset>
         <Field label="Portfolio links" htmlFor="pv-links" optional error={errors.links} hint={`One https link per line, up to ${POLICY_LIMITS.maxLinks}.`}><TextArea id="pv-links" value={form.links} onChange={set("links")} className="min-h-20" /></Field>
-        <Button onClick={saveProfile} disabled={busy} className="self-start">{p ? "Save profile" : "Create profile"}</Button>
+        <Button onClick={saveProfile} disabled={busy || (!p && !termsOk)} className="self-start">{p ? "Save profile" : "Create profile"}</Button>
       </Card>
 
       {p && (
@@ -193,7 +208,7 @@ function ProviderEditor() {
           <div className="flex flex-wrap gap-3">
             <Button variant="secondary" onClick={saveListings} disabled={busy}>Save services</Button>
             {(p.status === "draft" || p.status === "changes_requested") && (
-              <Button onClick={submit} disabled={busy || p.listings.filter((l) => l.active).length === 0}>Submit for review</Button>
+              <Button onClick={submit} disabled={busy || !termsOk || p.listings.filter((l) => l.active).length === 0}>Submit for review</Button>
             )}
           </div>
         </Card>
@@ -201,5 +216,37 @@ function ProviderEditor() {
       {errors.form && <p className="text-sm text-error" role="alert">{errors.form}</p>}
       {msg && !errors.form && <p className="text-sm text-success" role="status">{msg}</p>}
     </Container>
+  );
+}
+
+/** FR-MKT-025: accept the current Provider Terms version (recorded with IP and user agent by the API). */
+function ProviderTermsStep({ version, approved }: { version: string; approved: boolean }) {
+  const [agree, setAgree] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const accept = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.accept([{ kind: "provider_terms", version }]);
+      refreshMarketplaceAccess();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Something went wrong. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card className="flex flex-col gap-4" data-testid="provider-terms">
+      <SectionHeading title={<span className="flex items-center gap-2"><FileText className="size-5 text-gold" /> Provider Terms</span>} />
+      <p className="text-sm text-muted">
+        Before you create a profile, send it for review or answer artists, please accept the{" "}
+        <Link className="text-gold underline-offset-4 hover:underline" to="/legal/provider-terms" target="_blank">Provider Terms</Link> (version {version}).
+      </p>
+      {!approved && <Callout tone="warning">{MKT_TERMS_DRAFT_NOTE}</Callout>}
+      <Checkbox id="pv-terms" checked={agree} onChange={setAgree}>I've read and agree to the Provider Terms</Checkbox>
+      {err && <p className="text-sm text-error" role="alert">{err}</p>}
+      <Button onClick={accept} disabled={!agree || busy} className="self-start" data-testid="accept-provider-terms">{busy ? "Saving…" : "Accept and continue"}</Button>
+    </Card>
   );
 }
