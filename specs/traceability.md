@@ -8,10 +8,10 @@
 ## Summary
 | Requirements | ✅ tested | 🟡 code, no test ref | ⏳ designed/planned | ⚠️ spec only |
 |---|---|---|---|---|
-| 220 | 69 | 45 | 25 | 81 |
+| 221 | 71 | 44 | 25 | 81 |
 
 ## Matrix
-### Core (M1–GA) · `specs/01-requirements.md` · 141 requirements
+### Core (M1–GA) · `specs/01-requirements.md` · 142 requirements
 | ID | Requirement | Pri | Design | ADR | Tasks | Tests | Code | Status |
 |---|---|---|---|---|---|---|---|---|
 | FR-PAY-001 | Reserve perk stock at checkout | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/checkout.test.ts`, `api/test/money-flow.test.ts` | `api/src/checkout.ts`, `api/src/money.ts`, `api/src/routes/backings.ts` +5 | ✅ tested |
@@ -31,15 +31,16 @@
 | FR-BCK-004 | One deadline for everyone | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/checkout.test.ts`, `api/test/money-flow.test.ts`, `shared/test/rules.test.ts` | `mobile/app/campaigns/[slug].tsx`, `web/src/pages/campaigns/CampaignDetail.tsx`, `shared/src/campaign.ts` +1 | ✅ tested |
 | FR-BCK-005 | My backings | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/routes/me.ts`, `mobile/app/(tabs)/backed.tsx`, `web/src/pages/fan/BackedAndPerks.tsx` +2 | ✅ tested |
 | FR-CMP-001 | Create and edit a campaign that persists | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/routes/artist.ts` | ✅ tested |
-| FR-CMP-002 | Submit, review, publish | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/routes/artist.ts` | ✅ tested |
+| FR-CMP-002 | Submit, review, publish | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/routes/artist.ts`, `web/src/pages/creator/CampaignLive.tsx`, `shared/src/api-client.ts` | ✅ tested |
 | FR-CMP-003 | The campaign page tells the truth | P0a | `02-design.md` | — | `03-tasks.md` | — | `mobile/app/campaigns/[slug].tsx`, `web/src/pages/campaigns/CampaignDetail.tsx` | 🟡 code, no test ref |
 | FR-CMP-004 | Stretch goals | P1 | — | — | — | — | — | ⚠️ spec only |
 | FR-CMP-005 | Pre-launch page and "notify me" | P1 | — | — | — | — | — | ⚠️ spec only |
 | FR-CMP-006 | Final-48-hours mode | P1 | — | — | — | — | — | ⚠️ spec only |
 | FR-CMP-007 | Staff can suspend a campaign | P0a | `02-design.md` | — | — | — | — | ⏳ designed/planned |
-| FR-CMP-008 | Discover campaigns | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/discovery.test.ts`, `api/test/money-flow.test.ts` | `api/src/routes/campaigns.ts`, `mobile/app/(tabs)/index.tsx`, `web/src/components/campaign/LiveCampaignCard.tsx` +1 | ✅ tested |
+| FR-CMP-008 | Discover campaigns | P0a | `02-design.md` | `docs/adr/ADR-011-artist-screens-read-model.md` | `03-tasks.md` | `api/test/discovery.test.ts`, `api/test/money-flow.test.ts` | `api/src/routes/campaigns.ts`, `mobile/app/(tabs)/index.tsx`, `web/src/components/campaign/LiveCampaignCard.tsx` +2 | ✅ tested |
+| FR-CMP-009 | The artist home shows the artist's real campaigns | P0a | `02-design.md` | `docs/adr/ADR-011-artist-screens-read-model.md` | `03-tasks.md` | `api/test/artist-read.test.ts`, `shared/test/artist-home.test.ts`, `e2e/artist-home.spec.ts` | `web/src/components/creator/live.ts`, `web/src/pages/creator/CampaignLive.tsx`, `web/src/pages/creator/Campaigns.tsx` +3 | ✅ tested |
 | FR-FUL-001 | Backer survey after funding | P0b | — | — | — | — | — | ⚠️ spec only |
-| FR-FUL-002 | Fulfillment hub | P0b | — | — | — | — | `api/src/routes/me.ts`, `web/src/pages/fan/BackedAndPerks.tsx` | 🟡 code, no test ref |
+| FR-FUL-002 | Fulfillment hub | P0b | `02-design.md` | — | — | — | `api/src/routes/me.ts`, `web/src/pages/creator/CampaignLive.tsx`, `web/src/pages/fan/BackedAndPerks.tsx` | 🟡 code, no test ref |
 | FR-FUL-003 | Late perks give fans a choice | P0b | — | — | — | — | `shared/src/agents.ts` | 🟡 code, no test ref |
 | FR-FUL-004 | Show tickets as perks | P1 | — | — | — | — | — | ⚠️ spec only |
 | FR-DSP-001 | Refund any backing in any state | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts`, `api/test/staff-actions.test.ts` | `shared/src/policy.ts`, `supabase/migrations/20261004000300_m1_checkout_and_money.sql` | ✅ tested |
@@ -50,8 +51,8 @@
 | FR-ID-001 | Real sign-in | P0a | `02-design.md` | `docs/adr/ADR-004-full-account-auth.md` | `03-tasks.md` | `api/test/identity-staff.test.ts`, `api/test/money-flow.test.ts` | `api/src/lib/auth.ts`, `mobile/app/auth/forgot.tsx`, `mobile/app/auth/login.tsx` +8 | ✅ tested |
 | FR-ID-002 | Step-up for sensitive actions | P0a | `02-design.md` | `docs/adr/ADR-004-full-account-auth.md` | `03-tasks.md` | `api/test/identity-staff.test.ts`, `api/test/staff-actions.test.ts` | `api/src/staff.ts`, `web/src/components/admin/StaffGate.tsx`, `web/src/pages/auth/LogIn.tsx` | ✅ tested |
 | FR-ID-003 | Staff roles and separation of duties | P0a | `02-design.md` | `docs/adr/ADR-004-full-account-auth.md`, `docs/adr/ADR-008-agent-layer.md` | `03-tasks.md` | `api/test/identity-staff.test.ts`, `api/test/l2-offering.test.ts` | `api/src/lib/auth.ts`, `api/src/staff.ts`, `shared/src/policy.ts` +3 | ✅ tested |
-| FR-ID-004 | Artist identity and payout onboarding | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/provider/types.ts`, `api/src/routes/artist.ts` | ✅ tested |
-| FR-ID-005 | Guarded screens | P0a | `02-design.md` | — | `03-tasks.md` | — | `mobile/src/components/SignInPrompt.tsx`, `web/src/components/RequireAccount.tsx` | 🟡 code, no test ref |
+| FR-ID-004 | Artist identity and payout onboarding | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/provider/types.ts`, `api/src/routes/artist.ts`, `web/src/pages/creator/Dashboard.tsx` +1 | ✅ tested |
+| FR-ID-005 | Guarded screens | P0a | `02-design.md` | `docs/adr/ADR-011-artist-screens-read-model.md` | `03-tasks.md` | — | `mobile/src/components/SignInPrompt.tsx`, `web/src/components/RequireAccount.tsx`, `web/src/pages/creator/CampaignLive.tsx` +2 | 🟡 code, no test ref |
 | FR-ID-006 | Adults only, enforced | P0a | `02-design.md` | `docs/adr/ADR-004-full-account-auth.md` | `03-tasks.md` | `api/test/identity-staff.test.ts`, `e2e/marketplace.spec.ts` | `mobile/app/auth/signup.tsx`, `web/src/pages/auth/SignUp.tsx`, `shared/src/auth-rules.ts` +1 | ✅ tested |
 | FR-ID-007 | Single-operator mode | P0a | `02-design.md` | `docs/adr/ADR-004-full-account-auth.md` | `03-tasks.md` | `api/test/identity-staff.test.ts`, `api/test/staff-actions.test.ts` | `api/src/agents/ops-weekly.ts`, `api/src/routes/artist.ts`, `api/src/routes/staff.ts` +5 | ✅ tested |
 | FR-ID-008 | Payout-account changes are slowed down | P0b | `02-design.md` | — | — | — | — | ⏳ designed/planned |
@@ -66,7 +67,7 @@
 | FR-NTF-001 | Transactional messages | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts`, `api/test/staff-actions.test.ts` | `api/src/notify.ts`, `web/scripts/check-copy.mjs`, `supabase/migrations/20261004000400_m1_identity_and_staff.sql` | ✅ tested |
 | FR-NTF-002 | Notification center | P1 | — | — | — | — | — | ⚠️ spec only |
 | FR-NTF-003 | Web push and digests | P2 | — | — | — | — | — | ⚠️ spec only |
-| FR-COM-001 | Campaign updates | P1 | — | — | — | — | `web/src/pages/campaigns/CampaignDetail.tsx` | 🟡 code, no test ref |
+| FR-COM-001 | Campaign updates | P1 | `02-design.md` | — | — | — | `web/src/pages/campaigns/CampaignDetail.tsx`, `web/src/pages/creator/CampaignLive.tsx` | 🟡 code, no test ref |
 | FR-COM-002 | Comments and "Ask the artist" | P1 | — | — | — | — | — | ⚠️ spec only |
 | FR-GRO-001 | Every page shares well | P0b | — | — | — | — | — | ⚠️ spec only |
 | FR-GRO-002 | Share kit and native share | P1 | — | — | — | — | — | ⚠️ spec only |
@@ -82,11 +83,11 @@
 | FR-PRV-005 | Consent for marketing and tracking | P0b | — | — | — | — | `mobile/src/lib/ids.ts`, `web/src/lib/attribution.ts` | 🟡 code, no test ref |
 | FR-PRV-006 | What artists may do with backer data | P0b | — | — | — | — | — | ⚠️ spec only |
 | FR-PLT-001 | Server-enforced feature flags | P0a | `l2/02-design.md` | — | `marketplace/03-tasks.md` | `api/test/l2-platform.test.ts` | `api/src/app.ts`, `api/src/l2/gate.ts`, `api/src/routes/staff.ts` +4 | ✅ tested |
-| FR-PLT-002 | Honest production scope | P0a | `02-design.md` | — | — | — | `web/src/pages/auth/SignUp.tsx`, `web/src/pages/discover/Explore.tsx` | 🟡 code, no test ref |
+| FR-PLT-002 | Honest production scope | P0a | `02-design.md` | `docs/adr/ADR-011-artist-screens-read-model.md` | `03-tasks.md` | `e2e/artist-home.spec.ts` | `web/src/components/creator/live.ts`, `web/src/pages/auth/SignUp.tsx`, `web/src/pages/creator/CampaignLive.tsx` +3 | ✅ tested |
 | FR-PLT-003 | Locale-aware display | P1 | — | — | — | — | `api/src/lib/format.ts` | 🟡 code, no test ref |
 | FR-PLT-004 | Installable app | P2 | — | — | — | — | — | ⚠️ spec only |
 | FR-PLT-005 | Safe uploads and downloads | P0a | — | — | — | — | — | ⚠️ spec only |
-| FR-PLT-006 | What test-money participants are promised | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/notify.ts`, `mobile/app/campaigns/[slug].tsx`, `mobile/app/checkout/[slug].tsx` +8 | ✅ tested |
+| FR-PLT-006 | What test-money participants are promised | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/identity-staff.test.ts` | `api/src/notify.ts`, `mobile/app/campaigns/[slug].tsx`, `mobile/app/checkout/[slug].tsx` +12 | ✅ tested |
 | NFR-SEC-01 | Anonymous and signed-in clients can read only an explicit allowlist of columns from eve… | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/rls.test.ts` | `supabase/migrations/20261004000500_m1_column_grants.sql` | ✅ tested |
 | NFR-SEC-02 | All writes go through the API; direct database writes from clients are disabled. | P0a | `02-design.md` | — | `03-tasks.md` | `api/test/rls.test.ts`, `api/test/staff-actions.test.ts` | `supabase/migrations/20261004000400_m1_identity_and_staff.sql` | ✅ tested |
 | NFR-SEC-03 | Production web responses carry a strict Content-Security-Policy (no inline script; paym… | P0a | — | — | — | — | — | ⚠️ spec only |

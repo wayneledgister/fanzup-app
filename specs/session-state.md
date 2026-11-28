@@ -3,7 +3,7 @@
 **Last completed (merged on `main`):** M1 walking skeleton (PRs #6–#9); Layer 2 demo on mock rails (CR-002, PRs #10–#13); agent layer Phase 0 (CR-003, PR #24); mobile app MOB-1 (CR-004, PR #25); API TypeScript 5.9 pin (PR #26, DL-001); SDD docs audit (PR #29: `docs/API.md` drift test, traceability matrix, ADR index, changelog); services marketplace MKT-1 (CR-005, PR #27). See `CHANGELOG.md`.
 **In flight:**
 - Launch-gate docs (this PR): `specs/runbooks/`, `specs/risks.md` (RAID), `specs/fmea.md`, `specs/diagrams/`, `specs/05-readiness.md` (verdict **fix first**, blockers B1–B8).
-- Live artist screens and landing hero on real data (FR-PLT-002, M2 item 1) — separate thread.
+- CR-006 live artist screens (ADR-011, FR-CMP-009; PR #32): `/`, `/creator`, `/creator/campaigns`, `/creator/campaigns/:id` on API data, web only (mobile deprioritised by Wayne, 2026-11-27). Remaining sample-data routes are listed in the worklog entry.
 - Marketplace beta prep (CR-005): waits on counsel (Provider Terms, privacy update) and ~20 providers.
 - Draft PR #28, user-policy first drafts for counsel.
 **Pending decisions (Wayne):** G5 risk acceptances listed in `specs/05-readiness.md`; D-001 (late-capture deadline, `04-worklog.md`); G2 sign-off for M1 and G3; AGT G1+G2 and AGT-Q1; CR-004/CR-005 self-reviews; E1-A/B/C defaults hold (no live money, Stripe test only, FanZuP absorbs refund fees).

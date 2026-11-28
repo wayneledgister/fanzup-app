@@ -3,6 +3,7 @@
  * The API parses requests with these; the web app types responses with them. Money is integer cents.
  */
 import { z } from "zod";
+import { CAMPAIGN_STATUSES } from "./campaign";
 
 // ── Requests ───────────────────────────────────────────────────────────
 export const BackCampaignRequest = z.object({
@@ -101,6 +102,72 @@ export const CampaignDetail = z.object({
   tranches: z.array(TrancheView),
 });
 export type CampaignDetail = z.infer<typeof CampaignDetail>;
+
+/* ── Artist (owner) read model: CR-006, ADR-011. `GET /artist` and `GET /artist/campaigns/:id`. ── */
+
+/** Every campaign status the database knows (`campaign.ts`). Owner views see all of them; public views only public ones. */
+export const CampaignStatusSchema = z.enum(CAMPAIGN_STATUSES);
+
+export const MyCampaignSummary = z.object({
+  id: z.string().uuid(),
+  slug: z.string(),
+  title: z.string(),
+  type: z.string(),
+  blurb: z.string().nullable(),
+  status: CampaignStatusSchema,
+  goalMinor: z.number().int(),
+  raisedMinor: z.number().int(),
+  backers: z.number().int(),
+  milestoneRelease: z.boolean(),
+  startsAt: z.string().nullable(),
+  endsAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type MyCampaignSummary = z.infer<typeof MyCampaignSummary>;
+
+export const MyArtist = z.object({
+  id: z.string().uuid(),
+  slug: z.string(),
+  name: z.string(),
+  tier: z.string(),
+  identityStatus: z.enum(["todo", "pending", "verified", "rejected"]),
+  payoutAccount: z.object({ status: z.enum(["connected", "none"]) }),
+  /** Newest first. */
+  campaigns: z.array(MyCampaignSummary),
+});
+export type MyArtist = z.infer<typeof MyArtist>;
+
+export const MyPerk = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  description: z.string().nullable(),
+  kind: z.enum(["digital", "physical", "experience"]),
+  priceMinor: z.number().int(),
+  /** null = unlimited. */
+  limit: z.number().int().nullable(),
+  /** Units held by backings that are paid or awaiting payment. */
+  claimed: z.number().int(),
+  fulfillBy: z.string(),
+});
+export type MyPerk = z.infer<typeof MyPerk>;
+
+export const MyTranche = z.object({
+  id: z.string().uuid(),
+  seq: z.number().int(),
+  pct: z.number().int(),
+  milestone: z.string().nullable(),
+  status: z.string(),
+  targetDate: z.string().nullable(),
+  releasedMinor: z.number().int().nullable(),
+});
+export type MyTranche = z.infer<typeof MyTranche>;
+
+export const MyCampaign = MyCampaignSummary.extend({
+  perks: z.array(MyPerk),
+  tranches: z.array(MyTranche),
+});
+export type MyCampaign = z.infer<typeof MyCampaign>;
 
 export const BackCampaignResponse = z.object({
   backingId: z.string().uuid(),

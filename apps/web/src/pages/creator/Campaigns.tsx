@@ -1,26 +1,37 @@
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router";
-import { ArrowRight, Megaphone, Plus } from "lucide-react";
-import { ArtistArt, Badge, Button, Card, Container, EmptyState, FundingProgress, Money, PageHeader } from "@/components/brand";
+import { Link } from "react-router";
+import { ArrowRight, Megaphone, Plus, RefreshCw, UserPlus, WifiOff } from "lucide-react";
+import { RequireAccount } from "@/components/RequireAccount";
+import { ArtistArt, Badge, Button, Callout, Card, Container, EmptyState, FundingProgress, Money, PageHeader } from "@/components/brand";
 import { CampaignStatusChip, Segmented, formatDay } from "@/components/creator/ui";
-import { ME, creatorCampaigns, type CreatorCampaign, type CreatorCampaignStatus } from "@/components/creator/data";
-import { daysUntil } from "@/lib/format";
+import { useMyArtist } from "@/components/creator/live";
+import { daysLeft } from "@/components/campaign/LiveCampaignCard";
+import { isInProgress } from "@fanzup/shared/artist-home";
+import { POLICY } from "@fanzup/shared/policy";
+import type { MyCampaignSummary } from "@fanzup/shared/schemas";
 
 /**
- * Source: new screen (no wireframe) — list of the creator's reward campaigns.
- * Statuses follow Mechanism 05: Draft → In review → Live → Funded / Refunded (goal missed, auto-refund) → Ended.
- * Empty state reachable via `?state=empty`.
+ * Source: new screen (no wireframe): the creator's reward campaigns.
+ * CR-006 (FR-CMP-009, ADR-011): reads `GET /artist`; statuses are the database's (draft → in review → approved →
+ * live → funded / goal missed → closed). FR-PLT-006: no "escrow" wording.
  */
 type Filter = "all" | "active" | "closed";
-const ACTIVE: CreatorCampaignStatus[] = ["draft", "review", "live"];
 
-export default function Campaigns() {
-  const [params] = useSearchParams();
-  const list = params.get("state") === "empty" ? [] : creatorCampaigns;
+/** FR-ID-005: signed in with a confirmed email; the API enforces the same (verified + owner). */
+export default function CampaignsPage() {
+  return (
+    <RequireAccount>
+      <Campaigns />
+    </RequireAccount>
+  );
+}
+
+function Campaigns() {
+  const [state, reload] = useMyArtist();
   const [filter, setFilter] = useState<Filter>("all");
-
+  const list = useMemo(() => (state.status === "ready" ? state.data.campaigns.filter((c) => c.status !== "withdrawn") : []), [state]);
   const shown = useMemo(
-    () => list.filter((c) => (filter === "all" ? true : filter === "active" ? ACTIVE.includes(c.status) : !ACTIVE.includes(c.status))),
+    () => list.filter((c) => (filter === "all" ? true : filter === "active" ? isInProgress(c.status) : !isInProgress(c.status))),
     [filter, list],
   );
 
@@ -29,17 +40,48 @@ export default function Campaigns() {
       <PageHeader
         eyebrow="Campaigns"
         title="Your campaigns"
-        description="Reward campaigns are all-or-nothing. Backers' money waits with our escrow partner until you hit your goal."
+        description="Reward campaigns are all-or-nothing. If a goal isn't met by the deadline, every backer is refunded in full automatically."
         actions={
-          <Button asChild>
-            <Link to="/creator/campaigns/new/basics">
-              <Plus /> New campaign
-            </Link>
-          </Button>
+          state.status === "ready" && (
+            <Button asChild>
+              <Link to="/creator/campaigns/new/basics">
+                <Plus /> New campaign
+              </Link>
+            </Button>
+          )
         }
       />
 
-      {list.length === 0 ? (
+      {state.status === "loading" && (
+        <div className="flex flex-col gap-4" aria-busy="true" aria-label="Loading your campaigns">
+          {Array.from({ length: 3 }, (_, i) => <div key={i} className="h-36 animate-pulse rounded-lg border border-line bg-surface" />)}
+        </div>
+      )}
+
+      {state.status === "error" && (
+        <Callout tone="error" icon={<WifiOff />} title="We couldn't load your campaigns">
+          Check your connection and try again.{" "}
+          <Button variant="ghost" size="sm" onClick={reload}>
+            <RefreshCw /> Retry
+          </Button>
+        </Callout>
+      )}
+
+      {state.status === "missing" && (
+        <EmptyState
+          icon={<UserPlus />}
+          title="Create your artist profile first"
+          action={
+            <Button asChild>
+              <Link to="/artist-onboarding/basic">Create profile</Link>
+            </Button>
+          }
+        >
+          Campaigns belong to an artist profile, so fans know who they're backing.
+        </EmptyState>
+      )}
+
+      {state.status === "ready" && list.length === 0 && (
         <EmptyState
           icon={<Megaphone />}
           title="You haven't started a campaign yet"
@@ -51,9 +93,11 @@ export default function Campaigns() {
             </Button>
           }
         >
-          Pick a goal, a deadline and the perks you'll deliver. Our compliance team reviews every campaign before it goes live.
+          Pick a goal, a deadline and the perks you'll deliver. Our team reviews every campaign before it goes live.
         </EmptyState>
-      ) : (
+      )}
+
+      {list.length > 0 && (
         <>
           <Segmented
             label="Filter campaigns"
@@ -62,11 +106,11 @@ export default function Campaigns() {
             onChange={setFilter}
             options={[
               { value: "all", label: "All", count: list.length },
-              { value: "active", label: "In progress", count: list.filter((c) => ACTIVE.includes(c.status)).length },
-              { value: "closed", label: "Closed", count: list.filter((c) => !ACTIVE.includes(c.status)).length },
+              { value: "active", label: "In progress", count: list.filter((c) => isInProgress(c.status)).length },
+              { value: "closed", label: "Closed", count: list.filter((c) => !isInProgress(c.status)).length },
             ]}
           />
-          <ul className="flex flex-col gap-4">
+          <ul className="flex flex-col gap-4" data-testid="campaign-list">
             {shown.map((c) => (
               <li key={c.id}>
                 <CampaignRow c={c} />
@@ -79,30 +123,37 @@ export default function Campaigns() {
   );
 }
 
-function statusLine(c: CreatorCampaign) {
+function statusLine(c: MyCampaignSummary) {
   switch (c.status) {
     case "draft":
-      return <>Last edited {formatDay(c.statusDate)}</>;
-    case "review":
-      return <>Submitted {formatDay(c.statusDate)} · our compliance team is reviewing it</>;
-    case "live":
-      return <>Ends {formatDay(c.endsOn)} · <span className="num">{daysUntil(c.endsOn)}</span> days left</>;
+      return <>Last edited {formatDay(c.updatedAt)}</>;
+    case "in_review":
+      return <>In review since {formatDay(c.updatedAt)} · {POLICY.campaign.reviewEstimate}</>;
+    case "revisions_requested":
+      return <>Our reviewers asked for changes</>;
+    case "approved":
+      return <>Approved · publish it to start the clock</>;
+    case "live": {
+      const d = daysLeft(c.endsAt);
+      return c.endsAt ? <>Ends {formatDay(c.endsAt)} · <span className="num">{d}</span> {d === 1 ? "day" : "days"} left</> : <>Live</>;
+    }
     case "funded":
-      return <>Funded {formatDay(c.statusDate)} · perks being delivered</>;
-    case "ended":
-      return <>Closed {formatDay(c.statusDate)} · all perks delivered</>;
+    case "released":
+      return <>Goal met{c.endsAt ? ` ${formatDay(c.endsAt)}` : ""} · perks being delivered</>;
+    case "failed":
     case "refunded":
-      return <>Goal missed {formatDay(c.statusDate)} · every backer refunded automatically</>;
+      return <>Goal missed{c.endsAt ? ` ${formatDay(c.endsAt)}` : ""} · every backer refunded in full automatically</>;
+    default:
+      return <>Closed{c.endsAt ? ` ${formatDay(c.endsAt)}` : ""}</>;
   }
 }
 
-function CampaignRow({ c }: { c: CreatorCampaign }) {
-  const to = c.status === "draft" ? "/creator/campaigns/new/basics" : `/creator/campaigns/${c.id}`;
+function CampaignRow({ c }: { c: MyCampaignSummary }) {
   const hasMoney = c.raisedMinor > 0;
   return (
     <Card padded={false} interactive className="overflow-hidden">
-      <Link to={to} className="grid gap-0 sm:grid-cols-[160px_1fr]">
-        <ArtistArt seed={`${ME.id}-${c.id}`} label={c.title} className="hidden h-full min-h-32 w-full rounded-none sm:flex" />
+      <Link to={`/creator/campaigns/${c.id}`} className="grid gap-0 sm:grid-cols-[160px_1fr]">
+        <ArtistArt seed={c.slug} label={c.title} className="hidden h-full min-h-32 w-full rounded-none sm:flex" />
         <div className="grid gap-5 p-5 md:grid-cols-[1fr_280px] md:items-center md:gap-8">
           <div className="flex min-w-0 flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -122,7 +173,7 @@ function CampaignRow({ c }: { c: CreatorCampaign }) {
               </div>
             )}
             <span className="flex items-center gap-1 text-sm font-medium text-gold">
-              {c.status === "draft" ? "Continue editing" : c.status === "live" ? "Manage campaign" : "View details"} <ArrowRight className="size-4" />
+              {c.status === "live" ? "Manage campaign" : "View details"} <ArrowRight className="size-4" />
             </span>
           </div>
         </div>

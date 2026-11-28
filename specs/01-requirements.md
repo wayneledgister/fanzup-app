@@ -300,6 +300,17 @@ Approved by Wayne at G1 (card G1-C option 1, 2026-10-03). Moved here from the co
 - Campaigns not accepting backings are never shown as backable.
 **Priority:** P0a (list + filters) / P1 (text search) · **Source:** E1 C7; G1 Architect/Pragmatist
 
+### FR-CMP-009: The artist home shows the artist's real campaigns
+**Story:** As an artist, I want my dashboard to show my actual campaigns and what to do next, so that I can trust the numbers and act on them.
+**Acceptance criteria:**
+- The artist home, campaign list and campaign page read only the artist's own data from the API (owner routes); no sample data, no fixed dates.
+- The dashboard leads with the current campaign (live first, then in review, approved, revisions requested, draft, then the latest closed one) with raised, goal, backers and time left computed from the real deadline.
+- Next steps are derived from real state: create the profile, connect the payout account, finish or submit a draft, answer revisions, publish an approved campaign, share a live one.
+- An artist with no profile or no campaigns sees the getting-started state; a failed load shows a retry, never sample numbers.
+- A section with no backend yet is left out rather than faked.
+- The home page's featured campaign is a live campaign from the public list (ending soonest, FR-CMP-008), or a call to action when none is live.
+**Priority:** P0a (M2) · **Source:** CR-006 (Wayne, 2026-11-27); FR-PLT-002
+
 ---
 
 ## 4. Fulfillment (FR-FUL)
@@ -913,6 +924,7 @@ G1 is approved for M1 only. Before M2:
 4. Success-metric targets and volume assumptions (brief Q3, Q4).
 
 ## Change log
+- 2026-11-27: CR-006 adds FR-CMP-009 (the artist home shows the artist's real campaigns; P0a, M2).
 - 2026-11-27: SDD documentation audit: FR-PLT-001 lists the flags in use (`layer2`, `agents`, `marketplace` from CR-005, `postBeta`). The per-requirement trace now lives in the generated `specs/traceability.md` (all modules); the E1 tables above stay as the E1 record.
 - 2026-10-03: v2 draft created from council E1 (Claude, on Wayne's request "evaluate and come up with an improvement spec … enterprise level"). Scope per E1 card A default.
 - 2026-10-03: revised after G1 pass 1. P0 split into P0a (test-mode beta) / P0b (live money). Added FR-PAY-010 custody integration, FR-PAY-011 undeliverable refunds, FR-CMP-008 discovery, FR-ID-007 single-operator mode, FR-ID-008 payout-account cooling-off, FR-TAX-005 sales tax, FR-PRV-005 marketing/tracking consent, FR-PRV-006 artist use of backer data, FR-PLT-005 safe uploads; NFR-SEC-12..14, NFR-COMP-19..23, NFR-OPS-12..13. System-derived actor + factor on privileged actions; two-person control placed on milestone verification, not release. Restored E1 levels for fan cancel, late-perk remedy, fan problems, export/deletion and status page (P0b). One number per obligation (auto-refund initiated ≤ 1 h, confirmed ≤ 5 business days). Audit payloads carry ids only; address purge outlasts dispute windows. Added E1-conditions trace and Appendix A policy defaults. Checkout per card G1-B default (light account).

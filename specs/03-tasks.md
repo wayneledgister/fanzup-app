@@ -144,6 +144,23 @@ Probed 2026-10-03 in the agent sandbox.
 **Implements:** exit test 8, FR-ID-002 (staff), FR-ID-007 · **Depends on:** T-022 · **Size:** S
 **Done when:** `pnpm m1:operator` (`scripts/m1-operator.ts`) runs the commands in design §12.6 against `--api <url>`: `totp-enrol`, `token`, `artist-setup`, `publish`, `evidence`, `staff review|verify|refund|recon|trace`. It reuses `e2e/support.ts`'s Supabase MFA flow but reads the email from a flag and the password/TOTP code from a prompt (nothing secret in the repo or shell history), keeps tokens in memory only, prints correlation ids, and is documented in `docs/SETUP.md` (exit test 8). A CI smoke run against the local stack exercises `token` + one staff read. **Visible result:** a recorded run in the worklog.
 
+## M2 tasks (CR-006: live artist screens, web)
+### M2-T-001: Owner read-model contracts
+**Implements:** FR-CMP-009, ADR-011 · **Depends on:** — · **Size:** S
+**Done when:** `MyArtist`, `MyCampaignSummary`, `MyCampaign`, `MyPerk`, `MyTranche` in `packages/shared/src/schemas.ts`; `GET /artist` and `GET /artist/campaigns/:id` return them (`apps/api/src/routes/artist.ts`); `api-client` has `myArtist`, `myCampaign`, `submitCampaign`, `publishCampaign`, `connectPayoutAccount`; `docs/API.md` Contract column. **Test:** `apps/api/test/artist-read.test.ts` (strict schema parse, drafts included, live counters after a paid backing, another artist's campaign is 404).
+
+### M2-T-002: Artist home rules
+**Implements:** FR-CMP-009 · **Depends on:** M2-T-001 · **Size:** S
+**Done when:** `packages/shared/src/artist-home.ts` (`pickCurrentCampaign`, `nextSteps`, `isInProgress`). **Test:** `packages/shared/test/artist-home.test.ts`.
+
+### M2-T-003: Wire the artist screens and the home page
+**Implements:** FR-CMP-009, FR-PLT-002, FR-ID-005, FR-ID-004, FR-CMP-002, FR-CMP-008, FR-PLT-006 · **Depends on:** M2-T-001, M2-T-002 · **Size:** M
+**Done when:** `/`, `/creator`, `/creator/campaigns`, `/creator/campaigns/:id` read only the API (design §11 rows); creator pages behind `RequireAccount`; loading, empty, missing-profile and error states; no "escrow" wording on these screens; widgets without a backend removed (ADR-011).
+
+### M2-T-004: End-to-end check
+**Implements:** FR-CMP-009 · **Depends on:** M2-T-003 · **Size:** S
+**Done when:** `e2e/artist-home.spec.ts` runs in the CI E2E job: home page featured campaign from the API (no "Ended", no negative days), `/creator` redirects to log in, Nova's dashboard, list and campaign page show the API's data.
+
 ## Traceability check
 Every requirement in the M1 table maps to ≥ 1 task above (exit test 8 → T-024) (design §13 gives the component view); every task cites ≥ 1 requirement or G2 condition. Items the M1 table marks "not in M1" have no task by design.
 

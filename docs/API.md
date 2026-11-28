@@ -1,5 +1,5 @@
 # FanZuP API reference (wire contract)
-**Owner:** Wayne (product) · engineering · **Status:** active · **Date:** 2026-11-27 · **Touches:** FR-PLT-001, NFR-OPS-04, ADR-003, ADR-005, ADR-007, ADR-008, ADR-009, ADR-010
+**Owner:** Wayne (product) · engineering · **Status:** active · **Date:** 2026-11-27 · **Touches:** FR-PLT-001, NFR-OPS-04, FR-CMP-009, ADR-003, ADR-005, ADR-007, ADR-008, ADR-009, ADR-010, ADR-011
 
 Every HTTP route the API registers, in one table. **This file is checked in CI**: `apps/api/test/api-contract.test.ts` builds the app twice — locally with every optional module on (sandbox payments, mock Reg CF, cron secret) and as a deployed staging API (Stripe test provider) — and fails if a route exists that isn't listed here, or a listed route no longer exists. When you add, rename or remove a route, update this table, the owning design doc's API section and, if a client calls it, `packages/shared/src/api-client.ts` in the same PR. `pnpm --filter @fanzup/api api:routes` prints the live list.
 
@@ -21,17 +21,17 @@ The detailed request, response and error shapes stay in the design docs (the **S
 | GET | `/` | public | — |  | API banner (not the website) | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | GET | `/api/health` | public | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | GET | `/api/internal/tick` | cron (`Bearer CRON_SECRET`) | 404 unless `CRON_SECRET` set |  |  | [ADR-002](adr/ADR-002-hosting.md) |
-| GET | `/api/v1/artist` | verified (own profile) | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
+| GET | `/api/v1/artist` | verified (own profile) | — | `MyArtist` | 404 `no_artist`; every campaign status (CR-006) | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | POST | `/api/v1/artist` | verified (own profile) | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | POST | `/api/v1/artist/campaigns` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | DELETE | `/api/v1/artist/campaigns/:id` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
-| GET | `/api/v1/artist/campaigns/:id` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
+| GET | `/api/v1/artist/campaigns/:id` | verified + owner | — | `MyCampaign` | perks with `claimed`, milestones (CR-006) | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | PATCH | `/api/v1/artist/campaigns/:id` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | PUT | `/api/v1/artist/campaigns/:id/perks` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
-| POST | `/api/v1/artist/campaigns/:id/publish` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
-| POST | `/api/v1/artist/campaigns/:id/submit` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
+| POST | `/api/v1/artist/campaigns/:id/publish` | verified + owner | — | `{ status: "live", endsAt }` |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
+| POST | `/api/v1/artist/campaigns/:id/submit` | verified + owner | — | `{ status: "in_review", reviewEstimate }` |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | PUT | `/api/v1/artist/campaigns/:id/tranches` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
-| POST | `/api/v1/artist/payout-account` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
+| POST | `/api/v1/artist/payout-account` | verified + owner | — | `{ status, onboardingUrl }` | returns to `/creator?payout=done` (CR-006) | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | POST | `/api/v1/artist/tranches/:id/evidence` | verified + owner | — |  |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | POST | `/api/v1/backings` | verified | — | `BackCampaignRequest` → `BackCampaignResponse` | Idempotency-Key | [M1 §4.2](../specs/02-design.md#42-endpoints) |
 | GET | `/api/v1/backings/:id` | user (own) | — | `BackingStatus` |  | [M1 §4.2](../specs/02-design.md#42-endpoints) |
@@ -122,5 +122,6 @@ The detailed request, response and error shapes stay in the design docs (the **S
 - **Staff and Layer 2 screens** on the web still call some routes directly through `request` (the shared client's generic call, `apps/web/src/lib/api.ts`); those paths must also appear above.
 
 ## Change log
+- 2026-11-27: CR-006: contracts for `GET /artist` (`MyArtist`), `GET /artist/campaigns/:id` (`MyCampaign`), submit, publish and payout-account; web calls them through `api-client` (`myArtist`, `myCampaign`, `submitCampaign`, `publishCampaign`, `connectPayoutAccount`). No route added or removed.
 - 2026-11-27: CR-005 (PR #27): 13 services-marketplace routes behind `flag.marketplace`; `marketplace` added to `POST /staff/flags/:flag`.
 - 2026-11-27: Created from the registered routes (84) during the SDD documentation audit; added the CI drift test.
