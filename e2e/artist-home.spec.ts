@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test";
 import { SEED_PASSWORD, api, seedSignIn } from "./support";
 
 test("home page features a live campaign from the API", async ({ page }) => {
-  const live = await api<{ campaigns: { slug: string; title: string }[] }>("/v1/campaigns?tab=live");
+  const live = await api<{ campaigns: { slug: string; title: string }[] }>("/campaigns?tab=live");
   expect(live.status).toBe(200);
   const first = live.body.campaigns[0];
   await page.goto("/");
@@ -28,7 +28,7 @@ test("artist dashboard, campaign list and campaign page read the artist's own da
   await expect(page).toHaveURL(/\/login\?next=%2Fcreator/);
 
   const token = await seedSignIn("nova@fanzup.test");
-  const me = await api<{ campaigns: { id: string; slug: string; title: string; status: string; backers: number }[] }>("/v1/artist", { token });
+  const me = await api<{ campaigns: { id: string; slug: string; title: string; status: string; backers: number }[] }>("/artist", { token });
   expect(me.status).toBe(200);
   const tour = me.body.campaigns.find((c) => c.slug === "nova-live-band-tour")!;
   expect(tour.status).toBe("live");
