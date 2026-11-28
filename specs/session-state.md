@@ -2,6 +2,7 @@
 **Active:** sdd-document / sdd-continuity · documentation audit of `main` after PRs #24–#26, plus PR #27's contracts and docs
 **Last completed (merged on `main`):** M1 walking skeleton (PRs #6–#9); Layer 2 demo on mock rails (CR-002, PRs #10–#13); agent layer Phase 0 (CR-003, PR #24); mobile app MOB-1 (CR-004, PR #25); API pinned to TypeScript 5.9 for Vercel (PR #26, decision log DL-001); dependency bumps (#15–#23). See `CHANGELOG.md`.
 **In flight:**
+- CR-006 live artist screens (ADR-011, FR-CMP-009; branch `feat/cr-006-live-artist-screens`): `/`, `/creator`, `/creator/campaigns`, `/creator/campaigns/:id` on API data, web only (mobile deprioritised by Wayne, 2026-11-27). Remaining sample-data routes are listed in the worklog entry.
 - Draft PR #27, services marketplace MKT-1 (CR-005, ADR-010) — built and tested in the sandbox; docs completed by the audit (README, SETUP, worklog, FR-PLT-001 flag list, design §1). After the docs PR merges, PR #27 must add its 9+ routes to `docs/API.md` and regenerate `specs/traceability.md` (CI tells it to).
 - Draft PR #28, user-policy first drafts for counsel (`docs/legal/`); Word copies in the project files.
 - Docs PR from this audit (`docs/sdd-sync-2026-11-27`): `docs/API.md` + drift test, `specs/traceability.md` + CI check, `docs/adr/README.md`, `CHANGELOG.md`, this file.

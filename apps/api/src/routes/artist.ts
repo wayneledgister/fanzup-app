@@ -11,6 +11,22 @@ import { asService, asUser, n, type Claims } from "../db";
 import { HttpError, requireVerifiedUser } from "../lib/auth";
 import { singleOperatorMode } from "../staff";
 import type { Deps } from "../app";
+import type { CampaignStatus } from "@fanzup/shared/campaign";
+import type { MyArtist, MyCampaign, MyCampaignSummary, MyPerk } from "@fanzup/shared/schemas";
+
+/** Columns behind `MyCampaignSummary` (CR-006). Constant text, never user input. */
+const SUMMARY_COLS = "id, slug, title, type::text, blurb, status::text, goal_minor, raised_minor, backers_count, milestone_release, starts_at, ends_at, created_at, updated_at";
+type SummaryRow = {
+  id: string; slug: string; title: string; type: string; blurb: string | null; status: CampaignStatus; goal_minor: bigint; raised_minor: bigint;
+  backers_count: number; milestone_release: boolean; starts_at: Date | null; ends_at: Date | null; created_at: Date; updated_at: Date;
+};
+const summary = (c: SummaryRow): MyCampaignSummary => ({
+  id: c.id, slug: c.slug, title: c.title, type: c.type, blurb: c.blurb, status: c.status, goalMinor: n(c.goal_minor), raisedMinor: n(c.raised_minor),
+  backers: c.backers_count, milestoneRelease: c.milestone_release, startsAt: c.starts_at?.toISOString() ?? null, endsAt: c.ends_at?.toISOString() ?? null,
+  createdAt: c.created_at.toISOString(), updatedAt: c.updated_at.toISOString(),
+});
+/** A Postgres `date` arrives as midnight UTC; send the calendar day. */
+const dateOnly = (d: Date) => d.toISOString().slice(0, 10);
 
 const Slug = z.string().regex(/^[a-z0-9-]{3,60}$/);
 const CampaignFields = z.object({
@@ -49,8 +65,8 @@ export const artistRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
   const userOf = (req: unknown) => (req as { fzUser: Claims }).fzUser;
 
   async function myArtist(user: Claims) {
-    const [a] = await asService(d.sql, (tx) => tx<{ id: string; slug: string; name: string; identity_status: string; payout_account_ref: string | null }[]>`
-      select id, slug, name, identity_status::text, payout_account_ref from public.artists where owner_id = ${user.sub} order by created_at limit 1`);
+    const [a] = await asService(d.sql, (tx) => tx<{ id: string; slug: string; name: string; tier: string; identity_status: string; payout_account_ref: string | null }[]>`
+      select id, slug, name, tier::text, identity_status::text, payout_account_ref from public.artists where owner_id = ${user.sub} order by created_at limit 1`);
     if (!a) throw new HttpError(404, "no_artist", "Create your artist profile first.");
     return a;
   }
@@ -81,15 +97,16 @@ export const artistRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     }
   });
 
-  app.get("/", async (req) => {
+  /** Owner read model (CR-006, ADR-011): profile, payout status and every campaign, newest first. Contract `MyArtist`. */
+  app.get("/", async (req): Promise<MyArtist> => {
     const user = userOf(req);
     const a = await myArtist(user);
-    const campaigns = await asUser(d.sql, user, (tx) => tx<{ id: string; slug: string; title: string; status: string; goal_minor: bigint; raised_minor: bigint; ends_at: Date | null }[]>`
-      select id, slug, title, status::text, goal_minor, raised_minor, ends_at from public.campaigns where artist_id = ${a.id} order by created_at desc`);
+    const campaigns = await asUser(d.sql, user, (tx) => tx<SummaryRow[]>`
+      select ${tx.unsafe(SUMMARY_COLS)} from public.campaigns where artist_id = ${a.id} order by created_at desc, id`);
     return {
-      id: a.id, slug: a.slug, name: a.name, identityStatus: a.identity_status,
+      id: a.id, slug: a.slug, name: a.name, tier: a.tier, identityStatus: a.identity_status as MyArtist["identityStatus"],
       payoutAccount: { status: a.payout_account_ref ? "connected" : "none" },
-      campaigns: campaigns.map((c) => ({ id: c.id, slug: c.slug, title: c.title, status: c.status, goalMinor: n(c.goal_minor), raisedMinor: n(c.raised_minor), endsAt: c.ends_at?.toISOString() ?? null })),
+      campaigns: campaigns.map(summary),
     };
   });
 
@@ -103,7 +120,8 @@ export const artistRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     const a = await myArtist(user);
     const r = await d.provider.payoutOnboarding({
       artistId: a.id, existingRef: a.payout_account_ref,
-      returnUrl: `${d.env.PUBLIC_WEB_URL}/creator/payouts?onboarding=done`, refreshUrl: `${d.env.PUBLIC_WEB_URL}/creator/payouts?onboarding=retry`,
+      // CR-006: Stripe's hosted onboarding returns to the artist home, which calls this again to read the new status.
+      returnUrl: `${d.env.PUBLIC_WEB_URL}/creator?payout=done`, refreshUrl: `${d.env.PUBLIC_WEB_URL}/creator?payout=retry`,
     });
     const ready = await d.provider.payoutAccountReady(r.accountRef);
     await asService(d.sql, async (tx) => {
@@ -129,18 +147,28 @@ export const artistRoutes = (d: Deps): FastifyPluginAsync => async (app) => {
     }
   });
 
-  /** One of the artist's campaigns with its milestones (ids needed to submit evidence). */
-  app.get<{ Params: { id: string } }>("/campaigns/:id", async (req) => {
+  /** One of the artist's campaigns with its perks and milestones (milestone ids are needed to submit evidence). Contract `MyCampaign`. */
+  app.get<{ Params: { id: string } }>("/campaigns/:id", async (req): Promise<MyCampaign> => {
     const user = userOf(req);
     const c = await myCampaign(user, req.params.id);
-    const [row] = await asUser(d.sql, user, (tx) => tx<{ slug: string; title: string; goal_minor: bigint; raised_minor: bigint; ends_at: Date | null }[]>`
-      select slug, title, goal_minor, raised_minor, ends_at from public.campaigns where id = ${c.id}`);
-    const tranches = await asUser(d.sql, user, (tx) => tx<{ id: string; seq: number; pct: number; milestone: string | null; status: string; released_minor: bigint | null }[]>`
-      select id, seq, pct, milestone, status::text, released_minor from public.campaign_tranches where campaign_id = ${c.id} order by seq`);
-    return {
-      id: c.id, slug: row.slug, title: row.title, status: c.status, goalMinor: n(row.goal_minor), raisedMinor: n(row.raised_minor), endsAt: row.ends_at?.toISOString() ?? null,
-      tranches: tranches.map((t) => ({ id: t.id, seq: t.seq, pct: t.pct, milestone: t.milestone, status: t.status, releasedMinor: t.released_minor == null ? null : n(t.released_minor) })),
-    };
+    return asUser(d.sql, user, async (tx) => {
+      const [row] = await tx<SummaryRow[]>`select ${tx.unsafe(SUMMARY_COLS)} from public.campaigns where id = ${c.id}`;
+      const perks = await tx<{ id: string; title: string; description: string | null; kind: MyPerk["kind"]; price_minor: bigint; quantity_limit: number | null; claimed: number; fulfill_by: Date }[]>`
+        select id, title, description, kind::text, price_minor, quantity_limit, claimed, fulfill_by from public.perks where campaign_id = ${c.id} order by sort, price_minor, id`;
+      const tranches = await tx<{ id: string; seq: number; pct: number; milestone: string | null; status: string; target_date: Date | null; released_minor: bigint | null }[]>`
+        select id, seq, pct, milestone, status::text, target_date, released_minor from public.campaign_tranches where campaign_id = ${c.id} order by seq`;
+      return {
+        ...summary(row),
+        perks: perks.map((p) => ({
+          id: p.id, title: p.title, description: p.description, kind: p.kind, priceMinor: n(p.price_minor),
+          limit: p.quantity_limit, claimed: p.claimed, fulfillBy: dateOnly(p.fulfill_by),
+        })),
+        tranches: tranches.map((t) => ({
+          id: t.id, seq: t.seq, pct: t.pct, milestone: t.milestone, status: t.status,
+          targetDate: t.target_date ? dateOnly(t.target_date) : null, releasedMinor: t.released_minor == null ? null : n(t.released_minor),
+        })),
+      };
+    });
   });
 
   app.patch<{ Params: { id: string } }>("/campaigns/:id", async (req) => {

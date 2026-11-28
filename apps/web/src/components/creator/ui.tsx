@@ -8,7 +8,7 @@ import { Check, CircleDashed, Copy, Eye, FileUp, Hourglass, PencilLine, RotateCc
 import { Badge, Card } from "@/components/brand";
 import { cn } from "@/lib/utils";
 import { formatDate, formatMoney } from "@/lib/format";
-import type { CreatorCampaignStatus } from "./data";
+import type { CampaignStatus } from "@fanzup/shared/campaign";
 
 /* ── KPI card ─────────────────────────────────────────── */
 
@@ -49,16 +49,22 @@ export function KpiCard({ label, value, hint, delta, icon, children, className }
 
 /* ── Campaign status chip ─────────────────────────────── */
 
-const STATUS: Record<CreatorCampaignStatus, { label: string; tone: "success" | "warning" | "error" | "info" | "neutral" | "gold"; icon: ReactNode }> = {
+/** Every database campaign status, as the artist reads it (CR-006: the owner API returns the real status). */
+const STATUS: Record<CampaignStatus, { label: string; tone: "success" | "warning" | "error" | "info" | "neutral" | "gold"; icon: ReactNode }> = {
   draft: { label: "Draft", tone: "neutral", icon: <PencilLine /> },
-  review: { label: "In review", tone: "warning", icon: <Hourglass /> },
+  in_review: { label: "In review", tone: "warning", icon: <Hourglass /> },
+  revisions_requested: { label: "Changes requested", tone: "warning", icon: <PencilLine /> },
+  approved: { label: "Approved", tone: "success", icon: <Check /> },
   live: { label: "Live", tone: "info", icon: <Radio /> },
   funded: { label: "Funded", tone: "success", icon: <Trophy /> },
-  ended: { label: "Ended", tone: "neutral", icon: <Check /> },
+  released: { label: "Funded · released", tone: "success", icon: <Trophy /> },
+  failed: { label: "Goal missed", tone: "error", icon: <RotateCcw /> },
   refunded: { label: "Refunded", tone: "error", icon: <RotateCcw /> },
+  closed: { label: "Closed", tone: "neutral", icon: <Check /> },
+  withdrawn: { label: "Withdrawn", tone: "neutral", icon: <X /> },
 };
 
-export function CampaignStatusChip({ status }: { status: CreatorCampaignStatus }) {
+export function CampaignStatusChip({ status }: { status: CampaignStatus }) {
   const s = STATUS[status];
   return (
     <Badge tone={s.tone} icon={s.icon}>
@@ -66,7 +72,7 @@ export function CampaignStatusChip({ status }: { status: CreatorCampaignStatus }
     </Badge>
   );
 }
-export const campaignStatusLabel = (s: CreatorCampaignStatus) => STATUS[s].label;
+export const campaignStatusLabel = (s: CampaignStatus) => STATUS[s].label;
 
 /* ── Segmented control (radio group) ──────────────────── */
 

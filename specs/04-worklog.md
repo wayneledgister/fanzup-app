@@ -278,3 +278,10 @@ Labels: ✅ built and verified here (how) · 🟡 partial (what remains) · ⏳ 
 - Wayne asked for an automated test pass of the features, fixes first, then a demo video. Ran everything against a local Supabase stack in the cloud session: on `main` API 360/360, shared 91/91, web 12/12, mobile 9/9, mock escrow 18/18, operator smoke, Playwright golden + 2 Layer 2 journeys 3/3, typecheck, `lint:copy`, `trace:check`, `expo export` iOS + Android. On `feat/services-marketplace`: API 382/382, shared 97/97, web 13/13, mobile 9/9. No product defects found.
 - Gap found: the marketplace had API tests but no end-to-end journey. Added `e2e/marketplace.spec.ts` (MKT-T-016), which turns the flag on through the audited staff route and back off at the end, so the other journeys still see the default. Full E2E 4/4 locally.
 - Test-only observations (not app bugs): the cloud sandbox can't pull Supabase images from ECR (used `SUPABASE_INTERNAL_IMAGE_REGISTRY=docker.io`), and the preinstalled Playwright browser build differs from the pinned version (local config override, not committed).
+
+## 2026-11-27 · CR-006 live artist screens (`feat/cr-006-live-artist-screens`)
+- Wayne asked to do the live artist screens (with launch-gate docs and the marketplace beta in other threads) and to deprioritise mobile: web only. CR-006 accepted (v-now); ADR-011; FR-CMP-009 added.
+- Built: typed owner contracts (`MyArtist`, `MyCampaign`) on the two existing routes, no new route or migration; `@fanzup/shared/artist-home`; `/`, `/creator`, `/creator/campaigns`, `/creator/campaigns/:id` on API data behind `RequireAccount`; payout onboarding, submit and publish from those screens; Stripe's onboarding return URL moved to `/creator?payout=done`.
+- Deviation from the mockups: widgets with no backend are removed (ADR-011); they come back with their requirements (FR-COM-001, FR-FUL-002, P1 analytics).
+- Still on sample data (FR-PLT-002 list): `/creator/revenue`, `/content`, `/events`, `/streaming`, `/payouts`, `/tax`, `/discover` artist profile, live sessions, settings. The campaign wizard (`/creator/campaigns/new/*`) still saves to the browser, not the API (FR-CMP-001 web wiring).
+
