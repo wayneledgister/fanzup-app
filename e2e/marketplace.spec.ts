@@ -151,8 +151,8 @@ test("services marketplace: provider lists, staff vets, artist requests, provide
     await expect(page.getByText("in review").first()).toBeVisible();
     await shot(page, "1-provider-submitted");
 
-    // Not listed yet: the public directory doesn't show it (FR-MKT-008).
-    expect((await api(`/services/providers/${slug}`)).status).toBe(404);
+    // Not listed yet: even a caller who may browse (staff) gets 404 from the directory (FR-MKT-008). Anonymous callers get 401 in the closed beta.
+    expect((await api(`/services/providers/${slug}`, { token: staff })).status).toBe(404);
 
     // ── Staff vetting at aal2 (privileged provider.review) ──
     await logOut(page);
@@ -167,7 +167,7 @@ test("services marketplace: provider lists, staff vets, artist requests, provide
     await expect(row).toBeHidden();
     await page.getByRole("tab", { name: "listed" }).click();
     await expect(page.getByTestId("staff-providers").locator("div.p-4", { hasText: `/${slug}` })).toBeVisible();
-    await expect.poll(async () => (await api(`/services/providers/${slug}`)).status, { timeout: 20_000 }).toBe(200);
+    await expect.poll(async () => (await api(`/services/providers/${slug}`, { token: staff })).status, { timeout: 20_000 }).toBe(200);
 
     // ── Artist: browse → provider page → request (FR-MKT-001/002/005) ──
     await logOut(page);
